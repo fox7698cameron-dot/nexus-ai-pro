@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background Circle with Gradient -->
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#3A3A3A;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#2A2A2A;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1A1A1A;stop-opacity:1" />
+    </linearGradient>
+    
+    <linearGradient id="spaceshipGradient" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" style="stop-color:#E0E0E0;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#A0A0A0;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#606060;stop-opacity:1" />
+    </linearGradient>
+    
+    <linearGradient id="windowGradient" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" style="stop-color:#80A0C0;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#405060;stop-opacity:1" />
+    </linearGradient>
+    
+    <linearGradient id="engineGradient" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" style="stop-color:#FF8040;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#FF4020;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#C02000;stop-opacity:1" />
+    </linearGradient>
+    
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="10" result="blur"/>
+      <feFlood flood-color="#FFFFFF" flood-opacity="0.3"/>
+      <feComposite in2="blur" operator="in"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="10" stdDeviation="20" flood-color="#000000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+  
+  <!-- Background Circle -->
+  <circle cx="512" cy="512" r="480" fill="url(#bgGradient)" filter="url(#shadow)"/>
+  
+  <!-- Outer Ring -->
+  <circle cx="512" cy="512" r="480" fill="none" stroke="#404040" stroke-width="4"/>
+  <circle cx="512" cy="512" r="460" fill="none" stroke="#303030" stroke-width="2"/>
+  
+  <!-- Stars Background -->
+  <circle cx="200" cy="200" r="3" fill="#606060"/>
+  <circle cx="300" cy="150" r="2" fill="#505050"/>
+  <circle cx="150" cy="350" r="2" fill="#707070"/>
+  <circle cx="800" cy="180" r="3" fill="#606060"/>
+  <circle cx="850" cy="300" r="2" fill="#505050"/>
+  <circle cx="750" cy="400" r="2" fill="#707070"/>
+  <circle cx="250" cy="700" r="2" fill="#606060"/>
+  <circle cx="180" cy="600" r="3" fill="#505050"/>
+  <circle cx="820" cy="650" r="2" fill="#707070"/>
+  <circle cx="750" cy="750" r="3" fill="#606060"/>
+  
+  <!-- Spaceship Group -->
+  <g transform="translate(512, 512) rotate(-45) translate(-512, -512)" filter="url(#glow)">
+    
+    <!-- Engine Flames -->
+    <ellipse cx="512" cy="780" rx="40" ry="80" fill="url(#engineGradient)" opacity="0.9"/>
+    <ellipse cx="512" cy="760" rx="25" ry="50" fill="#FFCC00" opacity="0.8"/>
+    <ellipse cx="512" cy="740" rx="12" ry="25" fill="#FFFFFF" opacity="0.9"/>
+    
+    <!-- Main Body -->
+    <path d="M512 200 
+             C580 280, 620 400, 620 500 
+             L620 650 
+             C620 680, 600 700, 580 700 
+             L444 700 
+             C424 700, 404 680, 404 650 
+             L404 500 
+             C404 400, 444 280, 512 200 Z" 
+          fill="url(#spaceshipGradient)" 
+          stroke="#808080" 
+          stroke-width="3"/>
+    
+    <!-- Nose Cone Highlight -->
+    <path d="M512 220 
+             C550 280, 580 380, 585 460 
+             L512 460 
+             L512 220 Z" 
+          fill="#FFFFFF" 
+          opacity="0.2"/>
+    
+    <!-- Window -->
+    <ellipse cx="512" cy="380" rx="45" ry="60" fill="url(#windowGradient)" stroke="#505050" stroke-width="3"/>
+    <ellipse cx="512" cy="370" rx="30" ry="40" fill="#FFFFFF" opacity="0.3"/>
+    
+    <!-- Wing Left -->
+    <path d="M404 550 
+             L280 650 
+             C260 660, 260 680, 280 690 
+             L404 650 
+             Z" 
+          fill="url(#spaceshipGradient)" 
+          stroke="#808080" 
+          stroke-width="2"/>
+    
+    <!-- Wing Right -->
+    <path d="M620 550 
+             L744 650 
+             C764 660, 764 680, 744 690 
+             L620 650 
+             Z" 
+          fill="url(#spaceshipGradient)" 
+          stroke="#808080" 
+          stroke-width="2"/>
+    
+    <!-- Wing Engine Left -->
+    <ellipse cx="320" cy="680" rx="15" ry="30" fill="url(#engineGradient)" opacity="0.7"/>
+    <ellipse cx="320" cy="675" rx="8" ry="15" fill="#FFCC00" opacity="0.8"/>
+    
+    <!-- Wing Engine Right -->
+    <ellipse cx="704" cy="680" rx="15" ry="30" fill="url(#engineGradient)" opacity="0.7"/>
+    <ellipse cx="704" cy="675" rx="8" ry="15" fill="#FFCC00" opacity="0.8"/>
+    
+    <!-- Detail Lines -->
+    <line x1="450" y1="500" x2="450" y2="650" stroke="#707070" stroke-width="2"/>
+    <line x1="574" y1="500" x2="574" y2="650" stroke="#707070" stroke-width="2"/>
+    <line x1="440" y1="550" x2="584" y2="550" stroke="#707070" stroke-width="2"/>
+    <line x1="440" y1="600" x2="584" y2="600" stroke="#707070" stroke-width="2"/>
+    
+    <!-- Antenna -->
+    <line x1="512" y1="200" x2="512" y2="160" stroke="#A0A0A0" stroke-width="4"/>
+    <circle cx="512" cy="150" r="10" fill="#C0C0C0"/>
+    <circle cx="512" cy="150" r="5" fill="#FF4040"/>
+    
+  </g>
+  
+  <!-- Logo Text Ring (Optional) -->
+  <text x="512" y="920" text-anchor="middle" font-family="Arial, sans-serif" font-size="40" font-weight="bold" fill="#606060">NEXUS AI PRO</text>
+  
+</svg>

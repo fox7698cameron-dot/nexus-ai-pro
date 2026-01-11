@@ -4,11 +4,20 @@
   "description": "Military-grade encrypted AI platform with multi-model support, game/app development, n8n-style automation, and customizable avatars",
   "type": "module",
   "main": "server.js",
+  "author": {
+    "name": "Cameron Fox",
+    "email": "contact@nexusai.pro"
+  },
+  "license": "Apache-2.0",
+  "copyright": "Copyright © 2025-2026 Cameron Fox. All rights reserved.",
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "vite",
     "dev:server": "nodemon server.js",
     "build": "vite build",
+    "build:web": "vite build",
+    "build:desktop": "cd desktop && npm run build:all",
+    "build:mobile": "npm run build && npm run cap:sync",
     "start": "node server.js",
     "preview": "vite preview",
     "security:scan": "node -e \"import('./server.js').then(m => m.security?.scanVulnerabilities())\"",
@@ -18,10 +27,42 @@
     "test:security": "vitest run --grep security",
     "docker:build": "docker build -t nexus-ai-pro .",
     "docker:run": "docker run -p 3001:3001 --env-file .env nexus-ai-pro",
-    "docker:compose": "docker-compose up -d"
+    "docker:compose": "docker-compose up -d",
+    "cap:init": "cap init",
+    "cap:add:ios": "cap add ios",
+    "cap:add:android": "cap add android",
+    "cap:sync": "cap sync",
+    "cap:sync:ios": "cap sync ios",
+    "cap:sync:android": "cap sync android",
+    "cap:open:ios": "cap open ios",
+    "cap:open:android": "cap open android",
+    "cap:run:ios": "cap run ios",
+    "cap:run:android": "cap run android",
+    "cap:build:ios": "npm run build && cap sync ios && cap open ios",
+    "cap:build:android": "npm run build && cap sync android && cap open android",
+    "ios:dev": "cd \"nexus ai pro\" && xcodebuild -workspace \"nexus ai pro.xcworkspace\" -scheme \"nexus ai pro\" -configuration Debug",
+    "ios:build": "cd \"nexus ai pro\" && xcodebuild -workspace \"nexus ai pro.xcworkspace\" -scheme \"nexus ai pro\" -configuration Release archive",
+    "android:dev": "cd android && ./gradlew assembleDebug",
+    "android:build": "cd android && ./gradlew assembleRelease",
+    "pwa:build": "vite build --mode pwa",
+    "copyright:add": "node scripts/add-copyright.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.0",
+    "@capacitor/android": "^6.0.0",
+    "@capacitor/app": "^6.0.0",
+    "@capacitor/biometric": "^6.0.0",
+    "@capacitor/camera": "^6.0.0",
+    "@capacitor/core": "^6.0.0",
+    "@capacitor/filesystem": "^6.0.0",
+    "@capacitor/haptics": "^6.0.0",
+    "@capacitor/ios": "^6.0.0",
+    "@capacitor/keyboard": "^6.0.0",
+    "@capacitor/local-notifications": "^6.0.0",
+    "@capacitor/push-notifications": "^6.0.0",
+    "@capacitor/share": "^6.0.0",
+    "@capacitor/splash-screen": "^6.0.0",
+    "@capacitor/status-bar": "^6.0.0",
     "bcryptjs": "^2.4.3",
     "compression": "^1.7.4",
     "cors": "^2.8.5",
@@ -39,6 +80,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@capacitor/cli": "^6.0.0",
     "@types/node": "^22.5.0",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.20",
@@ -48,7 +90,19 @@
     "postcss": "^8.4.41",
     "tailwindcss": "^3.4.10",
     "vite": "^5.4.2",
-    "vitest": "^2.0.5"
+    "vite-plugin-pwa": "^0.20.0",
+    "vitest": "^2.0.5",
+    "workbox-window": "^7.0.0"
+  },
+  "capacitor": {
+    "appId": "com.cameronfox.nexusaipro",
+    "appName": "Nexus AI Pro",
+    "webDir": "dist",
+    "plugins": {
+      "SplashScreen": {
+        "launchShowDuration": 0
+      }
+    }
   },
   "engines": {
     "node": ">=18.0.0"
@@ -65,8 +119,11 @@
     "automation",
     "workflow",
     "game-development",
-    "app-development"
-  ],
-  "author": "Nexus AI Team",
-  "license": "MIT"
+    "app-development",
+    "mobile",
+    "ios",
+    "android",
+    "pwa",
+    "capacitor"
+  ]
 }

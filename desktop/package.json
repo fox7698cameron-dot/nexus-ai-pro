@@ -1,0 +1,238 @@
+{
+  "name": "nexus-ai-pro-desktop",
+  "version": "2.0.0",
+  "description": "Nexus AI Pro - Desktop Application for Windows, macOS, and Linux",
+  "main": "main.js",
+  "author": {
+    "name": "Cameron Fox",
+    "email": "contact@nexusai.pro"
+  },
+  "license": "Apache-2.0",
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/nexus-ai-pro"
+  },
+  "scripts": {
+    "start": "electron .",
+    "dev": "concurrently \"npm run dev:web --prefix ..\" \"wait-on http://localhost:5173 && electron .\"",
+    "build": "npm run build:web && npm run build:electron",
+    "build:web": "cd .. && npm run build",
+    "build:electron": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux",
+    "build:all": "electron-builder --win --mac --linux",
+    "dist:win": "npm run build && electron-builder --win --publish never",
+    "dist:mac": "npm run build && electron-builder --mac --publish never",
+    "dist:linux": "npm run build && electron-builder --linux --publish never",
+    "dist:all": "npm run build && electron-builder --win --mac --linux --publish never",
+    "pack": "electron-builder --dir",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "build": {
+    "appId": "com.cameronfox.nexusaipro",
+    "productName": "Nexus AI Pro",
+    "copyright": "Copyright © 2025-2026 Cameron Fox. All rights reserved.",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "dist-electron",
+      "buildResources": "build"
+    },
+    "files": [
+      "../dist/**/*",
+      "main.js",
+      "preload.js",
+      "platform/**/*",
+      "!node_modules",
+      "node_modules/electron-store/**/*",
+      "node_modules/keytar/**/*"
+    ],
+    "extraMetadata": {
+      "main": "main.js"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64", "ia32"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "publisherName": "Cameron Fox",
+      "verifyUpdateCodeSignature": false,
+      "certificateFile": null,
+      "certificatePassword": null,
+      "signingHashAlgorithms": ["sha256"],
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "icon": "build/icon.icns",
+      "category": "public.app-category.productivity",
+      "darkModeSupport": true,
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "type": "distribution"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64", "arm64"]
+        },
+        {
+          "target": "deb",
+          "arch": ["x64", "arm64"]
+        },
+        {
+          "target": "rpm",
+          "arch": ["x64", "arm64"]
+        },
+        {
+          "target": "snap",
+          "arch": ["x64"]
+        },
+        {
+          "target": "tar.gz",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "icon": "build/icons",
+      "category": "Utility",
+      "synopsis": "All-in-One AI Platform",
+      "description": "Military-grade encrypted AI platform with multi-model support, game/app development, automation, and customizable avatars.",
+      "desktop": {
+        "Name": "Nexus AI Pro",
+        "Comment": "All-in-One AI Platform",
+        "Categories": "Utility;Development;AI;",
+        "Keywords": "ai;chatbot;assistant;claude;gpt;automation;",
+        "StartupWMClass": "nexus-ai-pro"
+      },
+      "executableName": "nexus-ai-pro"
+    },
+    "snap": {
+      "confinement": "classic",
+      "grade": "stable",
+      "summary": "All-in-One AI Platform with Multi-Model Support"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Nexus AI Pro",
+      "runAfterFinish": true,
+      "menuCategory": true,
+      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "license": "../LICENSE",
+      "deleteAppDataOnUninstall": false,
+      "displayLanguageSelector": true
+    },
+    "dmg": {
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ],
+      "window": {
+        "width": 540,
+        "height": 380
+      },
+      "title": "${productName} ${version}",
+      "icon": "build/icon.icns",
+      "backgroundColor": "#0A0A0A"
+    },
+    "deb": {
+      "depends": [
+        "gconf2",
+        "gconf-service",
+        "libnotify4",
+        "libappindicator1",
+        "libxtst6",
+        "libnss3",
+        "libsecret-1-0"
+      ],
+      "compression": "xz",
+      "priority": "optional"
+    },
+    "rpm": {
+      "depends": [
+        "libXScrnSaver",
+        "libsecret"
+      ],
+      "compression": "xz"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "yourusername",
+      "repo": "nexus-ai-pro",
+      "private": false,
+      "releaseType": "release"
+    },
+    "afterSign": "scripts/notarize.js"
+  },
+  "dependencies": {
+    "electron-store": "^8.2.0",
+    "keytar": "^7.9.0"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "electron": "^28.2.0",
+    "electron-builder": "^24.13.3",
+    "electron-notarize": "^1.2.2",
+    "electron-updater": "^6.1.8",
+    "wait-on": "^7.2.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "keywords": [
+    "ai",
+    "chatbot",
+    "claude",
+    "gpt-4",
+    "gemini",
+    "multi-model",
+    "encryption",
+    "security",
+    "automation",
+    "workflow",
+    "desktop",
+    "electron",
+    "windows",
+    "linux",
+    "macos"
+  ]
+}

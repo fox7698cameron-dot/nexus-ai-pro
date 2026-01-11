@@ -4,51 +4,30 @@
 # ================================================
 
 # Stage 1: Build
-FROM node:20-alpine AS builder
+FROM node:18-bullseye-slim AS builder
 
-WORKDIR /app
+# Install build deps required by some native modules (kept minimal)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends python3 build-essential ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 
-# Install dependencies
-COPY package*.json ./
-RUN npm ci --only=production
+WORKDIR /usr/src/app
 
-# Copy source
+# Copy package definitions first for efficient caching
+COPY package.json package-lock.json* ./
+
+# Install dependencies (including devDependencies for tests)
+RUN npm ci --no-fund --no-audit
+
+# Copy app sources
 COPY . .
 
-# Build
-RUN npm run build
-
-# Stage 2: Production
-FROM node:20-alpine AS production
-
-# Security: Run as non-root user
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S nexusai -u 1001
-
-WORKDIR /app
-
-# Copy built assets
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./
-COPY --from=builder /app/server.js ./
-
-# Environment
-ENV NODE_ENV=production
+# Default environment
+ENV NODE_ENV=development
 ENV PORT=3001
 
-# Security headers
-ENV HELMET_ENABLED=true
+# Expose ports used by web + API
+EXPOSE 3001 5173
 
-# Expose port
-EXPOSE 3001
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:3001/api/health || exit 1
-
-# Switch to non-root user
-USER nexusai
-
-# Start server
-CMD ["node", "server.js"]
+# Default command is to run tests when invoked by compose. Can be overridden.
+CMD ["npm", "test"]

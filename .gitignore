@@ -3,3 +3,6 @@ Library/
 .Trash/
 .DS_Store
 Caches/
+node_modules/
+dist/
+build/

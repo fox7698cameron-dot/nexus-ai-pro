@@ -14,18 +14,21 @@
  * limitations under the License.
  */
 
-const { app, BrowserWindow, ipcMain, Menu, Tray, dialog, shell } = require('electron');
-const path = require('path');
-const fs = require('fs');
-const Store = require('electron-store');
-const { platform } = require('os');
+import { app, BrowserWindow, ipcMain, Menu, Tray, dialog, shell } from 'electron';
+import path from 'path';
+import fs from 'fs';
+import Store from 'electron-store';
+import { platform } from 'os';
+import { fileURLToPath } from 'url';
 
-// Platform-specific modules
-const WindowsPlatform = require('./platform/windows');
-const LinuxPlatform = require('./platform/linux');
-const MacOSPlatform = require('./platform/macos');
+// Platform-specific modules (ensure .js files exist in platform folder)
+import WindowsPlatform from './platform/windows.js';
+import LinuxPlatform from './platform/linux.js';
+import MacOSPlatform from './platform/macos.js';
 
-// Initialize secure storage
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const store = new Store({
   encryptionKey: 'nexus-ai-pro-secure-key-' + app.getVersion(),
   name: 'nexus-config'
@@ -35,7 +38,6 @@ let mainWindow;
 let tray;
 let platformHelper;
 
-// Determine platform
 const currentPlatform = platform();
 const isDev = process.env.NODE_ENV === 'development';
 const isWindows = currentPlatform === 'win32';
@@ -43,7 +45,7 @@ const isMac = currentPlatform === 'darwin';
 const isLinux = currentPlatform === 'linux';
 
 // Initialize platform-specific helper
-function initializePlatform() {
+async function initializePlatform() {
   if (isWindows) {
     platformHelper = new WindowsPlatform(app, store);
   } else if (isLinux) {
@@ -52,10 +54,12 @@ function initializePlatform() {
     platformHelper = new MacOSPlatform(app, store);
   }
   
-  return platformHelper.initialize();
+  if (platformHelper && typeof platformHelper.initialize === 'function') {
+    return await platformHelper.initialize();
+  }
+  return null;
 }
 
-// Create main window
 function createWindow() {
   const windowState = store.get('windowState', {
     width: 1400,

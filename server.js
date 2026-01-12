@@ -27,7 +27,8 @@ class SecurityModule {
   constructor() {
     this.algorithm = 'aes-256-gcm';
     this.keyLength = 32;
-    this.ivLength = 16;
+    // Use 12 byte IV for AES-GCM standard (matches UI ENCRYPTION_CONFIG)
+    this.ivLength = 12;
     this.tagLength = 16;
     this.saltLength = 64;
     this.iterations = 100000;
@@ -46,7 +47,7 @@ class SecurityModule {
     return crypto.pbkdf2Sync(secret, salt, this.iterations, this.keyLength, this.digest);
   }
 
-  // AES-256-GCM Encryption
+  // AES-256-GCM Encryption (versioned output)
   encrypt(plaintext, additionalData = '') {
     try {
       const iv = crypto.randomBytes(this.ivLength);

@@ -1,0 +1,10 @@
+# .dockerignore
+node_modules
+dist
+build
+.vscode
+.env
+*.log
+.DS_Store
+.git
+.gitignore

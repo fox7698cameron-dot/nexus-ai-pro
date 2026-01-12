@@ -138,6 +138,26 @@ services:
     networks:
       - nexus-network
 
+  # Development Service (for testing)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    volumes:
+      - ./:/usr/src/app:cached
+      - /usr/src/app/node_modules
+    ports:
+      - "3001:3001"   # backend
+      - "5173:5173"   # frontend dev server (vite)
+    command: ["npm", "test"]
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"process.exit(0)\""]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+
 networks:
   nexus-network:
     driver: bridge

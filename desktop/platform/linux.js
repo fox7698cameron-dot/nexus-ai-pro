@@ -1,12 +1,12 @@
 /**
  * Copyright © 2025-2026 Cameron Fox. All rights reserved.
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -37,7 +37,7 @@ class LinuxPlatform {
 
   async initialize() {
     console.log('Initializing Linux platform integration...');
-    
+
     // Detect desktop environment
     this.desktopEnvironment = await this.detectDesktopEnvironment();
     console.log('Desktop environment:', this.desktopEnvironment);
@@ -64,8 +64,8 @@ class LinuxPlatform {
    * Detect Linux desktop environment
    */
   async detectDesktopEnvironment() {
-    const desktop = process.env.XDG_CURRENT_DESKTOP || 
-                   process.env.DESKTOP_SESSION || 
+    const desktop = process.env.XDG_CURRENT_DESKTOP ||
+                   process.env.DESKTOP_SESSION ||
                    'unknown';
     return desktop.toLowerCase();
   }
@@ -89,7 +89,7 @@ class LinuxPlatform {
     if (!this.hasPAM) {
       return {
         success: false,
-        error: 'System authentication not available',
+        error: 'System authentication not available'
       };
     }
 
@@ -103,19 +103,19 @@ class LinuxPlatform {
       }
 
       const { stdout } = await execAsync(command);
-      
+
       // Verify password using PAM
       // This is a simplified version - production should use proper PAM integration
       const success = stdout.trim().length > 0;
-      
+
       return {
         success,
-        error: success ? null : 'Authentication failed',
+        error: success ? null : 'Authentication failed'
       };
     } catch (error) {
       return {
         success: false,
-        error: error.message,
+        error: error.message
       };
     }
   }
@@ -211,7 +211,7 @@ MimeType=x-scheme-handler/nexus-ai-pro;
    */
   onWindowReady(window) {
     console.log('Window ready on Linux');
-    
+
     // Set up Linux-specific features
     this.setupNotifications(window);
     this.setupDarkMode(window);
@@ -222,7 +222,7 @@ MimeType=x-scheme-handler/nexus-ai-pro;
    */
   setupNotifications(window) {
     const { Notification } = require('electron');
-    
+
     if (Notification.isSupported()) {
       console.log('Linux notifications supported');
     }

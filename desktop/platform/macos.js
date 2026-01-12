@@ -1,12 +1,12 @@
 /**
  * Copyright © 2025-2026 Cameron Fox. All rights reserved.
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -28,7 +28,7 @@ class MacOSPlatform {
 
   async initialize() {
     console.log('Initializing macOS platform integration...');
-    
+
     // Initialize Keychain access
     try {
       this.keychain = require('keytar');
@@ -56,15 +56,15 @@ class MacOSPlatform {
       `;
 
       await execAsync(script);
-      
+
       return {
         success: true,
-        error: null,
+        error: null
       };
     } catch (error) {
       return {
         success: false,
-        error: 'Authentication failed or cancelled',
+        error: 'Authentication failed or cancelled'
       };
     }
   }
@@ -123,7 +123,7 @@ class MacOSPlatform {
    */
   onWindowReady(window) {
     console.log('Window ready on macOS');
-    
+
     // macOS-specific window customization
     this.setupTouchBar(window);
     this.setupDockMenu();
@@ -141,22 +141,22 @@ class MacOSPlatform {
       backgroundColor: '#2563EB',
       click: () => {
         window.webContents.send('new-chat');
-      },
+      }
     });
 
     const settingsButton = new TouchBarButton({
       label: '⚙️ Settings',
       click: () => {
         window.webContents.send('navigate-to', '/settings');
-      },
+      }
     });
 
     const touchBar = new TouchBar({
       items: [
         newChatButton,
         new TouchBarSpacer({ size: 'flexible' }),
-        settingsButton,
-      ],
+        settingsButton
+      ]
     });
 
     window.setTouchBar(touchBar);
@@ -167,22 +167,22 @@ class MacOSPlatform {
    */
   setupDockMenu() {
     const { Menu } = require('electron');
-    
+
     const dockMenu = Menu.buildFromTemplate([
       {
         label: 'New Chat',
         click: () => {
           // Trigger new chat
           this.app.emit('new-chat');
-        },
+        }
       },
       {
         label: 'Open Settings',
         click: () => {
           // Open settings
           this.app.emit('open-settings');
-        },
-      },
+        }
+      }
     ]);
 
     this.app.dock.setMenu(dockMenu);
@@ -194,7 +194,7 @@ class MacOSPlatform {
   setAutoLaunch(enabled) {
     this.app.setLoginItemSettings({
       openAtLogin: enabled,
-      openAsHidden: true,
+      openAsHidden: true
     });
   }
 }

@@ -1,12 +1,12 @@
 /**
  * Copyright © 2025-2026 Cameron Fox. All rights reserved.
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -53,7 +53,7 @@ async function initializePlatform() {
   } else if (isMac) {
     platformHelper = new MacOSPlatform(app, store);
   }
-  
+
   if (platformHelper && typeof platformHelper.initialize === 'function') {
     return await platformHelper.initialize();
   }
@@ -85,7 +85,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js')
     },
     icon: path.join(__dirname, 'build', isWindows ? 'icon.ico' : 'icon.png'),
-    show: false, // Don't show until ready
+    show: false // Don't show until ready
   });
 
   // Load app
@@ -99,7 +99,7 @@ function createWindow() {
   // Show window when ready
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
-    
+
     // Platform-specific initialization
     if (platformHelper) {
       platformHelper.onWindowReady(mainWindow);
@@ -110,7 +110,7 @@ function createWindow() {
   mainWindow.on('close', (e) => {
     if (!app.isQuitting) {
       e.preventDefault();
-      
+
       // Minimize to tray on close (configurable)
       const minimizeToTray = store.get('minimizeToTray', true);
       if (minimizeToTray && tray) {
@@ -145,14 +145,14 @@ function createWindow() {
 // Create system tray
 function createTray() {
   const trayIcon = path.join(__dirname, 'build', isWindows ? 'tray.ico' : 'tray.png');
-  
+
   if (!fs.existsSync(trayIcon)) {
     console.log('Tray icon not found, skipping tray creation');
     return;
   }
 
   tray = new Tray(trayIcon);
-  
+
   const contextMenu = Menu.buildFromTemplate([
     {
       label: 'Show Nexus AI Pro',
@@ -432,9 +432,9 @@ process.on('uncaughtException', (error) => {
 // Auto-update (production only)
 if (!isDev && process.platform !== 'linux') {
   const { autoUpdater } = require('electron-updater');
-  
+
   autoUpdater.checkForUpdatesAndNotify();
-  
+
   autoUpdater.on('update-available', () => {
     dialog.showMessageBox(mainWindow, {
       type: 'info',
@@ -443,7 +443,7 @@ if (!isDev && process.platform !== 'linux') {
       buttons: ['OK']
     });
   });
-  
+
   autoUpdater.on('update-downloaded', () => {
     dialog.showMessageBox(mainWindow, {
       type: 'info',

@@ -3,8 +3,9 @@
    ensure AES-256 label present, and small responsive CSS tweaks.
 */
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { 
-  Send, Mic, MicOff, Image, FileText, Code, Video, 
+import { securityService } from './src/security-service.js';
+import {
+  Send, Mic, MicOff, Image, FileText, Code, Video,
   Settings, Menu, X, Plus, Trash2, Download, Upload,
   Brain, Sparkles, Zap, Globe, Bot, MessageSquare,
   Clock, Calendar, Gamepad2, Rocket, Database,
@@ -51,325 +52,320 @@ const ENCRYPTION_CONFIG = {
 // ============================================
 // AI MODEL CONFIGURATIONS - 25+ MODELS
 // ============================================
-<<<<<<< HEAD
 const AI_MODELS = {
   // OpenAI Models
-  'gpt5': { 
-    name: 'GPT-5.2', 
-    provider: 'OpenAI', 
-    icon: '🧠',
+  'gpt5': {
+    name: 'GPT-5.2',
+    provider: 'OpenAI',
+    icon: '≡ƒºá',
     capabilities: ['chat', 'code', 'analysis', 'image-gen', 'video-gen', 'reasoning'],
     specialties: ['Advanced reasoning', 'Multimodal', 'Real-time']
   },
-  'gpt4': { 
-    name: 'GPT-4 Turbo', 
-    provider: 'OpenAI', 
-    icon: '🤖',
+  'gpt4': {
+    name: 'GPT-4 Turbo',
+    provider: 'OpenAI',
+    icon: '≡ƒñû',
     capabilities: ['chat', 'code', 'analysis', 'image-gen', 'vision'],
     specialties: ['Multimodal', 'DALL-E 3', 'Function calling']
   },
-  'gpt4o': { 
-    name: 'GPT-4o', 
-    provider: 'OpenAI', 
-    icon: '⚡',
+  'gpt4o': {
+    name: 'GPT-4o',
+    provider: 'OpenAI',
+    icon: 'ΓÜí',
     capabilities: ['chat', 'code', 'vision', 'audio'],
     specialties: ['Omni-modal', 'Real-time', 'Fast']
   },
-  'o1': { 
-    name: 'o1 Pro', 
-    provider: 'OpenAI', 
-    icon: '🔬',
+  'o1': {
+    name: 'o1 Pro',
+    provider: 'OpenAI',
+    icon: '≡ƒö¼',
     capabilities: ['reasoning', 'math', 'code', 'analysis'],
     specialties: ['Chain of thought', 'PhD-level reasoning']
   },
-  'o1-mini': { 
-    name: 'o1 Mini', 
-    provider: 'OpenAI', 
-    icon: '🧪',
+  'o1-mini': {
+    name: 'o1 Mini',
+    provider: 'OpenAI',
+    icon: '≡ƒº¬',
     capabilities: ['reasoning', 'code', 'math'],
     specialties: ['Fast reasoning', 'Cost-effective']
   },
-  'sora': { 
-    name: 'Sora', 
-    provider: 'OpenAI', 
-    icon: '🎬',
+  'sora': {
+    name: 'Sora',
+    provider: 'OpenAI',
+    icon: '≡ƒÄ¼',
     capabilities: ['video-gen', 'image-gen'],
     specialties: ['Video generation', '60s clips', 'Cinematic']
   },
-  'dalle3': { 
-    name: 'DALL-E 3', 
-    provider: 'OpenAI', 
-    icon: '🎨',
+  'dalle3': {
+    name: 'DALL-E 3',
+    provider: 'OpenAI',
+    icon: '≡ƒÄ¿',
     capabilities: ['image-gen'],
     specialties: ['Image generation', 'Photorealistic', 'Art']
   },
-  
+
   // Anthropic Models
-  'claude4': { 
-    name: 'Claude 4 Opus', 
-    provider: 'Anthropic', 
-    icon: '🧠',
+  'claude4': {
+    name: 'Claude 4 Opus',
+    provider: 'Anthropic',
+    icon: '≡ƒºá',
     capabilities: ['chat', 'code', 'analysis', 'writing', 'reasoning'],
     specialties: ['Complex reasoning', 'Code generation', 'Creative writing']
   },
-  'claude-sonnet': { 
-    name: 'Claude 4 Sonnet', 
-    provider: 'Anthropic', 
-    icon: '📝',
+  'claude-sonnet': {
+    name: 'Claude 4 Sonnet',
+    provider: 'Anthropic',
+    icon: '≡ƒô¥',
     capabilities: ['chat', 'code', 'analysis', 'writing'],
     specialties: ['Balanced', 'Fast', 'Efficient']
   },
-  'claude-haiku': { 
-    name: 'Claude 4 Haiku', 
-    provider: 'Anthropic', 
-    icon: '⚡',
+  'claude-haiku': {
+    name: 'Claude 4 Haiku',
+    provider: 'Anthropic',
+    icon: 'ΓÜí',
     capabilities: ['chat', 'code', 'analysis'],
     specialties: ['Ultra-fast', 'Cost-effective', 'Concise']
   },
-  
+
   // Google Models
-  'gemini-ultra': { 
-    name: 'Gemini 2.0 Ultra', 
-    provider: 'Google', 
-    icon: '💫',
+  'gemini-ultra': {
+    name: 'Gemini 2.0 Ultra',
+    provider: 'Google',
+    icon: '≡ƒÆ½',
     capabilities: ['chat', 'code', 'multimodal', 'video', 'reasoning'],
     specialties: ['1M context', 'Video understanding', 'Real-time']
   },
-  'gemini-pro': { 
-    name: 'Gemini 2.0 Pro', 
-    provider: 'Google', 
-    icon: '✨',
+  'gemini-pro': {
+    name: 'Gemini 2.0 Pro',
+    provider: 'Google',
+    icon: 'Γ£¿',
     capabilities: ['chat', 'code', 'analysis', 'vision'],
     specialties: ['Balanced', 'Multimodal', 'Fast']
   },
-  'gemini-flash': { 
-    name: 'Gemini 2.0 Flash', 
-    provider: 'Google', 
-    icon: '⚡',
+  'gemini-flash': {
+    name: 'Gemini 2.0 Flash',
+    provider: 'Google',
+    icon: 'ΓÜí',
     capabilities: ['chat', 'code', 'vision'],
     specialties: ['Ultra-fast', 'Low-latency', 'Efficient']
   },
-  'imagen3': { 
-    name: 'Imagen 3', 
-    provider: 'Google', 
-    icon: '🖼️',
+  'imagen3': {
+    name: 'Imagen 3',
+    provider: 'Google',
+    icon: '≡ƒû╝∩╕Å',
     capabilities: ['image-gen'],
     specialties: ['Image generation', 'Photorealistic', 'High-res']
   },
-  'veo': { 
-    name: 'Veo 2', 
-    provider: 'Google', 
-    icon: '🎥',
+  'veo': {
+    name: 'Veo 2',
+    provider: 'Google',
+    icon: '≡ƒÄÑ',
     capabilities: ['video-gen'],
     specialties: ['Video generation', '4K', 'Cinematic']
   },
-  
+
   // xAI Models
-  'grok4': { 
-    name: 'Grok 4.1', 
-    provider: 'xAI', 
-    icon: '⚡',
+  'grok4': {
+    name: 'Grok 4.1',
+    provider: 'xAI',
+    icon: 'ΓÜí',
     capabilities: ['chat', 'realtime', 'analysis', 'code', 'image-gen'],
     specialties: ['Real-time data', 'X integration', 'Unfiltered']
   },
-  'grok3': { 
-    name: 'Grok 3', 
-    provider: 'xAI', 
-    icon: '🔥',
+  'grok3': {
+    name: 'Grok 3',
+    provider: 'xAI',
+    icon: '≡ƒöÑ',
     capabilities: ['chat', 'code', 'analysis'],
     specialties: ['Humor', 'Real-time', 'Uncensored']
   },
-  'aurora': { 
-    name: 'Aurora', 
-    provider: 'xAI', 
-    icon: '🌟',
+  'aurora': {
+    name: 'Aurora',
+    provider: 'xAI',
+    icon: '≡ƒîƒ',
     capabilities: ['image-gen'],
     specialties: ['Image generation', 'Artistic', 'Fast']
   },
-  
+
   // DeepSeek Models
-  'deepseek-v3': { 
-    name: 'DeepSeek V3', 
-    provider: 'DeepSeek', 
-    icon: '🔮',
+  'deepseek-v3': {
+    name: 'DeepSeek V3',
+    provider: 'DeepSeek',
+    icon: '≡ƒö«',
     capabilities: ['chat', 'code', 'reasoning', 'math'],
     specialties: ['Deep reasoning', 'Mathematics', 'Code']
   },
-  'deepseek-r1': { 
-    name: 'DeepSeek R1', 
-    provider: 'DeepSeek', 
-    icon: '🧠',
+  'deepseek-r1': {
+    name: 'DeepSeek R1',
+    provider: 'DeepSeek',
+    icon: '≡ƒºá',
     capabilities: ['reasoning', 'math', 'code'],
     specialties: ['Chain of thought', 'PhD-level', 'Open-source']
   },
-  'deepseek-coder': { 
-    name: 'DeepSeek Coder V3', 
-    provider: 'DeepSeek', 
-    icon: '💻',
+  'deepseek-coder': {
+    name: 'DeepSeek Coder V3',
+    provider: 'DeepSeek',
+    icon: '≡ƒÆ╗',
     capabilities: ['code', 'debugging', 'analysis'],
     specialties: ['Code generation', 'Bug fixing', '330B params']
   },
-  
+
   // Meta Models
-  'llama4': { 
-    name: 'Llama 4 405B', 
-    provider: 'Meta', 
-    icon: '🦙',
+  'llama4': {
+    name: 'Llama 4 405B',
+    provider: 'Meta',
+    icon: '≡ƒªÖ',
     capabilities: ['chat', 'code', 'reasoning', 'multilingual'],
     specialties: ['Open-source', 'Local deployment', 'Massive scale']
   },
-  'llama3': { 
-    name: 'Llama 3.3 70B', 
-    provider: 'Meta', 
-    icon: '🦙',
+  'llama3': {
+    name: 'Llama 3.3 70B',
+    provider: 'Meta',
+    icon: '≡ƒªÖ',
     capabilities: ['chat', 'code', 'analysis'],
     specialties: ['Open-source', 'Efficient', 'Fast']
   },
-  'code-llama': { 
-    name: 'Code Llama 70B', 
-    provider: 'Meta', 
-    icon: '💻',
+  'code-llama': {
+    name: 'Code Llama 70B',
+    provider: 'Meta',
+    icon: '≡ƒÆ╗',
     capabilities: ['code', 'debugging'],
     specialties: ['Code generation', 'Python', 'C++']
   },
-  
+
   // Mistral Models
-  'mistral-large': { 
-    name: 'Mistral Large 2', 
-    provider: 'Mistral', 
-    icon: '🌀',
+  'mistral-large': {
+    name: 'Mistral Large 2',
+    provider: 'Mistral',
+    icon: '≡ƒîÇ',
     capabilities: ['chat', 'code', 'analysis', 'multilingual'],
     specialties: ['123B params', 'Multilingual', 'Function calling']
   },
-  'mixtral': { 
-    name: 'Mixtral 8x22B', 
-    provider: 'Mistral', 
-    icon: '🔀',
+  'mixtral': {
+    name: 'Mixtral 8x22B',
+    provider: 'Mistral',
+    icon: '≡ƒöÇ',
     capabilities: ['chat', 'code', 'multilingual'],
     specialties: ['MoE architecture', 'Efficient', 'Open-source']
   },
-  'codestral': { 
-    name: 'Codestral', 
-    provider: 'Mistral', 
-    icon: '💻',
+  'codestral': {
+    name: 'Codestral',
+    provider: 'Mistral',
+    icon: '≡ƒÆ╗',
     capabilities: ['code', 'debugging', 'completion'],
     specialties: ['Code generation', '80+ languages', 'Fast']
   },
-  
+
   // Microsoft Models
-  'copilot-pro': { 
-    name: 'Copilot Pro', 
-    provider: 'Microsoft', 
-    icon: '✨',
+  'copilot-pro': {
+    name: 'Copilot Pro',
+    provider: 'Microsoft',
+    icon: 'Γ£¿',
     capabilities: ['chat', 'code', 'productivity', 'image-gen'],
     specialties: ['Office integration', 'DALL-E 3', 'GPT-4 Turbo']
   },
-  'phi4': { 
-    name: 'Phi-4', 
-    provider: 'Microsoft', 
-    icon: '🔬',
+  'phi4': {
+    name: 'Phi-4',
+    provider: 'Microsoft',
+    icon: '≡ƒö¼',
     capabilities: ['chat', 'reasoning', 'math'],
     specialties: ['Small but mighty', 'Reasoning', 'Efficient']
   },
-  
+
   // Other Major Models
-  'kimi': { 
-    name: 'Kimi k2', 
-    provider: 'Moonshot', 
-    icon: '🌙',
+  'kimi': {
+    name: 'Kimi k2',
+    provider: 'Moonshot',
+    icon: '≡ƒîÖ',
     capabilities: ['chat', 'long-context', 'analysis'],
     specialties: ['2M context', 'Document analysis', 'Chinese']
   },
-  'qwen': { 
-    name: 'Qwen 2.5 Max', 
-    provider: 'Alibaba', 
-    icon: '🐉',
+  'qwen': {
+    name: 'Qwen 2.5 Max',
+    provider: 'Alibaba',
+    icon: '≡ƒÉë',
     capabilities: ['chat', 'code', 'math', 'vision'],
     specialties: ['Math', 'Coding', 'Multilingual']
   },
-  'perplexity': { 
-    name: 'Perplexity Pro', 
-    provider: 'Perplexity', 
-    icon: '🔍',
+  'perplexity': {
+    name: 'Perplexity Pro',
+    provider: 'Perplexity',
+    icon: '≡ƒöì',
     capabilities: ['chat', 'search', 'realtime'],
     specialties: ['Live search', 'Citations', 'Real-time']
   },
-  'groq': { 
-    name: 'Groq LPU', 
-    provider: 'Groq', 
-    icon: '⚡',
+  'groq': {
+    name: 'Groq LPU',
+    provider: 'Groq',
+    icon: 'ΓÜí',
     capabilities: ['chat', 'code', 'ultra-fast'],
     specialties: ['500 tokens/sec', 'Hardware accelerated']
   },
-  
+
   // Image Generation Models
-  'midjourney': { 
-    name: 'Midjourney V6.1', 
-    provider: 'Midjourney', 
-    icon: '🎨',
+  'midjourney': {
+    name: 'Midjourney V6.1',
+    provider: 'Midjourney',
+    icon: '≡ƒÄ¿',
     capabilities: ['image-gen'],
     specialties: ['Artistic', 'Photorealistic', 'Stylized']
   },
-  'stable-diffusion': { 
-    name: 'Stable Diffusion 3.5', 
-    provider: 'Stability AI', 
-    icon: '🖼️',
+  'stable-diffusion': {
+    name: 'Stable Diffusion 3.5',
+    provider: 'Stability AI',
+    icon: '≡ƒû╝∩╕Å',
     capabilities: ['image-gen', 'video-gen'],
     specialties: ['Open-source', 'Local', 'Customizable']
   },
-  'flux': { 
-    name: 'Flux Pro 1.1', 
-    provider: 'Black Forest Labs', 
-    icon: '✨',
+  'flux': {
+    name: 'Flux Pro 1.1',
+    provider: 'Black Forest Labs',
+    icon: 'Γ£¿',
     capabilities: ['image-gen'],
     specialties: ['Ultra-fast', 'High quality', 'Photorealistic']
   },
-  'ideogram': { 
-    name: 'Ideogram 2.0', 
-    provider: 'Ideogram', 
-    icon: '📝',
+  'ideogram': {
+    name: 'Ideogram 2.0',
+    provider: 'Ideogram',
+    icon: '≡ƒô¥',
     capabilities: ['image-gen'],
     specialties: ['Text rendering', 'Logos', 'Typography']
   },
-  
+
   // Video Generation Models
-  'runway': { 
-    name: 'Runway Gen-3 Alpha', 
-    provider: 'Runway', 
-    icon: '🎬',
+  'runway': {
+    name: 'Runway Gen-3 Alpha',
+    provider: 'Runway',
+    icon: '≡ƒÄ¼',
     capabilities: ['video-gen', 'image-gen'],
     specialties: ['Video generation', '10s clips', 'Motion brush']
   },
-  'pika': { 
-    name: 'Pika 1.5', 
-    provider: 'Pika Labs', 
-    icon: '🎥',
+  'pika': {
+    name: 'Pika 1.5',
+    provider: 'Pika Labs',
+    icon: '≡ƒÄÑ',
     capabilities: ['video-gen'],
     specialties: ['Video generation', 'Lip sync', 'Effects']
   },
-  'kling': { 
-    name: 'Kling AI', 
-    provider: 'Kuaishou', 
-    icon: '🎞️',
+  'kling': {
+    name: 'Kling AI',
+    provider: 'Kuaishou',
+    icon: '≡ƒÄ₧∩╕Å',
     capabilities: ['video-gen'],
     specialties: ['Long videos', 'Realistic', '2min clips']
   },
-  'luma': { 
-    name: 'Luma Dream Machine', 
-    provider: 'Luma AI', 
-    icon: '💭',
+  'luma': {
+    name: 'Luma Dream Machine',
+    provider: 'Luma AI',
+    icon: '≡ƒÆ¡',
     capabilities: ['video-gen', '3d-gen'],
     specialties: ['Video gen', '3D capture', 'Fast']
   }
 };
-=======
-// ... (unchanged data objects retained from original file) ...
->>>>>>> main
 
 // ============================================
 // TOOL CATEGORIES
 // ============================================
-<<<<<<< HEAD
 const TOOLS = {
   chat: { name: 'Chat', icon: MessageSquare, description: 'Conversational AI' },
   code: { name: 'Code', icon: Code, description: 'Code generation & debugging' },
@@ -382,50 +378,124 @@ const TOOLS = {
   security: { name: 'Security', icon: Shield, description: 'Security analysis' },
   schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' }
 };
-=======
-// ... (unchanged data objects retained from original file) ...
->>>>>>> main
 
 // ============================================
 // GAME DEV TEMPLATES
 // ============================================
-// ... (unchanged data objects retained from original file) ...
+const GAME_TEMPLATES = {
+  unity: {
+    name: 'Unity 6',
+    engine: 'Unity',
+    icon: '🎮',
+    framework: 'C#',
+    platform: 'Multi-platform',
+    features: ['2D/3D', 'VR/AR', 'Mobile', 'Console', 'Web']
+  },
+  unreal: {
+    name: 'Unreal Engine 5',
+    engine: 'UE5',
+    icon: '⚡',
+    framework: 'C++/Blueprints',
+    platform: 'Multi-platform',
+    features: ['AAA-grade', '3D', 'Nanite', 'Lumen', 'Metahuman']
+  },
+  godot: {
+    name: 'Godot 4.x',
+    engine: 'Godot',
+    icon: '🟢',
+    framework: 'GDScript/C#',
+    platform: 'Multi-platform',
+    features: ['Open-source', '2D/3D', 'Lightweight', 'Cross-platform']
+  },
+  babylon: {
+    name: 'Babylon.js',
+    engine: 'Web 3D',
+    icon: '🌐',
+    framework: 'JavaScript',
+    platform: 'Web/Mobile',
+    features: ['WebGL', 'Physics', 'Particles', 'Post-processing']
+  },
+  threejs: {
+    name: 'Three.js',
+    engine: 'Web 3D',
+    icon: '📦',
+    framework: 'JavaScript',
+    platform: 'Web',
+    features: ['WebGL', 'Minimal', 'Customizable', 'Community']
+  }
+};
 
 // ============================================
 // APP DEV TEMPLATES
 // ============================================
-// ... (unchanged data objects retained from original file) ...
+const APP_TEMPLATES = {
+  react: {
+    name: 'React Native',
+    framework: 'React',
+    icon: '⚛️',
+    language: 'JavaScript/TypeScript',
+    platform: 'iOS/Android',
+    features: ['Hot reload', 'Native', 'Component-based', 'Ecosystem']
+  },
+  flutter: {
+    name: 'Flutter',
+    framework: 'Flutter',
+    icon: '📱',
+    language: 'Dart',
+    platform: 'iOS/Android/Web',
+    features: ['Fast', 'Beautiful', 'Single codebase', 'Hot reload']
+  },
+  swift: {
+    name: 'SwiftUI',
+    framework: 'SwiftUI',
+    icon: '🍎',
+    language: 'Swift',
+    platform: 'iOS/macOS',
+    features: ['Native', 'Modern UI', 'Type-safe', 'Performance']
+  },
+  kotlin: {
+    name: 'Kotlin',
+    framework: 'Compose',
+    icon: '🤖',
+    language: 'Kotlin',
+    platform: 'Android',
+    features: ['Jetpack', 'Modern', 'Interop', 'Null-safe']
+  },
+  electron: {
+    name: 'Electron',
+    framework: 'Electron',
+    icon: '🖥️',
+    language: 'JavaScript/TypeScript',
+    platform: 'Desktop',
+    features: ['Cross-platform', 'Web tech', 'Native access', 'Large ecosystem']
+  }
+};
 
 // ============================================
 // AVATAR STYLES
 // ============================================
-<<<<<<< HEAD
 const AVATAR_STYLES = {
   user: [
-    { id: 'u1', emoji: '👤' },
-    { id: 'u2', emoji: '🧑' },
-    { id: 'u3', emoji: '👨‍💻' },
-    { id: 'u4', emoji: '👩‍💻' },
-    { id: 'u5', emoji: '🦸' },
-    { id: 'u6', emoji: '🧙' },
-    { id: 'u7', emoji: '🥷' },
-    { id: 'u8', emoji: '🤴' }
+    { id: 'u1', emoji: '≡ƒæñ' },
+    { id: 'u2', emoji: '≡ƒºæ' },
+    { id: 'u3', emoji: '≡ƒæ¿ΓÇì≡ƒÆ╗' },
+    { id: 'u4', emoji: '≡ƒæ⌐ΓÇì≡ƒÆ╗' },
+    { id: 'u5', emoji: '≡ƒª╕' },
+    { id: 'u6', emoji: '≡ƒºÖ' },
+    { id: 'u7', emoji: '≡ƒÑ╖' },
+    { id: 'u8', emoji: '≡ƒñ┤' }
   ],
   ai: [
-    { id: 'a1', emoji: '🤖' },
-    { id: 'a2', emoji: '🧠' },
-    { id: 'a3', emoji: '✨' },
-    { id: 'a4', emoji: '⚡' }
+    { id: 'a1', emoji: '≡ƒñû' },
+    { id: 'a2', emoji: '≡ƒºá' },
+    { id: 'a3', emoji: 'Γ£¿' },
+    { id: 'a4', emoji: 'ΓÜí' }
   ]
 };
-=======
-// ... (unchanged data objects retained from original file) ...
->>>>>>> main
 
 // ============================================
 // WORKFLOW NODES
 // ============================================
-<<<<<<< HEAD
 const WORKFLOW_NODES = {
   trigger: { name: 'Trigger', icon: Play, inputs: 0, outputs: 1 },
   ai: { name: 'AI Model', icon: Brain, inputs: 1, outputs: 1 },
@@ -437,19 +507,10 @@ const WORKFLOW_NODES = {
   schedule: { name: 'Schedule', icon: Clock, inputs: 0, outputs: 1 },
   transform: { name: 'Transform', icon: Wand2, inputs: 1, outputs: 1 }
 };
-=======
-// ... (unchanged data objects retained from original file) ...
-
-// ============================================
-// SECURITY STATUS COMPONENT
-// ============================================
-// ... (unchanged component copied in full from original file: SecurityStatus) ...
->>>>>>> main
 
 // ============================================
 // MAIN APP COMPONENT
 // ============================================
-<<<<<<< HEAD
 export default function NexusAI() {
   // State
   const [messages, setMessages] = useState([]);
@@ -468,19 +529,29 @@ export default function NexusAI() {
   const [gameTemplate, setGameTemplate] = useState(null);
   const [appTemplate, setAppTemplate] = useState(null);
   const [showToolContent, setShowToolContent] = useState(false);
-  
+
+  // Security Dashboard State
+  const [securityScan, setSecurityScan] = useState({
+    isScanning: false,
+    lastScanTime: null,
+    vulnerabilities: [],
+    threats: [],
+    encryptionStatus: 'secure',
+    overallScore: 92
+  });
+
   // User customization
   const [userAvatar, setUserAvatar] = useState(AVATAR_STYLES.user[0]);
-  
+
   // Chat management
   const [chats, setChats] = useState([
     { id: '1', title: 'New Chat', preview: 'Start a conversation...', messages: [], createdAt: Date.now(), updatedAt: Date.now() }
   ]);
   const [activeChat, setActiveChat] = useState('1');
-  
+
   // Memory
   const [memories, setMemories] = useState([]);
-  
+
   // Settings
   const [settings, setSettings] = useState({
     theme: 'grayscale',
@@ -491,15 +562,15 @@ export default function NexusAI() {
     securityLevel: 'military',
     apiKeys: {}
   });
-  
+
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
-  
+
   // Auto scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
-  
+
   // Get current chat messages
   useEffect(() => {
     const chat = chats.find(c => c.id === activeChat);
@@ -515,53 +586,20 @@ export default function NexusAI() {
         `Analyzing: "${prompt.slice(0, 50)}..."`,
         `Using: ${modelInfo?.name || 'AI'}`,
         `Mode: ${tool}`,
-        `Processing...`
+        'Processing...'
       ]
     };
-    
+
     return {
-      content: `**${modelInfo?.name || 'AI'}** responding to: "${prompt}"\n\n✅ Processing complete with ${tool} mode.\n\n🔒 End-to-end encrypted`,
+      content: `**${modelInfo?.name || 'AI'}** responding to: "${prompt}"\n\nΓ£à Processing complete with ${tool} mode.\n\n≡ƒöÆ End-to-end encrypted`,
       reasoning
-=======
-// ... (unchanged component copied in full from original file: AvatarSelector) ...
-
-// ============================================
-// REASONING DISPLAY COMPONENT
-// ============================================
-// ... (unchanged component copied in full from original file: ReasoningDisplay) ...
-
-// ============================================
-// GAME DEV PANEL COMPONENT
-// ============================================
-// ... (unchanged component copied in full from original file: GameDevPanel) ...
-
-// ============================================
-// APP DEV PANEL COMPONENT
-// ============================================
-// ... (unchanged component copied in full from original file: AppDevPanel) ...
-
-// ============================================
-// AUTOMATION WORKFLOW BUILDER
-// ============================================
-const WorkflowBuilder = ({ workflow, onUpdateWorkflow }) => {
-  const [nodes, setNodes] = useState(workflow?.nodes || []);
-  const [connections, setConnections] = useState(workflow?.connections || []);
-  const [selectedNode, setSelectedNode] = useState(null);
-
-  const addNode = (type) => {
-    const newNode = {
-      id: `node-${Date.now()}`,
-      type,
-      position: { x: 100 + nodes.length * 50, y: 100 },
-      config: {}
->>>>>>> main
     };
   };
-  
+
   // Send message
   const sendMessage = async () => {
     if (!input.trim() && attachments.length === 0) return;
-    
+
     const userMessage = {
       id: Date.now().toString(),
       role: 'user',
@@ -570,13 +608,13 @@ const WorkflowBuilder = ({ workflow, onUpdateWorkflow }) => {
       timestamp: Date.now(),
       encrypted: true
     };
-    
+
     const newMessages = [...messages, userMessage];
     setMessages(newMessages);
     setInput('');
     setAttachments([]);
     setIsLoading(true);
-    
+
     setTimeout(() => {
       const response = generateResponse(input, selectedModel, activeTool);
       const aiResponse = {
@@ -588,365 +626,80 @@ const WorkflowBuilder = ({ workflow, onUpdateWorkflow }) => {
         timestamp: Date.now(),
         encrypted: true
       };
-      
+
       const updatedMessages = [...newMessages, aiResponse];
       setMessages(updatedMessages);
       setIsLoading(false);
-      
-<<<<<<< HEAD
-      setChats(prev => prev.map(chat => 
-        chat.id === activeChat 
+
+      setChats(prev => prev.map(chat =>
+        chat.id === activeChat
           ? { ...chat, messages: updatedMessages, title: chat.messages.length === 0 ? input.slice(0, 30) + '...' : chat.title, preview: input.slice(0, 50), updatedAt: Date.now() }
           : chat
       ));
     }, 800 + Math.random() * 800);
   };
-  
+
   // Voice functions
-=======
-      <div className="workflow-canvas">
-        {nodes.length === 0 ? (
-          <div className="workflow-empty">
-            <Workflow size={48} />
-            <p>Drag nodes here to build your automation</p>
-          </div>
-        ) : (
-          <div className="workflow-nodes">
-            {nodes.map(node => {
-              const nodeType = WORKFLOW_NODES[node.type];
-              const Icon = nodeType.icon;
-              return (
-                <div
-                  key={node.id}
-                  className={`workflow-node ${selectedNode === node.id ? 'selected' : ''}`}
-                  style={{ 
-                    left: node.position.x, 
-                    top: node.position.y,
-                    borderColor: nodeType.color
-                  }}
-                  onClick={() => setSelectedNode(node.id)}
-                >
-                  <div className="node-header" style={{ background: nodeType.color }}>
-                    <Icon size={14} />
-                    <span>{nodeType.name}</span>
-                  </div>
-                  <div className="node-body">
-                    <span className="node-config">Configure...</span>
-                  </div>
-                  {nodeType.inputs > 0 && <div className="node-input" />}
-                  {nodeType.outputs > 0 && <div className="node-output" />}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// ============================================
-// SECURITY DASHBOARD
-// ============================================
-// ... (unchanged component copied in full from original file: SecurityDashboard) ...
-
-// ============================================
-// MESSAGE COMPONENT
-// ============================================
-// ... (unchanged component copied in full from original file: Message) ...
-
-// ============================================
-// MODEL SELECTOR COMPONENT
-// ============================================
-// ... (unchanged component copied in full from original file: ModelSelector) ...
-
-// ============================================
-// TOOL PANEL COMPONENT
-// ============================================
-// ... (unchanged component copied in full from original file: ToolPanel) ...
-
-// ============================================
-// CHAT HISTORY SIDEBAR
-// ============================================
-// ... (unchanged component copied in full from original file: ChatHistory) ...
-
-// ============================================
-// MEMORY PANEL
-// ============================================
-// ... (unchanged component copied in full from original file: MemoryPanel) ...
-
-// ============================================
-// SETTINGS PANEL
-// ============================================
-// ... (unchanged component copied in full from original file: SettingsPanel) ...
-
-// ============================================
-// VOICE CALL COMPONENT
-// ============================================
-// ... (unchanged component copied in full from original file: VoiceCall) ...
-
-// ============================================
-// MAIN APP COMPONENT (modified for persistence + improved responsiveness)
-// ============================================
-export default function NexusAI() {
-  // Helper to load from localStorage with fallback
-  const loadJSON = (key, fallback) => {
-    try {
-      const raw = localStorage.getItem(key);
-      return raw ? JSON.parse(raw) : fallback;
-    } catch {
-      return fallback;
-    }
-  };
-
-  // State - persisted where appropriate
-  const [selectedModel, setSelectedModel] = useState(() => loadJSON(STORAGE_KEYS.selectedModel, 'claude'));
-  const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false);
-  const [activeTool, setActiveTool] = useState('chat');
-  const [isSidebarOpen, setIsSidebarOpen] = useState(() => loadJSON(STORAGE_KEYS.sidebarOpen, true));
-  const [isMemoryOpen, setIsMemoryOpen] = useState(() => loadJSON(STORAGE_KEYS.memoryOpen, false));
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isSecurityOpen, setIsSecurityOpen] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isCallActive, setIsCallActive] = useState(false);
-  const [attachments, setAttachments] = useState([]);
-  const [gameTemplate, setGameTemplate] = useState(null);
-  const [appTemplate, setAppTemplate] = useState(null);
-
-  // Persisted user customization & memories
-  const [userAvatar, setUserAvatar] = useState(() => loadJSON(STORAGE_KEYS.userAvatar, null) || AVATAR_STYLES.user[0]);
-  const [aiAvatars, setAiAvatars] = useState(() => loadJSON(STORAGE_KEYS.aiAvatars, {}));
-
-  // Chat management - persisted
-  const defaultChat = { id: '1', title: 'New Chat', preview: 'Start a conversation...', messages: [], createdAt: Date.now(), updatedAt: Date.now() };
-  const [chats, setChats] = useState(() => loadJSON(STORAGE_KEYS.chats, [defaultChat]));
-  const [activeChat, setActiveChat] = useState(() => loadJSON(STORAGE_KEYS.activeChat, chats[0]?.id || defaultChat.id));
-  const [messages, setMessages] = useState([]);
-
-  // Memory - persisted
-  const [memories, setMemories] = useState(() => loadJSON(STORAGE_KEYS.memories, []));
-
-  // Settings - persisted
-  const [settings, setSettings] = useState(() => loadJSON(STORAGE_KEYS.settings, {
-    theme: 'dark',
-    voiceEnabled: true,
-    autoSpeak: false,
-    memoryEnabled: true,
-    e2eEncryption: true,
-    autoPatch: true,
-    securityLevel: 'military',
-    apiKeys: {}
-  }));
-
-  // Security status
-  const [securityStatus] = useState({
-    level: 'secure',
-    label: 'Protected',
-    encryption: 'AES-256-GCM'
-  });
-
-  // Refs
-  const messagesEndRef = useRef(null);
-  const fileInputRef = useRef(null);
-
-  // Persist on changes
-  useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEYS.chats, JSON.stringify(chats)); } catch {}
-  }, [chats]);
-
-  useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEYS.activeChat, activeChat); } catch {}
-  }, [activeChat]);
-
-  useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEYS.memories, JSON.stringify(memories)); } catch {}
-  }, [memories]);
-
-  useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(settings)); } catch {}
-  }, [settings]);
-
-  useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEYS.selectedModel, selectedModel); } catch {}
-  }, [selectedModel]);
-
-  useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEYS.userAvatar, JSON.stringify(userAvatar)); } catch {}
-  }, [userAvatar]);
-
-  useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEYS.aiAvatars, JSON.stringify(aiAvatars)); } catch {}
-  }, [aiAvatars]);
-
-  useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEYS.sidebarOpen, JSON.stringify(isSidebarOpen)); } catch {}
-  }, [isSidebarOpen]);
-
-  useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEYS.memoryOpen, JSON.stringify(isMemoryOpen)); } catch {}
-  }, [isMemoryOpen]);
-
-  // Sync messages when active chat changes or chats change
-  useEffect(() => {
-    const chat = chats.find(c => c.id === activeChat);
-    setMessages(chat ? chat.messages : []);
-  }, [activeChat, chats]);
-
-  // Auto scroll on message changes
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  // Helper: persist chat updates
-  const saveChatMessages = (chatId, newMessages) => {
-    setChats(prev =>
-      prev.map(c => c.id === chatId ? { ...c, messages: newMessages, updatedAt: Date.now(), preview: newMessages.slice(-1)[0]?.content?.slice(0, 50) || c.preview } : c)
-    );
-  };
-
-  // Model selection handler (persisted)
-  const handleSelectModel = (key) => {
-    setSelectedModel(key);
-    setIsModelSelectorOpen(false);
-  };
-
-  // Simulate AI response with reasoning (unchanged logic)
-  const generateResponse = (prompt, model, tool) => {
-    const modelInfo = AI_MODELS[model];
-    const memContext = memories.length > 0 
-      ? `\n\n[Memory context: ${memories.map(m => m.content).join(', ')}]`
-      : '';
-    
-    const reasoning = {
-      duration: Math.floor(Math.random() * 500) + 200,
-      steps: [
-        `Analyzing request: "${prompt.slice(0, 50)}..."`,
-        `Selected approach: ${modelInfo.specialties[0]}`,
-        `Processing with ${modelInfo.name}...`,
-        `Applying ${tool} mode optimizations`
-      ]
-    };
-
-    // Responses object (same as before) ...
-    const responses = {
-      chat: {
-        content: `Hello! I'm ${modelInfo.name} powered by ${modelInfo.provider}. I'd be happy to help you with: "${prompt}"\n\nThis platform features military-grade AES-256-GCM encryption, end-to-end security, and automatic vulnerability patching.${memContext}`,
-        reasoning
-      },
-      code: {
-        content: `\`\`\`javascript\n// ${modelInfo.name} Code Assistant\n// Request: ${prompt}\n\n// Military-grade encrypted code transmission\nconst secureFunction = async () => {\n  // AES-256 encrypted payload\n  const encrypted = await encrypt(data);\n  return process(encrypted);\n};\n\nexport default secureFunction;\n\`\`\`\n\n🔒 Code transmitted via encrypted channel.`,
-        reasoning
-      },
-      gamedev: {
-        content: `🎮 **Game Development Assistant**\n\n**Project:** "${prompt}"\n**Template:** ${gameTemplate ? GAME_TEMPLATES[gameTemplate].name : 'Custom'}\n**Engine:** ${gameTemplate ? GAME_TEMPLATES[gameTemplate].engine : 'Recommended based on requirements'}\n\n**I can help with:**\n• Game mechanics & physics\n• Character controllers\n• Level design patterns\n• AI behavior trees\n• Multiplayer networking\n• Asset optimization\n• Performance profiling\n\n**Next Steps:**\n1. Define core gameplay loop\n2. Create prototype\n3. Implement core systems\n4. Polish & iterate\n\nWhat aspect would you like to explore first?`,
-        reasoning: { ...reasoning, steps: [...reasoning.steps, 'Loading game development context'] }
-      },
-      appdev: {
-        content: `📱 **Application Development Assistant**\n\n**Project:** "${prompt}"\n**Template:** ${appTemplate ? APP_TEMPLATES[appTemplate].name : 'Custom'}\n**Stack:** ${appTemplate ? APP_TEMPLATES[appTemplate].stack : 'Recommended based on requirements'}\n\n**Architecture Options:**\n• Frontend: React/Vue/Svelte\n• Backend: Node/Python/Go\n• Database: PostgreSQL/MongoDB\n• Auth: JWT + OAuth2\n• Hosting: Vercel/Railway/AWS\n\n**Security Features (Auto-enabled):**\n✅ HTTPS/TLS 1.3\n✅ SQL Injection Prevention\n✅ XSS Protection\n✅ CSRF Tokens\n✅ Rate Limiting\n✅ Input Validation\n\nReady to scaffold your project?`,
-        reasoning: { ...reasoning, steps: [...reasoning.steps, 'Loading app development context'] }
-      },
-      automation: {
-        content: `⚡ **N8N-Style Automation Builder**\n\n**Workflow Request:** "${prompt}"\n\n**Available Nodes:**\n• Triggers (Schedule, Webhook, Event)\n• AI Models (Claude, GPT-4, Gemini)\n• HTTP Requests\n• Database Operations\n• Conditional Logic\n• Transformations\n• Notifications\n\n**Security:**\n🔐 All data encrypted in transit and at rest\n🔐 API keys stored in secure vault\n🔐 Audit logging enabled\n\nUse the workflow builder to visually create your automation, or describe what you want to achieve.`,
-        reasoning
-      },
-      security: {
-        content: `🛡️ **Security Analysis**\n\n**Query:** "${prompt}"\n\n**Current Security Status:**\n✅ Encryption: AES-256-GCM (Military Grade)\n✅ Authentication: Multi-Factor Active\n✅ Certificates: Valid (365 days)\n✅ Vulnerability Scan: Clean\n✅ Auto-Patching: Enabled\n✅ Intrusion Detection: Active\n\n**Security Recommendations:**\n1. Rotate API keys every 90 days\n2. Enable hardware security keys\n3. Review audit logs weekly\n4. Test backup restoration monthly\n\nWant me to run a comprehensive security audit?`,
-        reasoning: { ...reasoning, steps: [...reasoning.steps, 'Running security protocols'] }
-      },
-      image: {
-        content: `🎨 **Image Generation**\n\n**Prompt:** "${prompt}"\n\n**Available Engines:**\n• DALL-E 3 (OpenAI)\n• Stable Diffusion XL\n• Midjourney API\n• Imagen (Google)\n\n**Settings:**\n• Resolution: 1024x1024\n• Style: Photorealistic\n• Safety Filter: Enabled\n\n[Image generation in progress...]\n\n🔒 All generated images are encrypted before storage.`,
-        reasoning
-      },
-      video: {
-        content: `🎬 **Video Generation**\n\n**Prompt:** "${prompt}"\n\n**Available Engines:**\n• Sora (OpenAI)\n• Runway Gen-3\n• Pika Labs\n• Stable Video\n\n**Settings:**\n• Duration: Up to 60s\n• Resolution: 1080p\n• FPS: 24\n\n[Video generation queued...]\n\n🔒 Secure encrypted output.`,
-        reasoning
-      },
-      deploy: {
-        content: `🚀 **Deployment Assistant**\n\n**Project:** "${prompt}"\n\n**Deployment Targets:**\n• Vercel (Recommended for frontend)\n• Railway (Full-stack)\n• AWS (Enterprise)\n• Google Cloud\n• Azure\n• DigitalOcean\n\n**Security Checklist:**\n✅ Environment variables secured\n✅ HTTPS enforced\n✅ WAF enabled\n✅ DDoS protection active\n✅ Backup configured\n\nReady to deploy?`,
-        reasoning
-      },
-      schedule: {
-        content: `📅 **Task Scheduler**\n\n**Task:** "${prompt}"\n\n**Schedule Options:**\n• One-time\n• Recurring (daily/weekly/monthly)\n• Cron expression\n• Event-triggered\n\n**Integrations:**\n• Calendar sync\n• Email notifications\n• Slack/Discord alerts\n• Webhook triggers\n\nWhen should this task run?`,
-        reasoning
-      }
-    };
-    
-    return responses[tool] || responses.chat;
-  };
-  
-  // Send message (persisted)
-  const [input, setInput] = useState('');
-  const sendMessage = async () => {
-    if (!input.trim() && attachments.length === 0) return;
-    
-    const userMessage = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: input,
-      attachments: attachments,
-      timestamp: Date.now(),
-      encrypted: settings.e2eEncryption
-    };
-    
-    const newMessages = [...messages, userMessage];
-    setMessages(newMessages);
-    saveChatMessages(activeChat, newMessages);
-    setInput('');
-    setAttachments([]);
-    setIsLoading(true);
-    
-    // Simulate AI response
-    setTimeout(() => {
-      const response = generateResponse(input, selectedModel, activeTool);
-      const aiResponse = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        model: selectedModel,
-        content: response.content,
-        reasoning: response.reasoning,
-        timestamp: Date.now(),
-        encrypted: settings.e2eEncryption
-      };
-      
-      const updatedMessages = [...newMessages, aiResponse];
-      setMessages(updatedMessages);
-      saveChatMessages(activeChat, updatedMessages);
-      setIsLoading(false);
-      
-      if (settings.autoSpeak) {
-        speakText(aiResponse.content);
-      }
-    }, 800 + Math.random() * 800);
-  };
-
-  // Voice functions (unchanged)
-  const speakText = (text) => {
-    if ('speechSynthesis' in window) {
-      const clean = text.replace(/[*#`\[\]]/g, '').replace(/\n+/g, '. ');
-      const utterance = new SpeechSynthesisUtterance(clean);
-      speechSynthesis.speak(utterance);
-    }
-  };
-
->>>>>>> main
   const startRecording = () => {
     setIsRecording(true);
     setTimeout(() => {
       setIsRecording(false);
-<<<<<<< HEAD
-      setInput("Voice transcription demo");
-    }, 3000);
-  };
-  
-  // File handling
-=======
-      setInput("Voice transcription demo - integrate Web Speech API for production");
+      setInput('Voice transcription demo');
     }, 3000);
   };
 
-  // File handling (unchanged)
->>>>>>> main
+  // Security Scanning Functions
+  const runSecurityScan = async () => {
+    setSecurityScan(prev => ({ ...prev, isScanning: true }));
+    
+    try {
+      const dashboard = await securityService.runScan();
+      setSecurityScan(prev => ({
+        ...prev,
+        isScanning: false,
+        lastScanTime: Date.now(),
+        vulnerabilities: dashboard.vulnerabilities || [],
+        threats: dashboard.threats || [],
+        encryptionStatus: dashboard.encryptionStatus || 'secure',
+        overallScore: dashboard.overallScore || 92
+      }));
+    } catch (error) {
+      console.warn('Security scan error, using fallback:', error);
+      // Fallback to local data if service fails
+      const vulnerabilities = [
+        { id: 1, name: 'Outdated Dependencies', severity: 'medium', status: 'warning', description: '2 npm packages have updates available' },
+        { id: 2, name: 'API Key Exposure Risk', severity: 'low', status: 'info', description: 'Review environment variable handling' },
+        { id: 3, name: 'TLS/SSL Configuration', severity: 'high', status: 'resolved', description: 'TLS 1.3 enabled and verified' }
+      ];
+      
+      const threats = [
+        { type: 'Unauthorized Access', status: 'blocked', timestamp: Date.now() - 3600000 },
+        { type: 'Injection Attack', status: 'prevented', timestamp: Date.now() - 7200000 },
+        { type: 'XSS Attempt', status: 'filtered', timestamp: Date.now() - 86400000 }
+      ];
+      
+      setSecurityScan(prev => ({
+        ...prev,
+        isScanning: false,
+        lastScanTime: Date.now(),
+        vulnerabilities,
+        threats,
+        encryptionStatus: 'secure',
+        overallScore: 92
+      }));
+    }
+  };
+
+  const patchVulnerability = (vulnId) => {
+    setSecurityScan(prev => ({
+      ...prev,
+      vulnerabilities: prev.vulnerabilities.map(v =>
+        v.id === vulnId ? { ...v, status: 'patched' } : v
+      )
+    }));
+  };
+
+  // File handling
   const handleFileUpload = (e) => {
     const files = Array.from(e.target.files);
     const newAttachments = files.map(file => ({
@@ -956,43 +709,28 @@ export default function NexusAI() {
     }));
     setAttachments([...attachments, ...newAttachments]);
   };
-<<<<<<< HEAD
-  
+
   // Chat management
   const createNewChat = () => {
     const newChat = { id: Date.now().toString(), title: 'New Chat', preview: 'Start a conversation...', messages: [], createdAt: Date.now(), updatedAt: Date.now() };
-=======
-
-  // Chat management (create/delete updated to persist)
-  const createNewChat = () => {
-    const newChat = {
-      id: Date.now().toString(),
-      title: 'New Chat',
-      preview: 'Start a conversation...',
-      messages: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now()
-    };
->>>>>>> main
     setChats([newChat, ...chats]);
     setActiveChat(newChat.id);
     setMessages([]);
   };
-<<<<<<< HEAD
-  
+
   const deleteChat = (id) => {
     if (chats.length === 1) createNewChat();
     setChats(prev => prev.filter(c => c.id !== id));
     if (activeChat === id) setActiveChat(chats[0]?.id);
   };
-  
+
   // Memory
   const addMemory = (content) => {
     if (content.trim()) setMemories([...memories, { content, createdAt: Date.now() }]);
   };
-  
+
   const deleteMemory = (index) => setMemories(memories.filter((_, i) => i !== index));
-  
+
   // Group models by capability for selector
   const modelGroups = useMemo(() => {
     const groups = {
@@ -1001,7 +739,7 @@ export default function NexusAI() {
       'Video Generation': [],
       'Code & Development': []
     };
-    
+
     Object.entries(AI_MODELS).forEach(([key, model]) => {
       if (model.capabilities.includes('image-gen') && !model.capabilities.includes('chat')) {
         groups['Image Generation'].push({ key, ...model });
@@ -1013,61 +751,15 @@ export default function NexusAI() {
         groups['Chat & Reasoning'].push({ key, ...model });
       }
     });
-    
+
     return groups;
   }, []);
 
-=======
-
-  const deleteChat = (id) => {
-    if (chats.length === 1) {
-      createNewChat();
-      return;
-    }
-    const remaining = chats.filter(c => c.id !== id);
-    setChats(remaining);
-    if (activeChat === id) setActiveChat(remaining[0]?.id);
-  };
-
-  // Memory management (unchanged, persisted)
-  const addMemory = (content) => {
-    if (content.trim()) {
-      const mem = { content, createdAt: Date.now() };
-      setMemories(prev => [...prev, mem]);
-    }
-  };
-  
-  const deleteMemory = (index) => {
-    setMemories(prev => prev.filter((_, i) => i !== index));
-  };
-
-  // Render tool-specific content (unchanged)
-  const renderToolContent = () => {
-    switch(activeTool) {
-      case 'gamedev':
-        return <GameDevPanel activeTemplate={gameTemplate} onSelectTemplate={setGameTemplate} />;
-      case 'appdev':
-        return <AppDevPanel activeTemplate={appTemplate} onSelectTemplate={setAppTemplate} />;
-      case 'automation':
-        return <WorkflowBuilder workflow={null} onUpdateWorkflow={() => {}} />;
-      default:
-        return null;
-    }
-  };
-
-  // Mobile: toggle Sidebar override so small screens treat as overlay
-  const toggleSidebar = () => {
-    setIsSidebarOpen(prev => !prev);
-  };
-
-  // UI
->>>>>>> main
   return (
     <div className="nexus-app">
       {/* Header */}
       <header className="app-header">
         <div className="header-left">
-<<<<<<< HEAD
           <button className="icon-btn" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
             <Menu size={20} />
           </button>
@@ -1079,28 +771,18 @@ export default function NexusAI() {
           )}
           <div className="logo">
             <div className="logo-icon"><Sparkles size={20} /></div>
-=======
-          <button className="menu-btn" onClick={toggleSidebar} aria-label="Toggle menu">
-            <Menu size={20} />
-          </button>
-          <div className="logo">
-            <div className="logo-icon">
-              <Sparkles size={20} />
-            </div>
->>>>>>> main
             <span className="logo-text">NEXUS AI</span>
             <span className="logo-badge">PRO</span>
           </div>
         </div>
-        
+
         <div className="header-center">
-<<<<<<< HEAD
           <button className="model-selector-btn" onClick={() => setIsModelSelectorOpen(!isModelSelectorOpen)}>
             <span className="model-icon">{AI_MODELS[selectedModel]?.icon}</span>
             <span className="model-name">{AI_MODELS[selectedModel]?.name}</span>
             <ChevronDown size={16} className={isModelSelectorOpen ? 'rotated' : ''} />
           </button>
-          
+
           {isModelSelectorOpen && (
             <div className="model-dropdown">
               <div className="model-search">
@@ -1136,7 +818,7 @@ export default function NexusAI() {
             </div>
           )}
         </div>
-        
+
         <div className="header-right">
           <div className="security-badge">
             <ShieldCheck size={14} />
@@ -1147,87 +829,14 @@ export default function NexusAI() {
           <button className="icon-btn" onClick={() => setIsMemoryOpen(!isMemoryOpen)}><Brain size={20} /></button>
           <button className="icon-btn" onClick={() => setIsCallActive(true)}><Phone size={20} /></button>
           <button className="icon-btn" onClick={() => setIsSettingsOpen(true)}><Settings size={20} /></button>
-          <div className="user-avatar">{userAvatar?.emoji || '👤'}</div>
-=======
-          <div style={{ minWidth: 220 }}>
-            <div className="model-selector">
-              <button className="model-selector-btn" onClick={() => setIsModelSelectorOpen(!isModelSelectorOpen)}>
-                <span className="model-icon">{AI_MODELS[selectedModel]?.icon}</span>
-                <span className="model-name">{AI_MODELS[selectedModel]?.name}</span>
-                <ChevronDown size={16} className={isModelSelectorOpen ? 'rotated' : ''} />
-              </button>
-              {isModelSelectorOpen && (
-                <div className="model-dropdown" role="listbox">
-                  {Object.entries(AI_MODELS).map(([key, model]) => (
-                    <button
-                      key={key}
-                      className={`model-option ${selectedModel === key ? 'active' : ''}`}
-                      onClick={() => handleSelectModel(key)}
-                      aria-selected={selectedModel === key}
-                    >
-                      <div className="model-icon-wrapper" style={{ background: model.gradient }}>
-                        <span>{model.icon}</span>
-                      </div>
-                      <div className="model-info">
-                        <span className="model-name">{model.name}</span>
-                        <span className="model-provider">{model.provider}</span>
-                      </div>
-                      <div className="model-capabilities">
-                        {model.capabilities.slice(0, 2).map(cap => (
-                          <span key={cap} className="capability-tag">{cap}</span>
-                        ))}
-                      </div>
-                      {selectedModel === key && <Check size={16} className="check-icon" />}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-        
-        <div className="header-right">
-          <SecurityStatus 
-            status={securityStatus} 
-            onShowDetails={() => setIsSecurityOpen(true)}
-          />
-          <button 
-            className={`icon-btn ${isMemoryOpen ? 'active' : ''}`}
-            onClick={() => setIsMemoryOpen(!isMemoryOpen)}
-            title="Memory"
-          >
-            <Brain size={20} />
-          </button>
-          <button 
-            className="icon-btn"
-            onClick={() => setIsCallActive(true)}
-            title="Voice Call"
-          >
-            <Phone size={20} />
-          </button>
-          <button 
-            className="icon-btn"
-            onClick={() => setIsSettingsOpen(true)}
-            title="Settings"
-          >
-            <Settings size={20} />
-          </button>
-          <AvatarSelector
-            type="user"
-            selected={userAvatar}
-            onSelect={(a) => { setUserAvatar(a); setIsSettingsOpen(false); }}
-            isOpen={false}
-            onToggle={() => {}}
-          />
->>>>>>> main
+          <div className="user-avatar">{userAvatar?.emoji || '≡ƒæñ'}</div>
         </div>
       </header>
-      
+
       {/* Main Content */}
       <div className="app-content">
         {/* Sidebar */}
         {isSidebarOpen && (
-<<<<<<< HEAD
           <div className="sidebar">
             <div className="sidebar-header">
               <h3><History size={18} /> Chats</h3>
@@ -1243,7 +852,7 @@ export default function NexusAI() {
             </div>
           </div>
         )}
-        
+
         {/* Chat Area */}
         <main className="chat-area">
           {/* Tool Panel */}
@@ -1251,14 +860,14 @@ export default function NexusAI() {
             {Object.entries(TOOLS).map(([key, tool]) => {
               const Icon = tool.icon;
               return (
-                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation'].includes(key)) setShowToolContent(true); }}>
+                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security'].includes(key)) setShowToolContent(true); }}>
                   <Icon size={18} />
                   <span>{tool.name}</span>
                 </button>
               );
             })}
           </div>
-          
+
           {/* Tool Content Panels */}
           {showToolContent && activeTool === 'gamedev' && (
             <div className="tool-content">
@@ -1281,7 +890,7 @@ export default function NexusAI() {
               </div>
             </div>
           )}
-          
+
           {showToolContent && activeTool === 'appdev' && (
             <div className="tool-content">
               <div className="panel-header">
@@ -1299,84 +908,133 @@ export default function NexusAI() {
               </div>
             </div>
           )}
-=======
-          <ChatHistory
-            chats={chats}
-            activeChat={activeChat}
-            onSelectChat={(id) => { setActiveChat(id); setIsSidebarOpen(window.innerWidth > 768); }}
-            onNewChat={createNewChat}
-            onDeleteChat={deleteChat}
-            isOpen={isSidebarOpen}
-          />
-        )}
-        
-        {/* Chat Area */}
-        <main className="chat-area" role="main">
-          {/* Tool Panel */}
-          <ToolPanel activeTool={activeTool} onSelectTool={setActiveTool} />
-          
-          {/* Tool-specific content */}
-          {renderToolContent()}
->>>>>>> main
-          
+
+          {/* Security Dashboard */}
+          {showToolContent && activeTool === 'security' && (
+            <div className="tool-content security-dashboard">
+              <div className="panel-header">
+                <ShieldCheck size={18} />
+                <h3>Security Dashboard</h3>
+              </div>
+              
+              <div className="security-grid">
+                {/* Overall Score */}
+                <div className="security-card score-card">
+                  <div className="score-circle">
+                    <div className="score-value">{securityScan.overallScore}</div>
+                    <div className="score-label">Security Score</div>
+                  </div>
+                  <div className="score-status">
+                    <div className="status-item">
+                      <ShieldCheck size={16} style={{ color: '#10b981' }} />
+                      <span>Encryption: {securityScan.encryptionStatus.toUpperCase()}</span>
+                    </div>
+                    <div className="status-item">
+                      <Lock size={16} style={{ color: '#3b82f6' }} />
+                      <span>AES-256-GCM Active</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Scan Button */}
+                <div className="security-card action-card">
+                  <button 
+                    className={`scan-btn ${securityScan.isScanning ? 'scanning' : ''}`}
+                    onClick={runSecurityScan}
+                    disabled={securityScan.isScanning}
+                  >
+                    {securityScan.isScanning ? (
+                      <>
+                        <Loader2 size={18} className="spin" />
+                        Scanning...
+                      </>
+                    ) : (
+                      <>
+                        <Zap size={18} />
+                        Run Full Scan
+                      </>
+                    )}
+                  </button>
+                  {securityScan.lastScanTime && (
+                    <div className="scan-time">
+                      Last scan: {new Date(securityScan.lastScanTime).toLocaleTimeString()}
+                    </div>
+                  )}
+                </div>
+
+                {/* Vulnerabilities */}
+                <div className="security-card vulnerabilities-card">
+                  <h4><AlertTriangle size={16} /> Vulnerabilities</h4>
+                  <div className="vuln-list">
+                    {securityScan.vulnerabilities.length > 0 ? (
+                      securityScan.vulnerabilities.map(vuln => (
+                        <div key={vuln.id} className={`vuln-item severity-${vuln.severity} status-${vuln.status}`}>
+                          <div className="vuln-header">
+                            <span className={`severity-badge ${vuln.severity}`}>{vuln.severity.toUpperCase()}</span>
+                            <span className="vuln-name">{vuln.name}</span>
+                            <span className={`status-badge ${vuln.status}`}>{vuln.status.toUpperCase()}</span>
+                          </div>
+                          <div className="vuln-desc">{vuln.description}</div>
+                          {vuln.status !== 'patched' && (
+                            <button 
+                              className="patch-btn"
+                              onClick={() => patchVulnerability(vuln.id)}
+                            >
+                              <Wrench size={14} /> Patch Now
+                            </button>
+                          )}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="empty-state">No vulnerabilities detected</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Threats */}
+                <div className="security-card threats-card">
+                  <h4><Network size={16} /> Recent Threats</h4>
+                  <div className="threat-list">
+                    {securityScan.threats.length > 0 ? (
+                      securityScan.threats.map((threat, idx) => (
+                        <div key={idx} className={`threat-item status-${threat.status}`}>
+                          <div className="threat-status">
+                            {threat.status === 'blocked' && <ShieldAlert size={16} style={{ color: '#ef4444' }} />}
+                            {threat.status === 'prevented' && <ShieldCheck size={16} style={{ color: '#10b981' }} />}
+                            {threat.status === 'filtered' && <Eye size={16} style={{ color: '#f59e0b' }} />}
+                          </div>
+                          <div className="threat-info">
+                            <div className="threat-type">{threat.type}</div>
+                            <div className="threat-time">{threat.status.toUpperCase()} ΓÇó {new Date(threat.timestamp).toLocaleTimeString()}</div>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="empty-state">No threats detected</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Messages */}
           <div className="messages-container">
             {messages.length === 0 ? (
-<<<<<<< HEAD
               <div className="welcome">
                 <div className="welcome-icon"><Sparkles size={48} /></div>
                 <h2>Nexus AI Pro</h2>
-                <p>Military-grade encrypted AI • 40+ Models</p>
+                <p>Military-grade encrypted AI ΓÇó 40+ Models</p>
                 <div className="model-badges">
                   {Object.entries(AI_MODELS).slice(0, 12).map(([key, m]) => (
                     <span key={key} className="badge" onClick={() => setSelectedModel(key)}>{m.icon} {m.name}</span>
-=======
-              <div className="welcome-screen">
-                <div className="welcome-icon">
-                  <Sparkles size={48} />
-                </div>
-                <h2>Welcome to Nexus AI Pro</h2>
-                <p>Military-grade encrypted AI platform with multi-model support</p>
-                <div className="security-badge-large">
-                  <Shield size={20} />
-                  <span>AES-256-GCM Encryption Active</span>
-                  <Lock size={16} />
-                </div>
-                <div className="quick-actions">
-                  {Object.entries(TOOLS).slice(0, 4).map(([key, tool]) => {
-                    const Icon = tool.icon;
-                    return (
-                      <button 
-                        key={key}
-                        className="quick-action"
-                        onClick={() => setActiveTool(key)}
-                        style={{ '--action-color': tool.color }}
-                      >
-                        <Icon size={24} />
-                        <span>{tool.name}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className="model-badges">
-                  {Object.entries(AI_MODELS).slice(0, 6).map(([key, model]) => (
-                    <span 
-                      key={key} 
-                      className="model-badge"
-                      style={{ background: model.gradient }}
-                      onClick={() => { handleSelectModel(key); }}
-                    >
-                      {model.icon} {model.name}
-                    </span>
->>>>>>> main
                   ))}
                 </div>
               </div>
             ) : (
-<<<<<<< HEAD
               messages.map(msg => (
                 <div key={msg.id} className={`message ${msg.role}`}>
-                  <div className="message-avatar">{msg.role === 'user' ? userAvatar?.emoji : AI_MODELS[msg.model]?.icon || '🤖'}</div>
+                  <div className="message-avatar">{msg.role === 'user' ? userAvatar?.emoji : AI_MODELS[msg.model]?.icon || '≡ƒñû'}</div>
                   <div className="message-body">
                     <div className="message-header">
                       <span className="sender">{msg.role === 'user' ? 'You' : AI_MODELS[msg.model]?.name}</span>
@@ -1395,41 +1053,10 @@ export default function NexusAI() {
                   <div className="typing"><span></span><span></span><span></span></div>
                 </div>
               </div>
-=======
-              <>
-                {messages.map((msg) => (
-                  <Message 
-                    key={msg.id} 
-                    message={msg}
-                    userAvatar={userAvatar}
-                    aiAvatars={aiAvatars}
-                    onSpeak={speakText}
-                  />
-                ))}
-                {isLoading && (
-                  <div className="message assistant loading">
-                    <div className="message-avatar">
-                      <div className="avatar-circle loading-avatar" style={{ background: AI_MODELS[selectedModel]?.gradient }}>
-                        {AI_MODELS[selectedModel]?.icon}
-                      </div>
-                    </div>
-                    <div className="message-content">
-                      <div className="typing-indicator">
-                        <span></span><span></span><span></span>
-                      </div>
-                      <div className="reasoning-loading">
-                        <Brain size={12} /> Reasoning...
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </>
->>>>>>> main
             )}
             <div ref={messagesEndRef} />
           </div>
-          
-<<<<<<< HEAD
+
           {/* Input */}
           <div className="input-area">
             <div className="input-box">
@@ -1446,97 +1073,19 @@ export default function NexusAI() {
                 {isRecording ? <MicOff size={20} /> : <Mic size={20} />}
               </button>
               <button className="send-btn" onClick={sendMessage} disabled={!input.trim()}>
-=======
-          {/* Input Area */}
-          <div className="input-area">
-            {attachments.length > 0 && (
-              <div className="attachments-preview">
-                {attachments.map((att, i) => (
-                  <div key={i} className="attachment-preview">
-                    {att.type === 'image' ? (
-                      <img src={att.url} alt="preview" />
-                    ) : (
-                      <FileText size={20} />
-                    )}
-                    <button onClick={() => setAttachments(attachments.filter((_, j) => j !== i))}>
-                      <X size={12} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="input-container">
-              <button 
-                className="attach-btn"
-                onClick={() => fileInputRef.current?.click()}
-                aria-label="Attach files"
-              >
-                <Upload size={20} />
-              </button>
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileUpload}
-                multiple
-                hidden
-              />
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder={`Message ${AI_MODELS[selectedModel]?.name}... (${TOOLS[activeTool]?.name} mode)`}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    sendMessage();
-                  }
-                }}
-                rows={1}
-                aria-label="Message input"
-              />
-              <button 
-                className={`voice-btn ${isRecording ? 'recording' : ''}`}
-                onClick={startRecording}
-                aria-pressed={isRecording}
-                title="Record voice"
-              >
-                {isRecording ? <MicOff size={20} /> : <Mic size={20} />}
-              </button>
-              <button 
-                className="send-btn"
-                onClick={sendMessage}
-                disabled={!input.trim() && attachments.length === 0}
-                aria-label="Send message"
-              >
->>>>>>> main
                 {isLoading ? <Loader2 className="spin" size={20} /> : <Send size={20} />}
               </button>
             </div>
             <div className="input-footer">
-<<<<<<< HEAD
               <span className="model-tag">{AI_MODELS[selectedModel]?.icon} {AI_MODELS[selectedModel]?.name}</span>
               <span className="tool-tag">{TOOLS[activeTool]?.name}</span>
               <span className="secure"><Lock size={12} /> End-to-end encrypted</span>
-=======
-              <div className="footer-left">
-                <span className="model-indicator" style={{ background: AI_MODELS[selectedModel]?.gradient }}>
-                  {AI_MODELS[selectedModel]?.icon} {AI_MODELS[selectedModel]?.name}
-                </span>
-                <span className="tool-indicator">
-                  {TOOLS[activeTool]?.name}
-                </span>
-              </div>
-              <div className="footer-right">
-                <Lock size={12} />
-                <span>End-to-end encrypted</span>
-              </div>
->>>>>>> main
             </div>
           </div>
         </main>
-        
+
         {/* Memory Panel */}
         {isMemoryOpen && (
-<<<<<<< HEAD
           <div className="memory-panel">
             <div className="panel-header"><Brain size={18} /><h3>Memory</h3></div>
             <div className="memory-list">
@@ -1550,7 +1099,7 @@ export default function NexusAI() {
           </div>
         )}
       </div>
-      
+
       {/* Settings Modal */}
       {isSettingsOpen && (
         <div className="modal-overlay" onClick={() => setIsSettingsOpen(false)}>
@@ -1573,7 +1122,7 @@ export default function NexusAI() {
           </div>
         </div>
       )}
-      
+
       {/* Security Modal */}
       {isSecurityOpen && (
         <div className="modal-overlay" onClick={() => setIsSecurityOpen(false)}>
@@ -1590,7 +1139,7 @@ export default function NexusAI() {
           </div>
         </div>
       )}
-      
+
       {/* Voice Call Modal */}
       {isCallActive && (
         <div className="call-overlay">
@@ -1619,6 +1168,16 @@ export default function NexusAI() {
           --text-3: #666666;
           --border: #2a2a2a;
           --accent: #888888;
+          
+          /* Bold Gradient Colors */
+          --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f472b6 100%);
+          --gradient-success: linear-gradient(135deg, #10b981 0%, #059669 100%);
+          --gradient-warning: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+          --gradient-danger: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+          --gradient-info: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+          --gradient-cyan: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+          --gradient-purple: linear-gradient(135deg, #a855f7 0%, #7e22ce 100%);
+          --gradient-pink: linear-gradient(135deg, #ec4899 0%, #be185d 100%);
         }
         
         .nexus-app {
@@ -1688,6 +1247,48 @@ export default function NexusAI() {
           font-size: 0.75rem;
           color: var(--text-2);
         }
+        
+        /* Bold Gradient Buttons */
+        .btn-gradient {
+          background: var(--gradient-primary);
+          color: white;
+          border: none;
+          border-radius: 8px;
+          padding: 10px 16px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+        
+        .btn-gradient:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5);
+        }
+        
+        .btn-success { background: var(--gradient-success); box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3); }
+        .btn-success:hover { box-shadow: 0 8px 25px rgba(16, 185, 129, 0.5); }
+        
+        .btn-warning { background: var(--gradient-warning); box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3); }
+        .btn-warning:hover { box-shadow: 0 8px 25px rgba(245, 158, 11, 0.5); }
+        
+        .btn-danger { background: var(--gradient-danger); box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3); }
+        .btn-danger:hover { box-shadow: 0 8px 25px rgba(239, 68, 68, 0.5); }
+        
+        /* Gradient Text */
+        .text-gradient {
+          background: var(--gradient-primary);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
+          font-weight: 700;
+        }
+        
+        /* Highlight Gradient Backgrounds */
+        .highlight-primary { background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%); }
+        .highlight-success { background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(5, 150, 105, 0.1) 100%); }
+        .highlight-warning { background: linear-gradient(135deg, rgba(245, 158, 11, 0.1) 0%, rgba(217, 119, 6, 0.1) 100%); }
+        .highlight-danger { background: linear-gradient(135deg, rgba(239, 68, 68, 0.1) 0%, rgba(220, 38, 38, 0.1) 100%); }
         
         .user-avatar {
           width: 36px; height: 36px;
@@ -2129,6 +1730,322 @@ export default function NexusAI() {
         .spin { animation: spin 1s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         
+        /* Security Dashboard Styles */
+        .security-dashboard {
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+          padding: 16px;
+        }
+        
+        .security-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+          gap: 16px;
+          flex: 1;
+          overflow-y: auto;
+        }
+        
+        .security-card {
+          background: linear-gradient(135deg, var(--bg-3) 0%, var(--bg-4) 100%);
+          border: 1px solid var(--border);
+          border-radius: 12px;
+          padding: 16px;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        
+        .security-card h4 {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 0.95rem;
+          color: var(--text-1);
+          margin: 0;
+        }
+        
+        /* Score Card */
+        .score-card {
+          align-items: center;
+          text-align: center;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          border: none;
+        }
+        
+        .score-circle {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          width: 120px;
+          height: 120px;
+          border-radius: 50%;
+          background: rgba(255,255,255,0.1);
+          margin-bottom: 16px;
+        }
+        
+        .score-value {
+          font-size: 2.5rem;
+          font-weight: 700;
+          color: white;
+        }
+        
+        .score-label {
+          font-size: 0.75rem;
+          color: rgba(255,255,255,0.8);
+          text-transform: uppercase;
+          letter-spacing: 1px;
+        }
+        
+        .score-status {
+          width: 100%;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        
+        .status-item {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 8px 12px;
+          background: rgba(0,0,0,0.2);
+          border-radius: 8px;
+          font-size: 0.85rem;
+          color: white;
+        }
+        
+        /* Action Card */
+        .action-card {
+          align-items: center;
+          gap: 16px;
+        }
+        
+        .scan-btn {
+          width: 100%;
+          padding: 16px;
+          background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
+          border: none;
+          border-radius: 10px;
+          color: white;
+          font-size: 1rem;
+          font-weight: 600;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          transition: all 0.3s ease;
+        }
+        
+        .scan-btn:hover:not(:disabled) {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 20px rgba(59, 130, 246, 0.4);
+        }
+        
+        .scan-btn:disabled {
+          opacity: 0.7;
+          cursor: not-allowed;
+        }
+        
+        .scan-time {
+          font-size: 0.75rem;
+          color: var(--text-3);
+          text-align: center;
+          width: 100%;
+        }
+        
+        /* Vulnerabilities */
+        .vulnerabilities-card,
+        .threats-card {
+          grid-column: span 1;
+        }
+        
+        .vuln-list,
+        .threat-list {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          max-height: 400px;
+          overflow-y: auto;
+        }
+        
+        .vuln-item {
+          padding: 12px;
+          background: var(--bg-4);
+          border-left: 4px solid #f59e0b;
+          border-radius: 6px;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          font-size: 0.85rem;
+        }
+        
+        .vuln-item.severity-high {
+          border-left-color: #ef4444;
+        }
+        
+        .vuln-item.severity-medium {
+          border-left-color: #f59e0b;
+        }
+        
+        .vuln-item.severity-low {
+          border-left-color: #3b82f6;
+        }
+        
+        .vuln-item.status-resolved,
+        .vuln-item.status-patched {
+          opacity: 0.6;
+          border-left-color: #10b981;
+        }
+        
+        .vuln-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+        
+        .severity-badge {
+          padding: 2px 6px;
+          border-radius: 4px;
+          font-size: 0.7rem;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+        
+        .severity-badge.high {
+          background: rgba(239, 68, 68, 0.2);
+          color: #fca5a5;
+        }
+        
+        .severity-badge.medium {
+          background: rgba(245, 158, 11, 0.2);
+          color: #fcd34d;
+        }
+        
+        .severity-badge.low {
+          background: rgba(59, 130, 246, 0.2);
+          color: #93c5fd;
+        }
+        
+        .status-badge {
+          padding: 2px 6px;
+          border-radius: 4px;
+          font-size: 0.7rem;
+          font-weight: 600;
+          margin-left: auto;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+        
+        .status-badge.warning {
+          background: rgba(245, 158, 11, 0.2);
+          color: #fcd34d;
+        }
+        
+        .status-badge.info {
+          background: rgba(59, 130, 246, 0.2);
+          color: #93c5fd;
+        }
+        
+        .status-badge.resolved {
+          background: rgba(16, 185, 129, 0.2);
+          color: #6ee7b7;
+        }
+        
+        .status-badge.patched {
+          background: rgba(16, 185, 129, 0.2);
+          color: #6ee7b7;
+        }
+        
+        .vuln-name {
+          font-weight: 600;
+          flex: 1;
+          color: var(--text-1);
+        }
+        
+        .vuln-desc {
+          color: var(--text-3);
+          font-size: 0.8rem;
+          margin-left: 4px;
+        }
+        
+        .patch-btn {
+          padding: 6px 12px;
+          background: linear-gradient(135deg, #f97316 0%, #f59e0b 100%);
+          border: none;
+          border-radius: 6px;
+          color: white;
+          font-size: 0.8rem;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          width: fit-content;
+          transition: all 0.2s;
+        }
+        
+        .patch-btn:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 4px 12px rgba(249, 115, 22, 0.3);
+        }
+        
+        /* Threats */
+        .threat-item {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 10px;
+          background: var(--bg-4);
+          border-radius: 6px;
+          border-left: 3px solid #f59e0b;
+        }
+        
+        .threat-item.status-blocked {
+          border-left-color: #ef4444;
+        }
+        
+        .threat-item.status-prevented {
+          border-left-color: #10b981;
+        }
+        
+        .threat-item.status-filtered {
+          border-left-color: #f59e0b;
+        }
+        
+        .threat-status {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        
+        .threat-info {
+          flex: 1;
+        }
+        
+        .threat-type {
+          font-weight: 600;
+          font-size: 0.9rem;
+          color: var(--text-1);
+          margin-bottom: 2px;
+        }
+        
+        .threat-time {
+          font-size: 0.75rem;
+          color: var(--text-3);
+        }
+        
+        /* Empty State */
+        .empty-state {
+          text-align: center;
+          padding: 20px;
+          color: var(--text-3);
+          font-size: 0.9rem;
+        }
+        
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
@@ -2138,65 +2055,6 @@ export default function NexusAI() {
           .memory-panel { position: fixed; z-index: 500; height: calc(100vh - 60px); top: 60px; right: 0; }
           .tool-btn span { display: none; }
           .model-dropdown { width: 300px; left: 0; transform: none; }
-=======
-          <MemoryPanel
-            memories={memories}
-            onAddMemory={addMemory}
-            onDeleteMemory={deleteMemory}
-            isOpen={isMemoryOpen}
-          />
-        )}
-      </div>
-      
-      {/* Modals */}
-      <SettingsPanel
-        settings={settings}
-        onUpdateSettings={setSettings}
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        userAvatar={userAvatar}
-        onUpdateAvatar={setUserAvatar}
-      />
-      
-      <SecurityDashboard
-        isOpen={isSecurityOpen}
-        onClose={() => setIsSecurityOpen(false)}
-      />
-      
-      <VoiceCall
-        isActive={isCallActive}
-        onEnd={() => setIsCallActive(false)}
-        model={selectedModel}
-      />
-      
-      {/* Inline CSS tweaks for improved responsiveness */}
-      <style>{`
-        /* small adjustments for mobile/very small screens */
-        @media (max-width: 480px) {
-          .app-header { padding: 8px 12px; }
-          .logo-text { display: none; }
-          .logo-badge { display: none; }
-          .model-selector-btn { padding: 8px 10px; min-width: 120px; font-size: 0.8rem; }
-          .chat-history { width: 260px; }
-          .memory-panel { width: 260px; }
-          .messages-container { padding: 12px; }
-          .input-container textarea { min-height: 40px; font-size: 0.9rem; }
-          .tool-btn span { display: none; }
-          .model-dropdown { left: 8px; right: 8px; transform: none; min-width: auto; width: auto; max-width: calc(100vw - 16px); }
-        }
-
-        /* desktop: allow more compact sidebar if user has lots of width */
-        @media (min-width: 1400px) {
-          .chat-history { width: 320px; }
-          .memory-panel { width: 340px; }
-          .messages-container { padding: 28px; }
-        }
-
-        /* ensure input area is visible over overlays on mobile */
-        @media (max-height: 700px) {
-          .input-area { padding: 10px; }
-          .attachments-preview { gap: 6px; }
->>>>>>> main
         }
 
         /* Accessibility: larger tap areas */
@@ -2206,3 +2064,4 @@ export default function NexusAI() {
     </div>
   );
 }
+

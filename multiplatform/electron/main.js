@@ -6,6 +6,7 @@ const { app, BrowserWindow, ipcMain, Menu, Tray, nativeTheme } = require('electr
 const path = require('path');
 const Store = require('electron-store');
 const keytar = require('keytar');
+const ElectronSecurityService = require('./electron-security-service');
 
 // Initialize secure storage
 const store = new Store({
@@ -15,6 +16,9 @@ const store = new Store({
 
 // Service name for keychain
 const SERVICE_NAME = 'NexusAIPro';
+
+// Initialize security service
+const securityService = new ElectronSecurityService();
 
 let mainWindow;
 let tray;
@@ -61,7 +65,7 @@ function createWindow() {
 // Create system tray
 function createTray() {
   tray = new Tray(path.join(__dirname, 'assets/tray-icon.png'));
-  
+
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Open Nexus AI Pro', click: () => mainWindow?.show() },
     { type: 'separator' },
@@ -76,10 +80,10 @@ function createTray() {
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() }
   ]);
-  
+
   tray.setToolTip('Nexus AI Pro');
   tray.setContextMenu(contextMenu);
-  
+
   tray.on('click', () => {
     if (mainWindow) {
       mainWindow.isVisible() ? mainWindow.hide() : mainWindow.show();
@@ -151,7 +155,7 @@ function createMenu() {
       ]
     }
   ];
-  
+
   const menu = Menu.buildFromTemplate(template);
   Menu.setApplicationMenu(menu);
 }
@@ -199,7 +203,7 @@ app.whenReady().then(() => {
   createWindow();
   createTray();
   createMenu();
-  
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();

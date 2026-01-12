@@ -1,7 +1,7 @@
 /**
  * Copyright © 2025-2026 Cameron Fox. All rights reserved.
  * Licensed under the Apache License, Version 2.0
- * 
+ *
  * Capacitor Native Bridge
  * Provides unified interface for native features across iOS, Android, and Web
  */
@@ -146,7 +146,7 @@ export const HapticFeedback = {
 export const Notifications = {
   async requestPermission() {
     if (!Platform.isNative) return { display: 'granted' };
-    
+
     try {
       const result = await LocalNotifications.requestPermissions();
       return result;

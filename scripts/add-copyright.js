@@ -1,12 +1,12 @@
 /**
  * Copyright © 2025-2026 Cameron Fox. All rights reserved.
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -68,7 +68,7 @@ const COPYRIGHT_HEADERS = {
  * Licensed under the Apache License, Version 2.0
  */
 
-`,
+`
 };
 
 // Files and directories to skip
@@ -85,7 +85,7 @@ const SKIP_PATTERNS = [
   'NOTICE',
   'README.md',
   '.env',
-  '.env.example',
+  '.env.example'
 ];
 
 // File extensions to process
@@ -98,12 +98,12 @@ const FILE_EXTENSIONS = {
   '.swift': 'swift',
   '.html': 'html',
   '.css': 'css',
-  '.scss': 'css',
+  '.scss': 'css'
 };
 
 // Check if file already has copyright
 function hasCopyright(content) {
-  return content.includes('Copyright ©') || 
+  return content.includes('Copyright ©') ||
          content.includes('Copyright (c)') ||
          content.includes('Licensed under the Apache License');
 }
@@ -117,27 +117,27 @@ function shouldSkip(filePath) {
 function processFile(filePath) {
   const ext = path.extname(filePath);
   const headerType = FILE_EXTENSIONS[ext];
-  
+
   if (!headerType) {
     return { skipped: true, reason: 'unsupported extension' };
   }
 
   try {
     const content = fs.readFileSync(filePath, 'utf8');
-    
+
     if (hasCopyright(content)) {
       return { skipped: true, reason: 'already has copyright' };
     }
 
     const header = COPYRIGHT_HEADERS[headerType];
     const newContent = header + content;
-    
+
     // Create backup
     fs.writeFileSync(filePath + '.backup', content);
-    
+
     // Write new content
     fs.writeFileSync(filePath, newContent);
-    
+
     return { success: true };
   } catch (error) {
     return { error: error.message };
@@ -147,19 +147,19 @@ function processFile(filePath) {
 // Recursively process directory
 function processDirectory(dir, stats = { processed: 0, skipped: 0, errors: 0 }) {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
-  
+
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
-    
+
     if (shouldSkip(fullPath)) {
       continue;
     }
-    
+
     if (entry.isDirectory()) {
       processDirectory(fullPath, stats);
     } else if (entry.isFile()) {
       const result = processFile(fullPath);
-      
+
       if (result.success) {
         console.log(`✅ Added copyright: ${fullPath}`);
         stats.processed++;
@@ -172,7 +172,7 @@ function processDirectory(dir, stats = { processed: 0, skipped: 0, errors: 0 }) 
       }
     }
   }
-  
+
   return stats;
 }
 

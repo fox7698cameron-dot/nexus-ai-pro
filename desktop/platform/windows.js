@@ -1,12 +1,12 @@
 /**
  * Copyright © 2025-2026 Cameron Fox. All rights reserved.
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -33,7 +33,7 @@ class WindowsPlatform {
 
   async initialize() {
     console.log('Initializing Windows platform integration...');
-    
+
     // Check for Windows Hello availability
     try {
       this.isWindowsHelloAvailable = await this.checkWindowsHello();
@@ -75,7 +75,7 @@ class WindowsPlatform {
     if (!this.isWindowsHelloAvailable) {
       return {
         success: false,
-        error: 'Windows Hello not available on this device',
+        error: 'Windows Hello not available on this device'
       };
     }
 
@@ -84,16 +84,16 @@ class WindowsPlatform {
       const { stdout } = await execAsync(
         'powershell -Command "$cred = Get-Credential -Message \'Authenticate with Windows Hello\'; if ($cred) { \'success\' } else { \'failed\' }"'
       );
-      
+
       const success = stdout.trim() === 'success';
       return {
         success,
-        error: success ? null : 'Authentication failed',
+        error: success ? null : 'Authentication failed'
       };
     } catch (error) {
       return {
         success: false,
-        error: error.message,
+        error: error.message
       };
     }
   }
@@ -153,7 +153,7 @@ class WindowsPlatform {
   onWindowReady(window) {
     // Windows-specific window customization
     console.log('Window ready on Windows');
-    
+
     // Set up Windows-specific features
     this.setupJumpList();
     this.setupNotifications(window);
@@ -175,10 +175,10 @@ class WindowsPlatform {
             program: process.execPath,
             args: '--new-chat',
             iconPath: process.execPath,
-            iconIndex: 0,
-          },
-        ],
-      },
+            iconIndex: 0
+          }
+        ]
+      }
     ]);
   }
 
@@ -188,7 +188,7 @@ class WindowsPlatform {
   setupNotifications(window) {
     // Windows notification support
     const { Notification } = require('electron');
-    
+
     if (Notification.isSupported()) {
       console.log('Windows notifications supported');
     }
@@ -214,7 +214,7 @@ class WindowsPlatform {
       openAtLogin: enabled,
       openAsHidden: true,
       path: process.execPath,
-      args: ['--auto-start'],
+      args: ['--auto-start']
     });
   }
 }

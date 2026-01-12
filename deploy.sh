@@ -31,18 +31,12 @@ AWS_S3_BUCKET=""
 TESTFLIGHT_ENABLED=true
 
 echo -e "${PURPLE}"
-echo "╔════════════════════════════════════════════════════════════════╗"
-echo "║                                                                ║"
-echo "║     ███╗   ██╗███████╗██╗  ██╗██╗   ██╗███████╗               ║"
-echo "║     ████╗  ██║██╔════╝╚██╗██╔╝██║   ██║██╔════╝               ║"
-echo "║     ██╔██╗ ██║█████╗   ╚███╔╝ ██║   ██║███████╗               ║"
-echo "║     ██║╚██╗██║██╔══╝   ██╔██╗ ██║   ██║╚════██║               ║"
-echo "║     ██║ ╚████║███████╗██╔╝ ██╗╚██████╔╝███████║               ║"
-echo "║     ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝               ║"
-echo "║                                                                ║"
-echo "║              🚀 AUTOMATED DEPLOYMENT SYSTEM 🚀                 ║"
-echo "║                                                                ║"
-echo "╚════════════════════════════════════════════════════════════════╝"
+echo "===================================================================="
+echo "                                                                    "
+echo "                    NEXUS AI PRO                                    "
+echo "          AUTOMATED DEPLOYMENT SYSTEM v1.0                         "
+echo "                                                                    "
+echo "===================================================================="
 echo -e "${NC}"
 
 # Parse command line arguments
@@ -109,9 +103,9 @@ log_error() {
 
 log_step() {
     echo ""
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${CYAN}  $1${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ">>> $1"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
 }
 
@@ -128,7 +122,7 @@ check_command() {
 # ================================================
 
 check_prerequisites() {
-    log_step "🔍 Checking Prerequisites"
+    log_step "Checking Prerequisites"
     
     local missing=()
     
@@ -160,7 +154,7 @@ check_prerequisites() {
 # ================================================
 
 setup_environment() {
-    log_step "⚙️  Setting Up Environment"
+    log_step "Setting Up Environment"
     
     # Load environment variables
     if [ -f ".env.$ENVIRONMENT" ]; then
@@ -185,7 +179,7 @@ setup_environment() {
 # ================================================
 
 run_security_scan() {
-    log_step "🛡️  Running Security Scan"
+    log_step "Running Security Scan"
     
     # Check for sensitive data in code
     log_info "Scanning for sensitive data..."
@@ -211,7 +205,7 @@ run_security_scan() {
 # ================================================
 
 build_web_app() {
-    log_step "🌐 Building Web Application"
+    log_step "Building Web Application"
     
     cd "$WEB_APP_PATH"
     
@@ -233,7 +227,7 @@ build_web_app() {
 }
 
 deploy_web_app() {
-    log_step "🚀 Deploying Web Application"
+    log_step "Deploying Web Application"
     
     # Deploy to Vercel
     if command -v vercel &> /dev/null; then
@@ -259,7 +253,7 @@ deploy_web_app() {
 # ================================================
 
 build_backend() {
-    log_step "⚙️  Building Backend"
+    log_step "Building Backend"
     
     cd "$BACKEND_PATH"
     
@@ -277,7 +271,7 @@ build_backend() {
 }
 
 deploy_backend() {
-    log_step "🚀 Deploying Backend"
+    log_step "Deploying Backend"
     
     # Build Docker image
     if [ "$DEPLOY_TARGET" = "docker" ] || [ "$DEPLOY_TARGET" = "all" ]; then
@@ -298,7 +292,7 @@ deploy_backend() {
 # ================================================
 
 build_docker_image() {
-    log_step "🐳 Building Docker Image"
+    log_step "Building Docker Image"
     
     log_info "Building Docker image: $DOCKER_IMAGE:$DOCKER_TAG"
     docker build -t $DOCKER_IMAGE:$DOCKER_TAG .
@@ -322,7 +316,7 @@ build_docker_image() {
 # ================================================
 
 build_ios_app() {
-    log_step "📱 Building iOS Application"
+    log_step "Building iOS Application"
     
     cd "nexus ai pro"
     
@@ -361,7 +355,7 @@ build_ios_app() {
 }
 
 deploy_ios_app() {
-    log_step "🚀 Deploying iOS Application"
+    log_step "Deploying iOS Application"
     
     if [ "$TESTFLIGHT_ENABLED" = true ] && [ -f "./nexus ai pro/build/nexus-ai-pro.xcarchive" ]; then
         log_info "Exporting IPA..."
@@ -392,7 +386,7 @@ deploy_ios_app() {
 # ================================================
 
 run_ios_simulator() {
-    log_step "📱 Running iOS Simulator"
+    log_step "Running iOS Simulator"
     
     # Boot simulator
     log_info "Booting iPhone 15 Pro simulator..."
@@ -422,7 +416,7 @@ run_ios_simulator() {
 # ================================================
 
 start_dev() {
-    log_step "🔧 Starting Development Environment"
+    log_step "Starting Development Environment"
     
     # Start backend
     log_info "Starting backend server..."
@@ -506,17 +500,17 @@ main() {
             ;;
     esac
     
-    log_step "✅ Deployment Complete"
+    log_step "Deployment Complete"
     
     echo -e "${GREEN}"
-    echo "╔════════════════════════════════════════════════════════════════╗"
-    echo "║                                                                ║"
-    echo "║              🎉 DEPLOYMENT SUCCESSFUL! 🎉                      ║"
-    echo "║                                                                ║"
-    echo "║  Build Number: $BUILD_NUMBER                              ║"
-    echo "║  Environment:  $ENVIRONMENT                                   ║"
-    echo "║                                                                ║"
-    echo "╚════════════════════════════════════════════════════════════════╝"
+    echo "===================================================================="
+    echo "                                                                    "
+    echo "              DEPLOYMENT SUCCESSFUL!                               "
+    echo "                                                                    "
+    echo "  Build Number: $BUILD_NUMBER                              "
+    echo "  Environment:  $ENVIRONMENT                                   "
+    echo "                                                                    "
+    echo "===================================================================="
     echo -e "${NC}"
 }
 

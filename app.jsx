@@ -50,6 +50,51 @@ const ENCRYPTION_CONFIG = {
 };
 
 // ============================================
+// SUBSCRIPTION TIERS
+// ============================================
+const SUBSCRIPTION_TIERS = {
+  free: {
+    name: 'Free',
+    price: '$0/month',
+    color: 'from-gray-400 to-gray-600',
+    textColor: 'text-gray-700',
+    bgColor: 'bg-gray-50',
+    models: ['gpt4', 'claude-sonnet', 'gemini-flash'],
+    features: ['5 chats/day', 'Basic models only', '1MB file uploads'],
+    badge: '🆓',
+    reasoningTime: '⚡ Fast',
+    reasoningDetails: 'Instant responses (< 2 seconds)',
+    icon: '💰'
+  },
+  pro: {
+    name: 'Pro',
+    price: '$9.99/month',
+    color: 'from-blue-400 to-blue-600',
+    textColor: 'text-blue-700',
+    bgColor: 'bg-blue-50',
+    models: ['gpt5', 'o1', 'claude4', 'gemini-ultra', 'deepseek-v3'],
+    features: ['Unlimited chats', 'All models', '100MB uploads', 'Priority support'],
+    badge: '⭐',
+    reasoningTime: '🧠 Mid',
+    reasoningDetails: 'Balanced responses (2-10 seconds)',
+    icon: '🚀'
+  },
+  enterprise: {
+    name: 'Enterprise',
+    price: '$14.99/month',
+    color: 'from-purple-400 to-pink-600',
+    textColor: 'text-purple-700',
+    bgColor: 'bg-purple-50',
+    models: Object.keys(AI_MODELS),
+    features: ['Everything in Pro', 'Custom models', 'API access', 'Dedicated support', 'SLA guarantee'],
+    badge: '👑',
+    reasoningTime: '🔬 Expert',
+    reasoningDetails: 'Deep reasoning (10-60 seconds)',
+    icon: '💎'
+  }
+};
+
+// ============================================
 // AI MODEL CONFIGURATIONS - 25+ MODELS
 // ============================================
 const AI_MODELS = {
@@ -57,49 +102,56 @@ const AI_MODELS = {
   'gpt5': {
     name: 'GPT-5.2',
     provider: 'OpenAI',
-    icon: '≡ƒºá',
+    emoji: '🤖',
+    tier: 'pro',
     capabilities: ['chat', 'code', 'analysis', 'image-gen', 'video-gen', 'reasoning'],
     specialties: ['Advanced reasoning', 'Multimodal', 'Real-time']
   },
   'gpt4': {
     name: 'GPT-4 Turbo',
     provider: 'OpenAI',
-    icon: '≡ƒñû',
+    emoji: '🧠',
+    tier: 'free',
     capabilities: ['chat', 'code', 'analysis', 'image-gen', 'vision'],
     specialties: ['Multimodal', 'DALL-E 3', 'Function calling']
   },
   'gpt4o': {
     name: 'GPT-4o',
     provider: 'OpenAI',
-    icon: 'ΓÜí',
+    emoji: '⚡',
+    tier: 'pro',
     capabilities: ['chat', 'code', 'vision', 'audio'],
     specialties: ['Omni-modal', 'Real-time', 'Fast']
   },
   'o1': {
     name: 'o1 Pro',
     provider: 'OpenAI',
-    icon: '≡ƒö¼',
+    emoji: '🎯',
+    tier: 'pro',
     capabilities: ['reasoning', 'math', 'code', 'analysis'],
     specialties: ['Chain of thought', 'PhD-level reasoning']
   },
   'o1-mini': {
     name: 'o1 Mini',
     provider: 'OpenAI',
-    icon: '≡ƒº¬',
+    emoji: '💡',
+    tier: 'pro',
     capabilities: ['reasoning', 'code', 'math'],
     specialties: ['Fast reasoning', 'Cost-effective']
   },
   'sora': {
     name: 'Sora',
     provider: 'OpenAI',
-    icon: '≡ƒÄ¼',
+    emoji: '🎬',
+    tier: 'enterprise',
     capabilities: ['video-gen', 'image-gen'],
     specialties: ['Video generation', '60s clips', 'Cinematic']
   },
   'dalle3': {
     name: 'DALL-E 3',
     provider: 'OpenAI',
-    icon: '≡ƒÄ¿',
+    emoji: '🎨',
+    tier: 'pro',
     capabilities: ['image-gen'],
     specialties: ['Image generation', 'Photorealistic', 'Art']
   },
@@ -108,21 +160,24 @@ const AI_MODELS = {
   'claude4': {
     name: 'Claude 4 Opus',
     provider: 'Anthropic',
-    icon: '≡ƒºá',
+    emoji: '🧬',
+    tier: 'pro',
     capabilities: ['chat', 'code', 'analysis', 'writing', 'reasoning'],
     specialties: ['Complex reasoning', 'Code generation', 'Creative writing']
   },
   'claude-sonnet': {
     name: 'Claude 4 Sonnet',
     provider: 'Anthropic',
-    icon: '≡ƒô¥',
+    emoji: '🎵',
+    tier: 'free',
     capabilities: ['chat', 'code', 'analysis', 'writing'],
     specialties: ['Balanced', 'Fast', 'Efficient']
   },
   'claude-haiku': {
     name: 'Claude 4 Haiku',
     provider: 'Anthropic',
-    icon: 'ΓÜí',
+    emoji: '🏃',
+    tier: 'free',
     capabilities: ['chat', 'code', 'analysis'],
     specialties: ['Ultra-fast', 'Cost-effective', 'Concise']
   },
@@ -131,35 +186,40 @@ const AI_MODELS = {
   'gemini-ultra': {
     name: 'Gemini 2.0 Ultra',
     provider: 'Google',
-    icon: '≡ƒÆ½',
+    emoji: '✨',
+    tier: 'pro',
     capabilities: ['chat', 'code', 'multimodal', 'video', 'reasoning'],
     specialties: ['1M context', 'Video understanding', 'Real-time']
   },
   'gemini-pro': {
     name: 'Gemini 2.0 Pro',
     provider: 'Google',
-    icon: 'Γ£¿',
+    emoji: '🔥',
+    tier: 'pro',
     capabilities: ['chat', 'code', 'analysis', 'vision'],
     specialties: ['Balanced', 'Multimodal', 'Fast']
   },
   'gemini-flash': {
     name: 'Gemini 2.0 Flash',
     provider: 'Google',
-    icon: 'ΓÜí',
+    emoji: '⚙️',
+    tier: 'free',
     capabilities: ['chat', 'code', 'vision'],
     specialties: ['Ultra-fast', 'Low-latency', 'Efficient']
   },
   'imagen3': {
     name: 'Imagen 3',
     provider: 'Google',
-    icon: '≡ƒû╝∩╕Å',
+    emoji: '🖼️',
+    tier: 'enterprise',
     capabilities: ['image-gen'],
     specialties: ['Image generation', 'Photorealistic', 'High-res']
   },
   'veo': {
     name: 'Veo 2',
     provider: 'Google',
-    icon: '≡ƒÄÑ',
+    emoji: '📹',
+    tier: 'enterprise',
     capabilities: ['video-gen'],
     specialties: ['Video generation', '4K', 'Cinematic']
   },
@@ -168,21 +228,24 @@ const AI_MODELS = {
   'grok4': {
     name: 'Grok 4.1',
     provider: 'xAI',
-    icon: 'ΓÜí',
+    emoji: '🧙',
+    tier: 'enterprise',
     capabilities: ['chat', 'realtime', 'analysis', 'code', 'image-gen'],
     specialties: ['Real-time data', 'X integration', 'Unfiltered']
   },
   'grok3': {
     name: 'Grok 3',
     provider: 'xAI',
-    icon: '≡ƒöÑ',
+    emoji: '😄',
+    tier: 'pro',
     capabilities: ['chat', 'code', 'analysis'],
     specialties: ['Humor', 'Real-time', 'Uncensored']
   },
   'aurora': {
     name: 'Aurora',
     provider: 'xAI',
-    icon: '≡ƒîƒ',
+    emoji: '🌅',
+    tier: 'enterprise',
     capabilities: ['image-gen'],
     specialties: ['Image generation', 'Artistic', 'Fast']
   },
@@ -191,21 +254,24 @@ const AI_MODELS = {
   'deepseek-v3': {
     name: 'DeepSeek V3',
     provider: 'DeepSeek',
-    icon: '≡ƒö«',
+    emoji: '🌊',
+    tier: 'pro',
     capabilities: ['chat', 'code', 'reasoning', 'math'],
     specialties: ['Deep reasoning', 'Mathematics', 'Code']
   },
   'deepseek-r1': {
     name: 'DeepSeek R1',
     provider: 'DeepSeek',
-    icon: '≡ƒºá',
+    emoji: '🚀',
+    tier: 'pro',
     capabilities: ['reasoning', 'math', 'code'],
     specialties: ['Chain of thought', 'PhD-level', 'Open-source']
   },
   'deepseek-coder': {
     name: 'DeepSeek Coder V3',
     provider: 'DeepSeek',
-    icon: '≡ƒÆ╗',
+    emoji: '💻',
+    tier: 'pro',
     capabilities: ['code', 'debugging', 'analysis'],
     specialties: ['Code generation', 'Bug fixing', '330B params']
   },
@@ -214,21 +280,24 @@ const AI_MODELS = {
   'llama4': {
     name: 'Llama 4 405B',
     provider: 'Meta',
-    icon: '≡ƒªÖ',
+    emoji: '🦙',
+    tier: 'enterprise',
     capabilities: ['chat', 'code', 'reasoning', 'multilingual'],
     specialties: ['Open-source', 'Local deployment', 'Massive scale']
   },
   'llama3': {
     name: 'Llama 3.3 70B',
     provider: 'Meta',
-    icon: '≡ƒªÖ',
+    emoji: '🦙',
+    tier: 'pro',
     capabilities: ['chat', 'code', 'analysis'],
     specialties: ['Open-source', 'Efficient', 'Fast']
   },
   'code-llama': {
     name: 'Code Llama 70B',
     provider: 'Meta',
-    icon: '≡ƒÆ╗',
+    emoji: '🔗',
+    tier: 'pro',
     capabilities: ['code', 'debugging'],
     specialties: ['Code generation', 'Python', 'C++']
   },
@@ -237,21 +306,24 @@ const AI_MODELS = {
   'mistral-large': {
     name: 'Mistral Large 2',
     provider: 'Mistral',
-    icon: '≡ƒîÇ',
+    emoji: '⛈️',
+    tier: 'pro',
     capabilities: ['chat', 'code', 'analysis', 'multilingual'],
     specialties: ['123B params', 'Multilingual', 'Function calling']
   },
   'mixtral': {
     name: 'Mixtral 8x22B',
     provider: 'Mistral',
-    icon: '≡ƒöÇ',
+    emoji: '🎛️',
+    tier: 'pro',
     capabilities: ['chat', 'code', 'multilingual'],
     specialties: ['MoE architecture', 'Efficient', 'Open-source']
   },
   'codestral': {
     name: 'Codestral',
     provider: 'Mistral',
-    icon: '≡ƒÆ╗',
+    emoji: '🛠️',
+    tier: 'pro',
     capabilities: ['code', 'debugging', 'completion'],
     specialties: ['Code generation', '80+ languages', 'Fast']
   },
@@ -260,14 +332,16 @@ const AI_MODELS = {
   'copilot-pro': {
     name: 'Copilot Pro',
     provider: 'Microsoft',
-    icon: 'Γ£¿',
+    emoji: '🪟',
+    tier: 'enterprise',
     capabilities: ['chat', 'code', 'productivity', 'image-gen'],
     specialties: ['Office integration', 'DALL-E 3', 'GPT-4 Turbo']
   },
   'phi4': {
     name: 'Phi-4',
     provider: 'Microsoft',
-    icon: '≡ƒö¼',
+    emoji: '🔬',
+    tier: 'pro',
     capabilities: ['chat', 'reasoning', 'math'],
     specialties: ['Small but mighty', 'Reasoning', 'Efficient']
   },
@@ -276,28 +350,32 @@ const AI_MODELS = {
   'kimi': {
     name: 'Kimi k2',
     provider: 'Moonshot',
-    icon: '≡ƒîÖ',
+    emoji: '🌙',
+    tier: 'enterprise',
     capabilities: ['chat', 'long-context', 'analysis'],
     specialties: ['2M context', 'Document analysis', 'Chinese']
   },
   'qwen': {
     name: 'Qwen 2.5 Max',
     provider: 'Alibaba',
-    icon: '≡ƒÉë',
+    emoji: '🏯',
+    tier: 'pro',
     capabilities: ['chat', 'code', 'math', 'vision'],
     specialties: ['Math', 'Coding', 'Multilingual']
   },
   'perplexity': {
     name: 'Perplexity Pro',
     provider: 'Perplexity',
-    icon: '≡ƒöì',
+    emoji: '🔍',
+    tier: 'pro',
     capabilities: ['chat', 'search', 'realtime'],
     specialties: ['Live search', 'Citations', 'Real-time']
   },
   'groq': {
     name: 'Groq LPU',
     provider: 'Groq',
-    icon: 'ΓÜí',
+    emoji: '⚡️',
+    tier: 'enterprise',
     capabilities: ['chat', 'code', 'ultra-fast'],
     specialties: ['500 tokens/sec', 'Hardware accelerated']
   },
@@ -306,28 +384,32 @@ const AI_MODELS = {
   'midjourney': {
     name: 'Midjourney V6.1',
     provider: 'Midjourney',
-    icon: '≡ƒÄ¿',
+    emoji: '🎭',
+    tier: 'enterprise',
     capabilities: ['image-gen'],
     specialties: ['Artistic', 'Photorealistic', 'Stylized']
   },
   'stable-diffusion': {
     name: 'Stable Diffusion 3.5',
     provider: 'Stability AI',
-    icon: '≡ƒû╝∩╕Å',
+    emoji: '🌈',
+    tier: 'pro',
     capabilities: ['image-gen', 'video-gen'],
     specialties: ['Open-source', 'Local', 'Customizable']
   },
   'flux': {
     name: 'Flux Pro 1.1',
     provider: 'Black Forest Labs',
-    icon: 'Γ£¿',
+    emoji: '✨',
+    tier: 'enterprise',
     capabilities: ['image-gen'],
     specialties: ['Ultra-fast', 'High quality', 'Photorealistic']
   },
   'ideogram': {
     name: 'Ideogram 2.0',
     provider: 'Ideogram',
-    icon: '≡ƒô¥',
+    emoji: '📝',
+    tier: 'enterprise',
     capabilities: ['image-gen'],
     specialties: ['Text rendering', 'Logos', 'Typography']
   },
@@ -336,28 +418,32 @@ const AI_MODELS = {
   'runway': {
     name: 'Runway Gen-3 Alpha',
     provider: 'Runway',
-    icon: '≡ƒÄ¼',
+    emoji: '🎥',
+    tier: 'enterprise',
     capabilities: ['video-gen', 'image-gen'],
     specialties: ['Video generation', '10s clips', 'Motion brush']
   },
   'pika': {
     name: 'Pika 1.5',
     provider: 'Pika Labs',
-    icon: '≡ƒÄÑ',
+    emoji: '🎞️',
+    tier: 'enterprise',
     capabilities: ['video-gen'],
     specialties: ['Video generation', 'Lip sync', 'Effects']
   },
   'kling': {
     name: 'Kling AI',
     provider: 'Kuaishou',
-    icon: '≡ƒÄ₧∩╕Å',
+    emoji: '🎬',
+    tier: 'enterprise',
     capabilities: ['video-gen'],
     specialties: ['Long videos', 'Realistic', '2min clips']
   },
   'luma': {
     name: 'Luma Dream Machine',
     provider: 'Luma AI',
-    icon: '≡ƒÆ¡',
+    emoji: '🌟',
+    tier: 'enterprise',
     capabilities: ['video-gen', '3d-gen'],
     specialties: ['Video gen', '3D capture', 'Fast']
   }
@@ -472,24 +558,24 @@ const APP_TEMPLATES = {
 };
 
 // ============================================
-// AVATAR STYLES
+// AVATAR STYLES - CLEAN EMOJIS
 // ============================================
 const AVATAR_STYLES = {
   user: [
-    { id: 'u1', emoji: '≡ƒæñ' },
-    { id: 'u2', emoji: '≡ƒºæ' },
-    { id: 'u3', emoji: '≡ƒæ¿ΓÇì≡ƒÆ╗' },
-    { id: 'u4', emoji: '≡ƒæ⌐ΓÇì≡ƒÆ╗' },
-    { id: 'u5', emoji: '≡ƒª╕' },
-    { id: 'u6', emoji: '≡ƒºÖ' },
-    { id: 'u7', emoji: '≡ƒÑ╖' },
-    { id: 'u8', emoji: '≡ƒñ┤' }
+    { id: 'u1', emoji: '👨‍💼' },
+    { id: 'u2', emoji: '👩‍💼' },
+    { id: 'u3', emoji: '👨‍🚀' },
+    { id: 'u4', emoji: '👩‍🚀' },
+    { id: 'u5', emoji: '👨‍🎨' },
+    { id: 'u6', emoji: '👩‍🎨' },
+    { id: 'u7', emoji: '👨‍💻' },
+    { id: 'u8', emoji: '👩‍💻' }
   ],
   ai: [
-    { id: 'a1', emoji: '≡ƒñû' },
-    { id: 'a2', emoji: '≡ƒºá' },
-    { id: 'a3', emoji: 'Γ£¿' },
-    { id: 'a4', emoji: 'ΓÜí' }
+    { id: 'a1', emoji: '🤖' },
+    { id: 'a2', emoji: '🧠' },
+    { id: 'a3', emoji: '✨' },
+    { id: 'a4', emoji: '⚡' }
   ]
 };
 

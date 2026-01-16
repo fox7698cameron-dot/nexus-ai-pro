@@ -732,9 +732,54 @@ class WorkflowEngine {
     return { aiResponse: response };
   }
 
+  /**
+   * Validate and normalize the URL for HTTP workflow nodes to prevent SSRF.
+   * Throws an error if the URL is not allowed.
+   */
+  validateHttpNodeUrl(rawUrl) {
+    if (!rawUrl || typeof rawUrl !== 'string') {
+      throw new Error('HTTP node URL is required');
+    }
+
+    let parsed;
+    try {
+      parsed = new URL(rawUrl);
+    } catch (e) {
+      throw new Error('Invalid HTTP node URL');
+    }
+
+    const protocol = parsed.protocol.toLowerCase();
+    if (protocol !== 'http:' && protocol !== 'https:') {
+      throw new Error('HTTP node URL must use http or https');
+    }
+
+    const hostname = parsed.hostname.toLowerCase();
+
+    // Basic protection against localhost and obvious private IP-style hosts.
+    const blockedHostnames = ['localhost', '127.0.0.1', '::1'];
+    if (blockedHostnames.includes(hostname)) {
+      throw new Error('HTTP node URL hostname is not allowed');
+    }
+
+    // Optionally enforce a simple allow-list by domain suffix.
+    // Adjust this to your environment as needed.
+    const allowedDomainSuffixes = []; // e.g., ['.example.com']
+    if (allowedDomainSuffixes.length > 0) {
+      const matchesAllowed = allowedDomainSuffixes.some(suffix =>
+        hostname === suffix.slice(1) || hostname.endsWith(suffix)
+      );
+      if (!matchesAllowed) {
+        throw new Error('HTTP node URL hostname is not in the allow-list');
+      }
+    }
+
+    return parsed.toString();
+  }
+
   async executeHTTPNode(node, context) {
     const { url, method, headers, body } = node.config || {};
-    const response = await fetch(url, {
+    const safeUrl = this.validateHttpNodeUrl(url);
+    const response = await fetch(safeUrl, {
       method: method || 'GET',
       headers: headers || {},
       body: body ? JSON.stringify(body) : undefined

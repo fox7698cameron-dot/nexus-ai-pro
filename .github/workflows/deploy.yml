@@ -5,6 +5,9 @@
 
 name: Nexus AI Pro CI/CD
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main, develop]

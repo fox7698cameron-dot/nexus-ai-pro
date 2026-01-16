@@ -149,6 +149,7 @@ function processDirectory(dir, stats = { processed: 0, skipped: 0, errors: 0 }) 
   const entries = fs.readdirSync(dir, { withFileTypes: true });
 
   for (const entry of entries) {
+    if (entry.name.includes('..')) throw new Error('Invalid file name');
     const fullPath = path.join(dir, entry.name);
 
     if (shouldSkip(fullPath)) {

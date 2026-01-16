@@ -441,20 +441,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-    // Restrict Gemini model selection to a known-safe allow-list to prevent SSRF via path manipulation
-    const allowedGeminiModels = [
-      'gemini-pro',
-      'gemini-1.0-pro',
-      'gemini-1.5-pro',
-      'gemini-1.5-pro-latest',
-      'gemini-1.5-flash',
-      'gemini-1.5-flash-latest'
-    ];
 
-    let model = 'gemini-pro';
-    if (typeof options.model === 'string' && allowedGeminiModels.includes(options.model)) {
-      model = options.model;
-    }
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,

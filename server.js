@@ -440,7 +440,17 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-    const model = options.model || 'gemini-pro';
+    const allowedGeminiModels = [
+      'gemini-pro',
+      'gemini-1.5-pro',
+      'gemini-1.5-flash'
+    ];
+
+    const requestedModel = options.model || 'gemini-pro';
+    const model = allowedGeminiModels.includes(requestedModel)
+      ? requestedModel
+      : 'gemini-pro';
+
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {

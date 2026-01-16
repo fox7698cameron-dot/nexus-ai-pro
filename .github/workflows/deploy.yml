@@ -7,7 +7,7 @@ name: Nexus AI Pro CI/CD
 
 permissions:
   contents: read
-  actions: read
+ main
 
 on:
   push:

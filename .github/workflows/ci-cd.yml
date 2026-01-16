@@ -5,6 +5,9 @@
 
 name: Nexus AI Pro CI/CD
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main, develop]
@@ -278,6 +281,8 @@ jobs:
     runs-on: macos-14
     needs: build-ios
     if: github.event_name == 'release'
+    permissions:
+      contents: read
     environment:
       name: testflight
     steps:

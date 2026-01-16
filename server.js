@@ -14,6 +14,7 @@ import { Server } from 'socket.io';
 import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
+import Jexl from 'jexl';
 
 dotenv.config();
 
@@ -440,16 +441,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-    const allowedGeminiModels = [
-      'gemini-pro',
-      'gemini-1.5-pro',
-      'gemini-1.5-flash'
-    ];
 
-    const requestedModel = options.model || 'gemini-pro';
-    const model = allowedGeminiModels.includes(requestedModel)
-      ? requestedModel
-      : 'gemini-pro';
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
@@ -552,8 +544,17 @@ class AIModelManager {
       mixtral: () => this.callMistral(messages, options)
     };
 
-    const handler = modelHandlers[model];
-    if (!handler) {
+    // Validate the requested model name against the allowed handlers
+    const allowedModels = Object.keys(modelHandlers);
+    if (typeof model !== 'string' || !allowedModels.includes(model)) {
+      throw new Error(`Unknown model: ${model}`);
+    }
+
+    const handler = Object.prototype.hasOwnProperty.call(modelHandlers, model)
+      ? modelHandlers[model]
+      : null;
+
+    if (typeof handler !== 'function') {
       throw new Error(`Unknown model: ${model}`);
     }
 
@@ -716,9 +717,9 @@ class WorkflowEngine {
     case 'code':
       return this.executeCodeNode(node, context);
     case 'condition':
-      return this.executeConditionNode(node, context);
+      return await this.executeConditionNode(node, context);
     case 'transform':
-      return this.executeTransformNode(node, context);
+      return await this.executeTransformNode(node, context);
     default:
       return { result: 'Node type not implemented' };
     }
@@ -741,32 +742,41 @@ class WorkflowEngine {
     return { httpResponse: await response.json() };
   }
 
-  executeCodeNode(node, context) {
-    // Sandboxed code execution (simplified)
+  async executeCodeNode(node, context) {
+    // Execute code node as a Jexl expression instead of raw JavaScript
     const { code } = node.config || {};
+    if (typeof code !== 'string' || !code.trim()) {
+      return { codeError: 'Invalid code expression' };
+    }
     try {
-      const fn = new Function('context', code);
-      return { codeResult: fn(context) };
+      const result = await Jexl.eval(code, context);
+      return { codeResult: result };
     } catch (error) {
       return { codeError: error.message };
     }
   }
 
-  executeConditionNode(node, context) {
+  async executeConditionNode(node, context) {
     const { condition } = node.config || {};
+    if (typeof condition !== 'string' || !condition.trim()) {
+      return { conditionResult: false };
+    }
+    const { transform } = node.config || {};
     try {
-      const fn = new Function('context', `return ${condition}`);
-      return { conditionResult: fn(context) };
+      const result = await Jexl.eval(condition, context);
+      return { conditionResult: !!result };
     } catch (error) {
       return { conditionResult: false };
     }
   }
 
-  executeTransformNode(node, context) {
-    const { transform } = node.config || {};
+  async executeTransformNode(node, context) {
+    if (typeof transform !== 'string' || !transform.trim()) {
+      return { transformError: 'Invalid transform expression' };
+    }
     try {
-      const fn = new Function('context', `return ${transform}`);
-      return { transformResult: fn(context) };
+      const result = await Jexl.eval(transform, context);
+      return { transformResult: result };
     } catch (error) {
       return { transformError: error.message };
     }

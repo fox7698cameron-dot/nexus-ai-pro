@@ -5,6 +5,9 @@
 
 name: Nexus AI Pro CI/CD
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [main, develop]
@@ -49,7 +52,7 @@ jobs:
           NODE_ENV: test
 
       - name: Check for secrets
-        uses: trufflesecurity/trufflehog@main
+        uses: trufflesecurity/trufflehog@b69ed1309db4eb5efc9c2ba2647266a64530c271 # main
         with:
           path: ./
           base: main
@@ -159,7 +162,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Deploy to Vercel
-        uses: amondnet/vercel-action@v25
+        uses: amondnet/vercel-action@16e87c0a08142b0d0d33b76aeaf20823c381b9b9 # v25.2.0
         with:
           vercel-token: ${{ secrets.VERCEL_TOKEN }}
           vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
@@ -179,7 +182,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Deploy to Railway
-        uses: bervProject/railway-deploy@main
+        uses: bervProject/railway-deploy@2fe9b776ea820cf0e64784680a07b8c844d1cf80 # main
         with:
           railway_token: ${{ secrets.RAILWAY_TOKEN }}
           service: nexus-ai-pro

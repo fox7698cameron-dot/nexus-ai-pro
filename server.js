@@ -755,22 +755,26 @@ class WorkflowEngine {
     return { httpResponse: await response.json() };
   }
 
-  executeCodeNode(node, context) {
-    // Sandboxed code execution (simplified)
+  async executeCodeNode(node, context) {
+    // Execute code node as a Jexl expression instead of raw JavaScript
     const { code } = node.config || {};
+    if (typeof code !== 'string' || !code.trim()) {
+      return { codeError: 'Invalid code expression' };
+    }
     try {
-      const fn = new Function('context', code);
-      return { codeResult: fn(context) };
+      const result = await Jexl.eval(code, context);
+      return { codeResult: result };
     } catch (error) {
       return { codeError: error.message };
     }
   }
 
   async executeConditionNode(node, context) {
+    const { condition } = node.config || {};
     if (typeof condition !== 'string' || !condition.trim()) {
       return { conditionResult: false };
     }
-    const { condition } = node.config || {};
+    const { transform } = node.config || {};
     try {
       const result = await Jexl.eval(condition, context);
       return { conditionResult: !!result };
@@ -783,7 +787,6 @@ class WorkflowEngine {
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
-    const { transform } = node.config || {};
     try {
       const result = await Jexl.eval(transform, context);
       return { transformResult: result };

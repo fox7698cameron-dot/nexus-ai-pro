@@ -542,8 +542,17 @@ class AIModelManager {
       mixtral: () => this.callMistral(messages, options)
     };
 
-    const handler = modelHandlers[model];
-    if (!handler) {
+    // Validate the requested model name against the allowed handlers
+    const allowedModels = Object.keys(modelHandlers);
+    if (typeof model !== 'string' || !allowedModels.includes(model)) {
+      throw new Error(`Unknown model: ${model}`);
+    }
+
+    const handler = Object.prototype.hasOwnProperty.call(modelHandlers, model)
+      ? modelHandlers[model]
+      : null;
+
+    if (typeof handler !== 'function') {
       throw new Error(`Unknown model: ${model}`);
     }
 

@@ -14,6 +14,7 @@ import { Server } from 'socket.io';
 import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
+import Jexl from 'jexl';
 
 dotenv.config();
 
@@ -729,9 +730,9 @@ class WorkflowEngine {
     case 'code':
       return this.executeCodeNode(node, context);
     case 'condition':
-      return this.executeConditionNode(node, context);
+      return await this.executeConditionNode(node, context);
     case 'transform':
-      return this.executeTransformNode(node, context);
+      return await this.executeTransformNode(node, context);
     default:
       return { result: 'Node type not implemented' };
     }
@@ -765,21 +766,27 @@ class WorkflowEngine {
     }
   }
 
-  executeConditionNode(node, context) {
+  async executeConditionNode(node, context) {
+    if (typeof condition !== 'string' || !condition.trim()) {
+      return { conditionResult: false };
+    }
     const { condition } = node.config || {};
     try {
-      const fn = new Function('context', `return ${condition}`);
-      return { conditionResult: fn(context) };
+      const result = await Jexl.eval(condition, context);
+      return { conditionResult: !!result };
     } catch (error) {
       return { conditionResult: false };
     }
   }
 
-  executeTransformNode(node, context) {
+  async executeTransformNode(node, context) {
+    if (typeof transform !== 'string' || !transform.trim()) {
+      return { transformError: 'Invalid transform expression' };
+    }
     const { transform } = node.config || {};
     try {
-      const fn = new Function('context', `return ${transform}`);
-      return { transformResult: fn(context) };
+      const result = await Jexl.eval(transform, context);
+      return { transformResult: result };
     } catch (error) {
       return { transformError: error.message };
     }

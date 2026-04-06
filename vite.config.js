@@ -19,8 +19,7 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: 'http://localhost:3001',
-        changeOrigin: true,
-        secure: false
+        changeOrigin: true
       }
     }
   },
@@ -38,7 +37,6 @@ export default defineConfig({
       output: {
         manualChunks: {
           'react-vendor': ['react', 'react-dom'],
-          'ai-vendor': ['@anthropic-ai/sdk', 'openai'],
           'ui-vendor': ['lucide-react']
         }
       }

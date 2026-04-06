@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const fetch = require('node-fetch');
 
 class ElectronSecurityService {
-  constructor(apiUrl = 'http://localhost:3001/api/security') {
+  constructor(apiUrl = process.env.NEXUS_API_URL || 'http://localhost:3001/api/security') {
     this.apiUrl = apiUrl;
     this.isScanning = false;
     this.dashboard = null;

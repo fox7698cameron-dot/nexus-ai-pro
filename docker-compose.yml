@@ -1,40 +1,45 @@
 # ================================================
-# NEXUS AI PRO - Docker Compose Configuration
-# Complete development and production stack
+# NEXUS AI PRO - Docker Compose
+# Production stack:  docker compose up
+# Development stack: docker compose --profile dev up
 # ================================================
 
-version: '3.8'
-
 services:
-  # Main Application
+
+  # ── Production application ─────────────────────────────────────────────────
   nexus-ai:
     build:
       context: .
       dockerfile: Dockerfile
+      target: runner
     container_name: nexus-ai-pro
     restart: unless-stopped
     ports:
       - "3001:3001"
     environment:
-      - NODE_ENV=${NODE_ENV:-production}
-      - PORT=3001
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-      - XAI_API_KEY=${XAI_API_KEY}
-      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
-      - ENCRYPTION_SECRET=${ENCRYPTION_SECRET}
-      - ENCRYPTION_SALT=${ENCRYPTION_SALT}
-      - REDIS_URL=redis://redis:6379
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/nexusai
+      NODE_ENV: production
+      PORT: "3001"
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+      XAI_API_KEY: ${XAI_API_KEY}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY}
+      ENCRYPTION_SECRET: ${ENCRYPTION_SECRET}
+      ENCRYPTION_SALT: ${ENCRYPTION_SALT}
+      JWT_SECRET: ${JWT_SECRET}
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/nexusai
     depends_on:
-      - redis
-      - db
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
     networks:
       - nexus-network
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -48,38 +53,43 @@ services:
           cpus: '0.5'
           memory: 512M
 
-  # Redis for caching and sessions
+  # ── Redis ──────────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: nexus-redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
+    expose:
+      - "6379"
     volumes:
       - redis-data:/data
     networks:
       - nexus-network
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --protected-mode yes
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # PostgreSQL Database
+  # ── PostgreSQL ─────────────────────────────────────────────────────────────
   db:
     image: postgres:16-alpine
     container_name: nexus-db
     restart: unless-stopped
-    ports:
-      - "5432:5432"
+    expose:
+      - "5432"
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=nexusai
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: nexusai
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
       - nexus-network
     healthcheck:
@@ -88,7 +98,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # Nginx Reverse Proxy
+  # ── Nginx reverse proxy ────────────────────────────────────────────────────
   nginx:
     image: nginx:alpine
     container_name: nexus-nginx
@@ -99,29 +109,38 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./ssl:/etc/nginx/ssl:ro
+      - nginx-html:/usr/share/nginx/html:ro
     depends_on:
       - nexus-ai
     networks:
       - nexus-network
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
-  # Prometheus Metrics
+  # ── Prometheus metrics ─────────────────────────────────────────────────────
   prometheus:
     image: prom/prometheus:latest
     container_name: nexus-prometheus
     restart: unless-stopped
-    ports:
-      - "9090:9090"
+    expose:
+      - "9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
     networks:
       - nexus-network
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.enable-lifecycle'
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-lifecycle
+    depends_on:
+      - nexus-ai
 
-  # Grafana Dashboard
+  # ── Grafana dashboard ──────────────────────────────────────────────────────
   grafana:
     image: grafana/grafana:latest
     container_name: nexus-grafana
@@ -129,8 +148,9 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
-      - GF_USERS_ALLOW_SIGN_UP=false
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-changeme}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: ${GRAFANA_URL:-http://localhost:3000}
     volumes:
       - grafana-data:/var/lib/grafana
     depends_on:
@@ -138,25 +158,27 @@ services:
     networks:
       - nexus-network
 
-  # Development Service (for testing)
-  app:
+  # ── Development service (profile: dev) ────────────────────────────────────
+  app-dev:
+    profiles: [dev]
     build:
       context: .
       dockerfile: Dockerfile
+      target: builder
+    container_name: nexus-dev
     env_file:
       - .env
+    environment:
+      NODE_ENV: development
     volumes:
-      - ./:/usr/src/app:cached
-      - /usr/src/app/node_modules
+      - ./:/app:cached
+      - /app/node_modules
     ports:
-      - "3001:3001"   # backend
-      - "5173:5173"   # frontend dev server (vite)
-    command: ["npm", "test"]
-    healthcheck:
-      test: ["CMD-SHELL", "node -e \"process.exit(0)\""]
-      interval: 1m
-      timeout: 10s
-      retries: 3
+      - "3001:3001"
+      - "5173:5173"
+    command: ["npm", "run", "dev"]
+    networks:
+      - nexus-network
 
 networks:
   nexus-network:
@@ -167,3 +189,4 @@ volumes:
   postgres-data:
   prometheus-data:
   grafana-data:
+  nginx-html:

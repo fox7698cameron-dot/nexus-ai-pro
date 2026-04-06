@@ -15,6 +15,15 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import os from 'os';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const execAsync = promisify(exec);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 dotenv.config();
 
@@ -142,39 +151,111 @@ class SecurityModule {
     return entry;
   }
 
-  // Vulnerability scanning
+  // Real vulnerability scanning via npm audit + runtime checks
   async scanVulnerabilities() {
     const results = {
       timestamp: Date.now(),
       vulnerabilities: [],
-      status: 'secure'
+      status: 'secure',
+      npmAuditRan: false
     };
 
-    // Check for common vulnerabilities
-    const checks = [
-      { name: 'SQL Injection', check: () => true, patched: true },
-      { name: 'XSS', check: () => true, patched: true },
-      { name: 'CSRF', check: () => true, patched: true },
-      { name: 'Path Traversal', check: () => true, patched: true },
-      { name: 'Rate Limiting', check: () => true, patched: true },
-      { name: 'Input Validation', check: () => true, patched: true },
-      { name: 'Encryption', check: () => !!this.masterKey, patched: true },
-      { name: 'Session Security', check: () => true, patched: true }
+    // Runtime security checks
+    const runtimeChecks = [
+      { id: 'enc-key', name: 'Encryption Key', check: () => !!this.masterKey, severity: 'critical' },
+      { id: 'key-strength', name: 'Key Length (256-bit)', check: () => this.masterKey?.length === 32, severity: 'high' },
+      { id: 'env-secret', name: 'ENCRYPTION_SECRET set', check: () => !!process.env.ENCRYPTION_SECRET, severity: 'high' },
+      { id: 'env-salt', name: 'ENCRYPTION_SALT set', check: () => !!process.env.ENCRYPTION_SALT, severity: 'high' },
+      { id: 'jwt-secret', name: 'JWT_SECRET set', check: () => !!process.env.JWT_SECRET, severity: 'medium' },
+      { id: 'node-env', name: 'NODE_ENV production', check: () => process.env.NODE_ENV === 'production', severity: 'low' }
     ];
 
-    for (const check of checks) {
+    for (const check of runtimeChecks) {
       if (!check.check()) {
         results.vulnerabilities.push({
+          id: check.id,
           name: check.name,
-          severity: 'high',
-          patched: false
+          severity: check.severity,
+          status: 'open',
+          source: 'runtime',
+          description: `${check.name} is not properly configured`
         });
+        if (check.severity === 'critical' || check.severity === 'high') {
+          results.status = 'vulnerable';
+        }
+      }
+    }
+
+    // Run real npm audit
+    try {
+      const { stdout } = await execAsync('npm audit --json --prefix ' + __dirname, {
+        timeout: 30000,
+        cwd: __dirname
+      });
+      const audit = JSON.parse(stdout);
+      const auditVulns = audit.vulnerabilities || {};
+      results.npmAuditRan = true;
+      results.npmAuditMetadata = audit.metadata || {};
+
+      for (const [pkgName, vuln] of Object.entries(auditVulns)) {
+        const severity = vuln.severity || 'moderate';
+        if (['critical', 'high', 'moderate'].includes(severity)) {
+          results.vulnerabilities.push({
+            id: `npm-${pkgName}`,
+            name: `Dependency: ${pkgName}`,
+            severity: severity === 'moderate' ? 'medium' : severity,
+            status: vuln.fixAvailable ? 'fixable' : 'open',
+            source: 'npm-audit',
+            description: `${vuln.via?.[0]?.title || 'Known vulnerability'} in ${pkgName}@${vuln.range || 'unknown'}`,
+            cvss: vuln.via?.[0]?.cvss?.score || null,
+            url: vuln.via?.[0]?.url || null
+          });
+        }
+      }
+
+      if (results.vulnerabilities.some(v => v.severity === 'critical' || v.severity === 'high')) {
         results.status = 'vulnerable';
+      }
+    } catch (auditErr) {
+      // npm audit exits non-zero when vulns found — parse stdout anyway
+      if (auditErr.stdout) {
+        try {
+          const audit = JSON.parse(auditErr.stdout);
+          results.npmAuditRan = true;
+          results.npmAuditMetadata = audit.metadata || {};
+          const auditVulns = audit.vulnerabilities || {};
+          for (const [pkgName, vuln] of Object.entries(auditVulns)) {
+            const severity = vuln.severity || 'moderate';
+            if (['critical', 'high', 'moderate'].includes(severity)) {
+              results.vulnerabilities.push({
+                id: `npm-${pkgName}`,
+                name: `Dependency: ${pkgName}`,
+                severity: severity === 'moderate' ? 'medium' : severity,
+                status: vuln.fixAvailable ? 'fixable' : 'open',
+                source: 'npm-audit',
+                description: `${vuln.via?.[0]?.title || 'Known vulnerability'} in ${pkgName}@${vuln.range || 'unknown'}`,
+                cvss: vuln.via?.[0]?.cvss?.score || null,
+                url: vuln.via?.[0]?.url || null
+              });
+            }
+          }
+          if (results.vulnerabilities.some(v => v.severity === 'critical' || v.severity === 'high')) {
+            results.status = 'vulnerable';
+          }
+        } catch (_) {
+          results.npmAuditError = auditErr.message;
+        }
+      } else {
+        results.npmAuditError = auditErr.message;
       }
     }
 
     this.lastScan = Date.now();
-    this.logAudit('VULNERABILITY_SCAN', results);
+    this.logAudit('VULNERABILITY_SCAN', {
+      status: results.status,
+      count: results.vulnerabilities.length,
+      npmAuditRan: results.npmAuditRan
+    });
 
     return results;
   }
@@ -237,6 +318,15 @@ class SecurityModule {
     if (threats.length > 0) {
       this.logAudit('THREAT_DETECTED', { ip, threats });
       this.threatDatabase.add(ip);
+      // Broadcast real-time threat event (io is initialized after this class)
+      if (global._io) {
+        global._io.emit('security:threat', {
+          timestamp: Date.now(),
+          ip,
+          threats,
+          blocked: threats.some(t => t.severity === 'critical')
+        });
+      }
     }
 
     return threats;
@@ -266,6 +356,198 @@ class SecurityModule {
 const security = new SecurityModule();
 
 // ================================================
+// NETWORK MONITOR — Real-time request metrics
+// ================================================
+class NetworkMonitor {
+  constructor() {
+    this.totalRequests = 0;
+    this.blockedRequests = 0;
+    this.bytesIn = 0;
+    this.bytesOut = 0;
+    this.uniqueIPs = new Set();
+    this.statusCounts = {};
+    this.requestsPerSecond = [];
+    this._windowStart = Date.now();
+    this._windowCount = 0;
+  }
+
+  recordRequest(req, res, bytesIn = 0) {
+    this.totalRequests++;
+    this._windowCount++;
+    this.bytesIn += bytesIn;
+    if (req.ip) this.uniqueIPs.add(req.ip);
+
+    const now = Date.now();
+    if (now - this._windowStart >= 1000) {
+      this.requestsPerSecond.push({ ts: this._windowStart, count: this._windowCount });
+      if (this.requestsPerSecond.length > 60) this.requestsPerSecond.shift();
+      this._windowStart = now;
+      this._windowCount = 0;
+    }
+  }
+
+  recordResponse(res, bytesOut = 0) {
+    this.bytesOut += bytesOut;
+    const code = String(res.statusCode || 200);
+    this.statusCounts[code] = (this.statusCounts[code] || 0) + 1;
+  }
+
+  recordBlocked() {
+    this.blockedRequests++;
+  }
+
+  getMetrics() {
+    const recentRps = this.requestsPerSecond.slice(-5);
+    const avgRps = recentRps.length
+      ? Math.round(recentRps.reduce((s, r) => s + r.count, 0) / recentRps.length)
+      : 0;
+    return {
+      totalRequests: this.totalRequests,
+      blockedRequests: this.blockedRequests,
+      bytesIn: this.bytesIn,
+      bytesOut: this.bytesOut,
+      uniqueIPs: this.uniqueIPs.size,
+      avgRequestsPerSecond: avgRps,
+      statusCounts: { ...this.statusCounts },
+      uptime: process.uptime(),
+      memUsage: process.memoryUsage(),
+      cpuLoad: os.loadavg()
+    };
+  }
+}
+
+const networkMonitor = new NetworkMonitor();
+
+// ================================================
+// ECDH KEY EXCHANGE — M2M and P2P Crypto
+// ================================================
+class ECDHKeyExchange {
+  constructor() {
+    this.sessions = new Map();
+    this.curve = 'prime256v1'; // NIST P-256
+  }
+
+  // Generate server-side ECDH keypair for a session
+  initSession(sessionId) {
+    const ecdh = crypto.createECDH(this.curve);
+    const publicKey = ecdh.generateKeys('base64');
+    this.sessions.set(sessionId, { ecdh, established: false, createdAt: Date.now() });
+    // Purge sessions older than 10 minutes
+    for (const [id, sess] of this.sessions) {
+      if (Date.now() - sess.createdAt > 600000) this.sessions.delete(id);
+    }
+    return { sessionId, publicKey, curve: this.curve };
+  }
+
+  // Derive shared secret from client's public key
+  deriveSharedSecret(sessionId, clientPublicKey) {
+    const sess = this.sessions.get(sessionId);
+    if (!sess) throw new Error('ECDH session not found or expired');
+    const clientKeyBuf = Buffer.from(clientPublicKey, 'base64');
+    const sharedSecret = sess.ecdh.computeSecret(clientKeyBuf);
+    // Derive a symmetric key from the shared secret via HKDF-style PBKDF2
+    const derivedKey = crypto.pbkdf2Sync(sharedSecret, sessionId, 1, 32, 'sha256');
+    sess.established = true;
+    sess.derivedKey = derivedKey;
+    return derivedKey.toString('hex');
+  }
+
+  // Encrypt data with session key (for M2M messaging)
+  encryptWithSession(sessionId, data) {
+    const sess = this.sessions.get(sessionId);
+    if (!sess?.derivedKey) throw new Error('Session key not established');
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', sess.derivedKey, iv);
+    const encrypted = Buffer.concat([cipher.update(JSON.stringify(data), 'utf8'), cipher.final()]);
+    const tag = cipher.getAuthTag();
+    return { iv: iv.toString('hex'), data: encrypted.toString('hex'), tag: tag.toString('hex') };
+  }
+
+  // Decrypt data with session key
+  decryptWithSession(sessionId, payload) {
+    const sess = this.sessions.get(sessionId);
+    if (!sess?.derivedKey) throw new Error('Session key not established');
+    const decipher = crypto.createDecipheriv(
+      'aes-256-gcm',
+      sess.derivedKey,
+      Buffer.from(payload.iv, 'hex')
+    );
+    decipher.setAuthTag(Buffer.from(payload.tag, 'hex'));
+    const decrypted = Buffer.concat([
+      decipher.update(Buffer.from(payload.data, 'hex')),
+      decipher.final()
+    ]);
+    return JSON.parse(decrypted.toString('utf8'));
+  }
+}
+
+const ecdhExchange = new ECDHKeyExchange();
+
+// ================================================
+// FILE MALWARE SCANNER
+// ================================================
+const MALWARE_SIGNATURES = [
+  // Magic bytes for executable types that don't belong in uploads
+  { name: 'Windows PE Executable', hex: '4d5a', offset: 0, severity: 'critical' },
+  { name: 'ELF Executable', hex: '7f454c46', offset: 0, severity: 'critical' },
+  { name: 'Mach-O Binary', hex: 'feedfacf', offset: 0, severity: 'critical' },
+  { name: 'Mach-O 32-bit', hex: 'cefaedfe', offset: 0, severity: 'critical' }
+];
+
+const SUSPICIOUS_PATTERNS = [
+  /eval\s*\(\s*(?:atob|unescape|String\.fromCharCode)/gi,
+  /(?:document|window)\s*\[\s*['"][^'"]+['"]\s*\]\s*\(/gi,
+  /(?:exec|spawn|system|popen)\s*\([^)]*\$[^)]*\)/gi,
+  /(?:base64_decode|hex2bin|str_rot13)\s*\(/gi
+];
+
+function scanFileForMalware(buffer, mimetype, filename) {
+  const findings = [];
+
+  // Check magic bytes
+  const hex = buffer.slice(0, 8).toString('hex');
+  for (const sig of MALWARE_SIGNATURES) {
+    if (hex.startsWith(sig.hex)) {
+      findings.push({ type: 'signature', name: sig.name, severity: sig.severity });
+    }
+  }
+
+  // Entropy check — high entropy (>7.2 bits/byte) on non-image files indicates encryption/packing
+  if (!mimetype.startsWith('image/')) {
+    let freq = new Array(256).fill(0);
+    for (let i = 0; i < buffer.length; i++) freq[buffer[i]]++;
+    let entropy = 0;
+    for (const f of freq) {
+      if (f > 0) {
+        const p = f / buffer.length;
+        entropy -= p * Math.log2(p);
+      }
+    }
+    if (entropy > 7.2 && buffer.length > 1024) {
+      findings.push({ type: 'entropy', name: 'High Entropy Content', severity: 'medium', entropy: entropy.toFixed(2) });
+    }
+  }
+
+  // Content pattern scan for text files
+  if (mimetype.startsWith('text/') || mimetype === 'application/json') {
+    const content = buffer.toString('utf8', 0, Math.min(buffer.length, 65536));
+    for (const pattern of SUSPICIOUS_PATTERNS) {
+      if (pattern.test(content)) {
+        findings.push({ type: 'pattern', name: 'Suspicious Code Pattern', severity: 'high', pattern: pattern.source.slice(0, 50) });
+      }
+    }
+  }
+
+  return {
+    filename,
+    clean: findings.length === 0,
+    findings,
+    scannedAt: Date.now(),
+    size: buffer.length
+  };
+}
+
+// ================================================
 // SOCKET.IO WITH ENCRYPTION
 // ================================================
 const io = new Server(httpServer, {
@@ -275,6 +557,7 @@ const io = new Server(httpServer, {
   },
   pingTimeout: 60000
 });
+global._io = io;
 
 // ================================================
 // MIDDLEWARE STACK
@@ -331,11 +614,17 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Request ID and timing
+// Request ID, timing, and network monitoring
 app.use((req, res, next) => {
   req.requestId = uuidv4();
   req.startTime = Date.now();
   res.setHeader('X-Request-ID', req.requestId);
+  const bytesIn = parseInt(req.headers['content-length'] || '0', 10);
+  networkMonitor.recordRequest(req, res, bytesIn);
+  res.on('finish', () => {
+    const bytesOut = parseInt(res.getHeader('content-length') || '0', 10);
+    networkMonitor.recordResponse(res, bytesOut);
+  });
   next();
 });
 
@@ -343,6 +632,7 @@ app.use((req, res, next) => {
 app.use((req, res, next) => {
   const threats = security.detectThreat(req);
   if (threats.some(t => t.severity === 'critical')) {
+    networkMonitor.recordBlocked();
     security.logAudit('REQUEST_BLOCKED', {
       ip: req.ip,
       path: req.path,
@@ -441,8 +731,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-pro';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -869,33 +1158,154 @@ app.get('/api/security/audit', (req, res) => {
   res.json({ logs, total: security.auditLog.length });
 });
 
-// Comprehensive security dashboard endpoint (for all platforms)
+// Comprehensive security dashboard — real data from audit log + last scan
 app.get('/api/security/dashboard', async (req, res) => {
   try {
     const status = security.getSecurityStatus();
-    const recentLogs = security.auditLog.slice(-10);
-    const threatsSummary = recentLogs.filter(l => l.type.includes('THREAT') || l.type.includes('ATTACK'));
-    
+    const allLogs = security.auditLog;
+    const threats = allLogs
+      .filter(l => l.event === 'THREAT_DETECTED' || l.event === 'REQUEST_BLOCKED')
+      .slice(-20)
+      .reverse()
+      .map(l => ({
+        type: l.details?.threats?.[0]?.type || l.event,
+        severity: l.details?.threats?.[0]?.severity || 'medium',
+        status: l.event === 'REQUEST_BLOCKED' ? 'blocked' : 'detected',
+        ip: l.details?.ip || 'unknown',
+        timestamp: l.timestamp
+      }));
+
+    const malwareEvents = allLogs
+      .filter(l => l.event === 'MALWARE_DETECTED')
+      .slice(-10)
+      .reverse();
+
+    const recentActivity = allLogs.slice(-20).reverse();
+    const netMetrics = networkMonitor.getMetrics();
+
+    // Compute score: start at 100, deduct for open issues
+    let score = 100;
+    if (!process.env.ENCRYPTION_SECRET) score -= 15;
+    if (!process.env.JWT_SECRET) score -= 10;
+    if (process.env.NODE_ENV !== 'production') score -= 5;
+    score -= Math.min(30, threats.filter(t => t.severity === 'critical').length * 5);
+    score -= Math.min(15, malwareEvents.length * 3);
+    score = Math.max(0, score);
+
     res.json({
-      overallScore: status.securityScore || 92,
+      overallScore: score,
       encryptionStatus: 'AES-256-GCM',
       encryptionActive: true,
+      algorithm: security.algorithm,
       lastScanTime: security.lastScan,
-      vulnerabilities: [
-        { id: 1, name: 'Outdated Dependencies', severity: 'medium', status: 'warning' },
-        { id: 2, name: 'API Key Exposure Risk', severity: 'low', status: 'info' },
-        { id: 3, name: 'TLS/SSL Configuration', severity: 'high', status: 'resolved' }
-      ],
-      threats: threatsSummary.slice(0, 5).map(log => ({
-        type: log.type,
-        status: 'blocked',
-        timestamp: log.timestamp
-      })),
-      recentActivity: recentLogs.slice(0, 10)
+      threats,
+      malwareEvents,
+      recentActivity,
+      network: netMetrics,
+      auditLogSize: allLogs.length,
+      threatsBlocked: status.threatsBlocked,
+      patchesApplied: status.patchesApplied
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+// Real-time network metrics endpoint
+app.get('/api/security/network', (req, res) => {
+  res.json(networkMonitor.getMetrics());
+});
+
+// ECDH key exchange — Step 1: server generates keypair for session
+app.post('/api/crypto/ecdh/init', (req, res) => {
+  const sessionId = req.body?.sessionId || uuidv4();
+  const result = ecdhExchange.initSession(sessionId);
+  security.logAudit('ECDH_INIT', { sessionId });
+  res.json(result);
+});
+
+// ECDH key exchange — Step 2: client sends its public key, server derives shared secret
+app.post('/api/crypto/ecdh/complete', (req, res) => {
+  const { sessionId, clientPublicKey } = req.body || {};
+  if (!sessionId || !clientPublicKey) {
+    return res.status(400).json({ error: 'sessionId and clientPublicKey required' });
+  }
+  try {
+    const derivedKeyHex = ecdhExchange.deriveSharedSecret(sessionId, clientPublicKey);
+    security.logAudit('ECDH_COMPLETE', { sessionId });
+    // Return first 8 chars as fingerprint only — never the key itself
+    res.json({ sessionId, fingerprint: derivedKeyHex.slice(0, 16), established: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Encrypt data using established ECDH session key (M2M)
+app.post('/api/crypto/encrypt', (req, res) => {
+  const { sessionId, data } = req.body || {};
+  if (!sessionId || data === undefined) {
+    return res.status(400).json({ error: 'sessionId and data required' });
+  }
+  try {
+    const encrypted = ecdhExchange.encryptWithSession(sessionId, data);
+    res.json({ sessionId, encrypted });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Decrypt data using established ECDH session key (M2M)
+app.post('/api/crypto/decrypt', (req, res) => {
+  const { sessionId, encrypted } = req.body || {};
+  if (!sessionId || !encrypted) {
+    return res.status(400).json({ error: 'sessionId and encrypted payload required' });
+  }
+  try {
+    const decrypted = ecdhExchange.decryptWithSession(sessionId, encrypted);
+    res.json({ sessionId, data: decrypted });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Prometheus metrics endpoint
+app.get('/metrics', (req, res) => {
+  const metrics = networkMonitor.getMetrics();
+  const secStatus = security.getSecurityStatus();
+  const lines = [
+    '# HELP nexus_requests_total Total HTTP requests',
+    '# TYPE nexus_requests_total counter',
+    `nexus_requests_total ${metrics.totalRequests}`,
+    '# HELP nexus_requests_blocked_total Blocked requests (threats)',
+    '# TYPE nexus_requests_blocked_total counter',
+    `nexus_requests_blocked_total ${metrics.blockedRequests}`,
+    '# HELP nexus_unique_ips_total Unique IPs seen',
+    '# TYPE nexus_unique_ips_total gauge',
+    `nexus_unique_ips_total ${metrics.uniqueIPs}`,
+    '# HELP nexus_bytes_in_total Total bytes received',
+    '# TYPE nexus_bytes_in_total counter',
+    `nexus_bytes_in_total ${metrics.bytesIn}`,
+    '# HELP nexus_bytes_out_total Total bytes sent',
+    '# TYPE nexus_bytes_out_total counter',
+    `nexus_bytes_out_total ${metrics.bytesOut}`,
+    '# HELP nexus_threats_blocked_total Unique threat IPs blocked',
+    '# TYPE nexus_threats_blocked_total gauge',
+    `nexus_threats_blocked_total ${secStatus.threatsBlocked}`,
+    '# HELP nexus_audit_log_size Audit log entries',
+    '# TYPE nexus_audit_log_size gauge',
+    `nexus_audit_log_size ${secStatus.auditLogSize}`,
+    '# HELP nexus_uptime_seconds Process uptime',
+    '# TYPE nexus_uptime_seconds gauge',
+    `nexus_uptime_seconds ${metrics.uptime.toFixed(2)}`,
+    '# HELP nexus_memory_heap_used_bytes Heap used',
+    '# TYPE nexus_memory_heap_used_bytes gauge',
+    `nexus_memory_heap_used_bytes ${metrics.memUsage.heapUsed}`,
+    '# HELP nexus_cpu_load_1m CPU load average 1 minute',
+    '# TYPE nexus_cpu_load_1m gauge',
+    `nexus_cpu_load_1m ${metrics.cpuLoad[0].toFixed(4)}`
+  ];
+  res.set('Content-Type', 'text/plain; version=0.0.4');
+  res.send(lines.join('\n') + '\n');
 });
 
 // Security alerts endpoint
@@ -1051,16 +1461,31 @@ app.post('/api/workflows/:workflowId/execute', async (req, res) => {
   }
 });
 
-// File upload
+// File upload with malware scanning
 app.post('/api/upload', upload.array('files', 10), (req, res) => {
   const files = req.files.map(file => {
+    const scanResult = scanFileForMalware(file.buffer, file.mimetype, file.originalname);
+    if (!scanResult.clean) {
+      security.logAudit('MALWARE_DETECTED', {
+        filename: file.originalname,
+        findings: scanResult.findings,
+        ip: req.ip
+      });
+      if (global._io) {
+        global._io.emit('security:malware', { ...scanResult, ip: req.ip });
+      }
+    }
     const encrypted = security.encrypt(file.buffer.toString('base64'));
     return {
       id: uuidv4(),
       name: file.originalname,
       type: file.mimetype,
       size: file.size,
-      encrypted: true
+      encrypted: true,
+      scanResult: {
+        clean: scanResult.clean,
+        findings: scanResult.findings
+      }
     };
   });
   res.json({ files });
@@ -1116,16 +1541,27 @@ io.use((socket, next) => {
 });
 
 io.on('connection', (socket) => {
-  console.log(`Client connected: ${socket.id}`);
   security.logAudit('SOCKET_CONNECT', { socketId: socket.id, userId: socket.userId });
 
+  // Send initial network metrics to newly connected client
+  socket.emit('security:network', networkMonitor.getMetrics());
+
+  // Subscribe to security monitoring room
+  socket.on('security:subscribe', () => {
+    socket.join('security-room');
+    socket.emit('security:network', networkMonitor.getMetrics());
+  });
+
+  socket.on('security:unsubscribe', () => {
+    socket.leave('security-room');
+  });
+
   // Voice call handling
-  socket.on('voice:start', (data) => {
+  socket.on('voice:start', () => {
     socket.broadcast.emit('voice:started', { userId: socket.userId });
   });
 
   socket.on('voice:data', (data) => {
-    // Encrypt voice data
     const encrypted = security.encrypt(JSON.stringify(data));
     socket.broadcast.emit('voice:data', encrypted);
   });
@@ -1134,7 +1570,7 @@ io.on('connection', (socket) => {
     socket.broadcast.emit('voice:ended', { userId: socket.userId });
   });
 
-  // Real-time chat
+  // Real-time encrypted chat
   socket.on('chat:message', (data) => {
     const encrypted = security.encrypt(JSON.stringify(data));
     socket.broadcast.emit('chat:message', encrypted);
@@ -1149,6 +1585,11 @@ io.on('connection', (socket) => {
     security.logAudit('SOCKET_DISCONNECT', { socketId: socket.id });
   });
 });
+
+// Broadcast real-time network metrics every 5 seconds to security room
+setInterval(() => {
+  io.to('security-room').emit('security:network', networkMonitor.getMetrics());
+}, 5000);
 
 // ================================================
 // AUTO-PATCHING SCHEDULER

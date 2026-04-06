@@ -202,19 +202,89 @@ export class SecurityService {
   }
 
   /**
+   * Get real-time network metrics
+   */
+  async getNetworkMetrics() {
+    try {
+      const response = await fetch(`${this.apiBaseUrl}/security/network`);
+      if (!response.ok) throw new Error('Failed to fetch network metrics');
+      return await response.json();
+    } catch (error) {
+      console.error('Network metrics error:', error);
+      return null;
+    }
+  }
+
+  /**
+   * ECDH key exchange — Step 1: initialize session (server returns its public key)
+   */
+  async ecdhInit(sessionId) {
+    try {
+      const response = await fetch(`${this.apiBaseUrl}/crypto/ecdh/init`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId })
+      });
+      if (!response.ok) throw new Error('ECDH init failed');
+      return await response.json();
+    } catch (error) {
+      console.error('ECDH init error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * ECDH key exchange — Step 2: complete exchange with client's public key
+   */
+  async ecdhComplete(sessionId, clientPublicKey) {
+    try {
+      const response = await fetch(`${this.apiBaseUrl}/crypto/ecdh/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, clientPublicKey })
+      });
+      if (!response.ok) throw new Error('ECDH exchange failed');
+      return await response.json();
+    } catch (error) {
+      console.error('ECDH complete error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Client-side ECDH: generate keypair in browser using Web Crypto API
+   * Returns { publicKeyB64, privateKey } for P2P use
+   */
+  async generateClientECDHKeypair() {
+    if (typeof window === 'undefined' || !window.crypto?.subtle) {
+      throw new Error('Web Crypto API not available');
+    }
+    const keyPair = await window.crypto.subtle.generateKey(
+      { name: 'ECDH', namedCurve: 'P-256' },
+      true,
+      ['deriveKey', 'deriveBits']
+    );
+    const publicKeyRaw = await window.crypto.subtle.exportKey('raw', keyPair.publicKey);
+    const publicKeyB64 = btoa(String.fromCharCode(...new Uint8Array(publicKeyRaw)));
+    return { publicKeyB64, keyPair };
+  }
+
+  /**
    * Export security report
    */
   async exportReport() {
     const dashboard = await this.getDashboard();
     const alerts = await this.getAlerts();
     const logs = await this.getAuditLogs(100);
-    
+    const network = await this.getNetworkMetrics();
+
     return {
       generatedAt: new Date().toISOString(),
       platform: this.getPlatform(),
       dashboard,
       alerts,
       auditLogs: logs,
+      network,
       encryptionHealth: await this.getEncryptionHealth()
     };
   }

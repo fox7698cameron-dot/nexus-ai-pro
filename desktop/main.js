@@ -429,31 +429,31 @@ process.on('uncaughtException', (error) => {
   dialog.showErrorBox('Error', error.message);
 });
 
-// Auto-update (production only)
+// Auto-update (production only) — use dynamic import for ES module compatibility
 if (!isDev && process.platform !== 'linux') {
-  const { autoUpdater } = require('electron-updater');
+  import('electron-updater').then(({ autoUpdater }) => {
+    autoUpdater.checkForUpdatesAndNotify();
 
-  autoUpdater.checkForUpdatesAndNotify();
-
-  autoUpdater.on('update-available', () => {
-    dialog.showMessageBox(mainWindow, {
-      type: 'info',
-      title: 'Update Available',
-      message: 'A new version is available. It will be downloaded in the background.',
-      buttons: ['OK']
+    autoUpdater.on('update-available', () => {
+      dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: 'Update Available',
+        message: 'A new version is available. It will be downloaded in the background.',
+        buttons: ['OK']
+      });
     });
-  });
 
-  autoUpdater.on('update-downloaded', () => {
-    dialog.showMessageBox(mainWindow, {
-      type: 'info',
-      title: 'Update Ready',
-      message: 'Update downloaded. The application will restart to install the update.',
-      buttons: ['Restart Now', 'Later']
-    }).then((result) => {
-      if (result.response === 0) {
-        autoUpdater.quitAndInstall();
-      }
+    autoUpdater.on('update-downloaded', () => {
+      dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: 'Update Ready',
+        message: 'Update downloaded. The application will restart to install the update.',
+        buttons: ['Restart Now', 'Later']
+      }).then((result) => {
+        if (result.response === 0) autoUpdater.quitAndInstall();
+      });
     });
+  }).catch((err) => {
+    console.warn('Auto-updater not available:', err.message);
   });
 }

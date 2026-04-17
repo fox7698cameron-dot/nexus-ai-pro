@@ -1,6 +1,9 @@
+// nexus-ai-pro/main.jsx | 2026-04-17
+// Copyright © 2025-2026 Cameron Fox. All rights reserved.
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import NexusAI from './app.jsx';
+import App from './src/App.jsx';
+import './src/i18n/index.js';
 
 // Security: Disable React DevTools in production
 if (typeof window.__REACT_DEVTOOLS_GLOBAL_HOOK__ === 'object') {
@@ -84,7 +87,7 @@ const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
     <ErrorBoundary>
-      <NexusAI />
+      <App />
     </ErrorBoundary>
   </React.StrictMode>
 );

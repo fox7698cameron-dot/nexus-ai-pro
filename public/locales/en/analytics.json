@@ -1,0 +1,20 @@
+{
+  "title": "Social Analytics",
+  "subtitle": "Real-time cross-platform insights",
+  "connect": "Connect Platform",
+  "metrics": {
+    "followers": "Followers",
+    "views": "Views",
+    "likes": "Likes",
+    "reach": "Reach",
+    "engagement": "Engagement",
+    "retention": "View Retention",
+    "shares": "Shares",
+    "comments": "Comments"
+  },
+  "charts": {
+    "reachOverTime": "Reach Over Time",
+    "engagementByPlatform": "Engagement Rate by Platform",
+    "retentionCurve": "View Retention Curve"
+  }
+}

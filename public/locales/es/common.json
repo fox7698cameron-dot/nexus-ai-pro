@@ -1,0 +1,30 @@
+{
+  "app": {
+    "name": "Nexus AI Pro",
+    "tagline": "Plataforma de IA cifrada de grado militar"
+  },
+  "nav": {
+    "chat": "Chat",
+    "analytics": "Analítica",
+    "security": "Seguridad",
+    "projects": "Proyectos",
+    "checkout": "Mejorar",
+    "admin": "Admin",
+    "logout": "Cerrar sesión"
+  },
+  "common": {
+    "loading": "Cargando…",
+    "error": "Ocurrió un error",
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "delete": "Eliminar",
+    "edit": "Editar",
+    "create": "Crear",
+    "search": "Buscar",
+    "refresh": "Actualizar",
+    "back": "Volver",
+    "next": "Siguiente",
+    "close": "Cerrar",
+    "confirm": "Confirmar"
+  }
+}

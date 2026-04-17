@@ -1,7 +1,7 @@
 {
   "name": "nexus-ai-pro",
-  "version": "2.0.0",
-  "description": "Military-grade encrypted AI platform with multi-model support, game/app development, n8n-style automation, and customizable avatars",
+  "version": "2.1.0",
+  "description": "Enterprise AI platform with multi-model support, real-time analytics, game/app development, social insights, and military-grade security",
   "type": "module",
   "main": "server.js",
   "author": {
@@ -20,15 +20,16 @@
     "build:mobile": "npm run build && npm run cap:sync",
     "start": "node server.js",
     "preview": "vite preview",
-    "security:scan": "node -e \"import('./server.js').then(m => m.security?.scanVulnerabilities())\"",
-    "security:patch": "node -e \"import('./server.js').then(m => m.security?.autoPatch())\"",
-    "lint": "eslint . --ext .js,.jsx",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "test": "vitest",
+    "test:run": "vitest run",
     "test:security": "vitest run --grep security",
+    "test:coverage": "vitest run --coverage",
+    "security:scan": "node -e \"import('./server.js')\"",
     "docker:build": "docker build -t nexus-ai-pro .",
     "docker:run": "docker run -p 3001:3001 --env-file .env nexus-ai-pro",
     "docker:compose": "docker-compose up -d",
-    "cap:init": "cap init",
     "cap:add:ios": "cap add ios",
     "cap:add:android": "cap add android",
     "cap:sync": "cap sync",
@@ -40,12 +41,7 @@
     "cap:run:android": "cap run android",
     "cap:build:ios": "npm run build && cap sync ios && cap open ios",
     "cap:build:android": "npm run build && cap sync android && cap open android",
-    "ios:dev": "cd \"nexus ai pro\" && xcodebuild -workspace \"nexus ai pro.xcworkspace\" -scheme \"nexus ai pro\" -configuration Debug",
-    "ios:build": "cd \"nexus ai pro\" && xcodebuild -workspace \"nexus ai pro.xcworkspace\" -scheme \"nexus ai pro\" -configuration Release archive",
-    "android:dev": "cd android && ./gradlew assembleDebug",
-    "android:build": "cd android && ./gradlew assembleRelease",
-    "pwa:build": "vite build --mode pwa",
-    "copyright:add": "node scripts/add-copyright.js"
+    "pwa:build": "vite build --mode pwa"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -69,21 +65,31 @@
     "express": "^4.21.2",
     "express-rate-limit": "^7.5.0",
     "helmet": "^8.0.0",
+    "i18next": "^23.16.8",
+    "i18next-browser-languagedetector": "^8.0.2",
+    "i18next-http-backend": "^3.0.2",
+    "jexl": "^2.3.0",
     "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.469.0",
     "multer": "^2.0.2",
     "node-fetch": "^3.3.2",
     "openai": "^4.77.0",
+    "otplib": "^12.0.1",
+    "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-i18next": "^15.4.1",
+    "react-router-dom": "^7.1.1",
+    "recharts": "^2.15.0",
     "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
+    "stripe": "^17.4.0",
     "uuid": "^11.0.4",
     "winston": "^3.17.0",
-    "zod": "^3.24.1",
-    "jexl": "^2.3.0"
+    "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@capacitor/cli": "^6.2.0",
+    "@capacitor/cli": "^8.3.1",
     "@eslint/js": "^9.39.2",
     "@types/node": "^22.10.5",
     "@vitejs/plugin-react": "^4.3.4",
@@ -95,47 +101,36 @@
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "vite": "^6.0.0",
-    "vite-plugin-pwa": "^1.2.0",
-    "vitest": "^4.0.16",
-    "workbox-window": "^7.3.0"
+    "vitest": "^4.0.16"
   },
   "overrides": {
-    "esbuild": "^0.24.2",
-    "rollup": "^4.29.1"
+    "esbuild": "^0.25.0",
+    "rollup": "^4.29.1",
+    "brace-expansion": "^2.0.1",
+    "minimatch": "^10.2.5",
+    "picomatch": "^4.0.2",
+    "flatted": "^3.4.2",
+    "ajv": "^8.18.0",
+    "lodash": "^4.17.21",
+    "path-to-regexp": "^8.0.0",
+    "@xmldom/xmldom": "^0.8.12"
   },
   "capacitor": {
     "appId": "com.cameronfox.nexusaipro",
     "appName": "Nexus AI Pro",
     "webDir": "dist",
     "plugins": {
-      "SplashScreen": {
-        "launchShowDuration": 0
-      },
-      "BiometricAuth": {
-        "allowDeviceCredential": true
-      }
+      "SplashScreen": { "launchShowDuration": 0 },
+      "BiometricAuth": { "allowDeviceCredential": true }
     }
   },
   "engines": {
     "node": ">=18.0.0"
   },
   "keywords": [
-    "ai",
-    "chatbot",
-    "claude",
-    "gpt-4",
-    "gemini",
-    "multi-model",
-    "encryption",
-    "security",
-    "automation",
-    "workflow",
-    "game-development",
-    "app-development",
-    "mobile",
-    "ios",
-    "android",
-    "pwa",
-    "capacitor"
+    "ai", "analytics", "security", "multi-model", "enterprise",
+    "game-development", "ar-vr", "social-analytics", "stripe",
+    "2fa", "mfa", "biometrics", "real-time", "cross-platform",
+    "ios", "android", "electron", "pwa", "capacitor"
   ]
 }

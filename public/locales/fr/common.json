@@ -1,0 +1,30 @@
+{
+  "app": {
+    "name": "Nexus AI Pro",
+    "tagline": "Plateforme IA chiffrée de grade militaire"
+  },
+  "nav": {
+    "chat": "Chat",
+    "analytics": "Analytique",
+    "security": "Sécurité",
+    "projects": "Projets",
+    "checkout": "Mettre à niveau",
+    "admin": "Admin",
+    "logout": "Se déconnecter"
+  },
+  "common": {
+    "loading": "Chargement…",
+    "error": "Une erreur s'est produite",
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "delete": "Supprimer",
+    "edit": "Modifier",
+    "create": "Créer",
+    "search": "Rechercher",
+    "refresh": "Actualiser",
+    "back": "Retour",
+    "next": "Suivant",
+    "close": "Fermer",
+    "confirm": "Confirmer"
+  }
+}

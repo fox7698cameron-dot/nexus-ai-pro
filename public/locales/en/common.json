@@ -1,0 +1,36 @@
+{
+  "app": {
+    "name": "Nexus AI Pro",
+    "tagline": "Military-grade encrypted AI platform"
+  },
+  "nav": {
+    "chat": "Chat",
+    "analytics": "Analytics",
+    "security": "Security",
+    "projects": "Projects",
+    "checkout": "Upgrade",
+    "admin": "Admin",
+    "logout": "Sign Out"
+  },
+  "common": {
+    "loading": "Loading…",
+    "error": "An error occurred",
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "search": "Search",
+    "refresh": "Refresh",
+    "back": "Back",
+    "next": "Next",
+    "close": "Close",
+    "confirm": "Confirm"
+  },
+  "status": {
+    "active": "Active",
+    "inactive": "Inactive",
+    "pending": "Pending",
+    "suspended": "Suspended"
+  }
+}

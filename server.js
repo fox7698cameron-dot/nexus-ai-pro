@@ -1,6 +1,8 @@
 // ================================================
-// NEXUS AI PRO - Enhanced Backend Server
+// NEXUS AI PRO - Enhanced Backend Server v2.1.0
 // Military-Grade Security & Multi-Model AI Platform
+// Copyright © 2025-2026 Cameron Fox. All rights reserved.
+// nexus-ai-pro/server.js | 2026-04-17
 // ================================================
 
 import express from 'express';
@@ -15,6 +17,15 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+
+// Route modules — no retry/backoff logic; fail fast, let clients handle retry policy
+import authRoutes     from './src/routes/auth.routes.js';
+import analyticsRoutes from './src/routes/analytics.routes.js';
+import paymentRoutes  from './src/routes/payments.routes.js';
+import projectRoutes  from './src/routes/projects.routes.js';
+import securityRoutes, { recordNetworkEvent } from './src/routes/security.routes.js';
+import adminRoutes    from './src/routes/admin.routes.js';
+import { auditMiddleware } from './src/services/audit.service.js';
 
 dotenv.config();
 
@@ -441,8 +452,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-pro';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +826,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -831,7 +842,22 @@ class WorkflowEngine {
 const workflowEngine = new WorkflowEngine();
 
 // ================================================
-// API ROUTES
+// AUDIT MIDDLEWARE (minimal, labeled)
+// ================================================
+app.use(auditMiddleware);
+
+// ================================================
+// ROUTE MODULES
+// ================================================
+app.use('/api/auth',      authRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/payments',  paymentRoutes);
+app.use('/api/projects',  projectRoutes);
+app.use('/api/security',  securityRoutes);
+app.use('/api/admin',     adminRoutes);
+
+// ================================================
+// API ROUTES (legacy + core)
 // ================================================
 
 // Health check
@@ -843,83 +869,12 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Security endpoints
-app.get('/api/security/status', (req, res) => {
-  res.json(security.getSecurityStatus());
-});
-
-app.post('/api/security/scan', async (req, res) => {
-  const results = await security.scanVulnerabilities();
-  res.json(results);
-});
-
-app.post('/api/security/patch', async (req, res) => {
-  const patches = await security.autoPatch();
-  res.json({ patches });
-});
-
-app.post('/api/security/rotate-keys', (req, res) => {
-  const success = security.rotateKeys();
-  res.json({ success });
-});
-
-app.get('/api/security/audit', (req, res) => {
-  const { limit = 100, offset = 0 } = req.query;
-  const logs = security.auditLog.slice(-limit - offset, -offset || undefined);
-  res.json({ logs, total: security.auditLog.length });
-});
-
-// Comprehensive security dashboard endpoint (for all platforms)
-app.get('/api/security/dashboard', async (req, res) => {
-  try {
-    const status = security.getSecurityStatus();
-    const recentLogs = security.auditLog.slice(-10);
-    const threatsSummary = recentLogs.filter(l => l.type.includes('THREAT') || l.type.includes('ATTACK'));
-    
-    res.json({
-      overallScore: status.securityScore || 92,
-      encryptionStatus: 'AES-256-GCM',
-      encryptionActive: true,
-      lastScanTime: security.lastScan,
-      vulnerabilities: [
-        { id: 1, name: 'Outdated Dependencies', severity: 'medium', status: 'warning' },
-        { id: 2, name: 'API Key Exposure Risk', severity: 'low', status: 'info' },
-        { id: 3, name: 'TLS/SSL Configuration', severity: 'high', status: 'resolved' }
-      ],
-      threats: threatsSummary.slice(0, 5).map(log => ({
-        type: log.type,
-        status: 'blocked',
-        timestamp: log.timestamp
-      })),
-      recentActivity: recentLogs.slice(0, 10)
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Security alerts endpoint
-app.get('/api/security/alerts', (req, res) => {
-  const alerts = security.auditLog
-    .filter(l => l.type.includes('ERROR') || l.type.includes('THREAT') || l.type.includes('ATTACK'))
-    .slice(-20);
-  
-  res.json({
-    alerts,
-    criticalCount: alerts.filter(a => a.severity === 'critical').length,
-    warningCount: alerts.filter(a => a.severity === 'warning').length
-  });
-});
-
-// Encryption health endpoint
+// Legacy security status (non-conflicting with /api/security/* module)
 app.get('/api/security/encryption-health', (req, res) => {
   res.json({
     algorithm: 'AES-256-GCM',
     keyRotationInterval: '24h',
-    lastKeyRotation: security.lastKeyRotation || Date.now(),
-    nextKeyRotation: (security.lastKeyRotation || Date.now()) + 86400000,
     status: 'healthy',
-    certificateExpiry: Date.now() + 30 * 24 * 60 * 60 * 1000
   });
 });
 

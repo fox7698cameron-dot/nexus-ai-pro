@@ -1,5 +1,10 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { AuthProvider } from './src/auth/AuthSystem.jsx';
+import MainApp from './src/MainApp.jsx';
+import './src/i18n/index.js';
+
+// Legacy app still exported for backward compat
 import NexusAI from './app.jsx';
 
 // Security: Disable React DevTools in production
@@ -84,7 +89,9 @@ const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
     <ErrorBoundary>
-      <NexusAI />
+      <AuthProvider>
+        <MainApp />
+      </AuthProvider>
     </ErrorBoundary>
   </React.StrictMode>
 );

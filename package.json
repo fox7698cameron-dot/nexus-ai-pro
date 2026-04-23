@@ -101,7 +101,8 @@
   },
   "overrides": {
     "esbuild": "^0.24.2",
-    "rollup": "^4.29.1"
+    "rollup": "^4.29.1",
+    "glob": ">=9.0.0"
   },
   "capacitor": {
     "appId": "com.cameronfox.nexusaipro",

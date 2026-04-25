@@ -15,6 +15,7 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import { expressCorsOptions, socketCorsOptions } from './cors.config.js';
 
 dotenv.config();
 
@@ -268,21 +269,8 @@ const security = new SecurityModule();
 // ================================================
 // SOCKET.IO WITH ENCRYPTION
 // ================================================
-// When CORS_ORIGIN is '*', use true (origin reflection) so credentialed
-// requests work — browsers reject Access-Control-Allow-Origin: * with credentials.
-const corsOrigin = (() => {
-  const raw = process.env.CORS_ORIGIN || '*';
-  if (raw === '*') return true;
-  if (raw.includes(',')) return raw.split(',').map(o => o.trim());
-  return raw;
-})();
-
 const io = new Server(httpServer, {
-  cors: {
-    origin: corsOrigin,
-    methods: ['GET', 'POST'],
-    credentials: true
-  },
+  cors: socketCorsOptions,
   pingTimeout: 60000
 });
 
@@ -330,12 +318,7 @@ const authLimiter = rateLimit({
 });
 
 // CORS
-app.use(cors({
-  origin: corsOrigin,
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID']
-}));
+app.use(cors(expressCorsOptions));
 
 // Body parsing with size limits
 app.use(express.json({ limit: '10mb' }));

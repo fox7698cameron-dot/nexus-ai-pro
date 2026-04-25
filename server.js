@@ -268,10 +268,20 @@ const security = new SecurityModule();
 // ================================================
 // SOCKET.IO WITH ENCRYPTION
 // ================================================
+// When CORS_ORIGIN is '*', use true (origin reflection) so credentialed
+// requests work — browsers reject Access-Control-Allow-Origin: * with credentials.
+const corsOrigin = (() => {
+  const raw = process.env.CORS_ORIGIN || '*';
+  if (raw === '*') return true;
+  if (raw.includes(',')) return raw.split(',').map(o => o.trim());
+  return raw;
+})();
+
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.CORS_ORIGIN || '*',
-    methods: ['GET', 'POST']
+    origin: corsOrigin,
+    methods: ['GET', 'POST'],
+    credentials: true
   },
   pingTimeout: 60000
 });
@@ -321,7 +331,7 @@ const authLimiter = rateLimit({
 
 // CORS
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*',
+  origin: corsOrigin,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID']
@@ -858,7 +868,7 @@ app.post('/api/security/patch', async (req, res) => {
   res.json({ patches });
 });
 
-app.post('/api/security/rotate-keys', (req, res) => {
+app.post('/api/security/rotate-keys', authLimiter, (req, res) => {
   const success = security.rotateKeys();
   res.json({ success });
 });
@@ -1187,6 +1197,15 @@ app.use((err, req, res, next) => {
 // ================================================
 
 const PORT = process.env.PORT || 3001;
+
+// Warn on startup if security secrets are still placeholder values
+const placeholderPattern = /generate|your_|changeme|secret_here/i;
+['ENCRYPTION_SECRET', 'ENCRYPTION_SALT', 'JWT_SECRET'].forEach(key => {
+  const val = process.env[key];
+  if (!val || placeholderPattern.test(val)) {
+    console.warn(`[SECURITY WARNING] ${key} is not set or uses a placeholder value. Run: openssl rand -hex 32`);
+  }
+});
 
 httpServer.listen(PORT, () => {
   console.log(`

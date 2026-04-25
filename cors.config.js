@@ -8,7 +8,13 @@
 //   tells the cors library to echo back the requesting origin, which is
 //   valid with credentials while still accepting any origin in development.
 //   In production, set CORS_ORIGIN to your actual domain(s).
+//
+// dotenv is loaded here because ES module imports are evaluated before the
+// server.js body runs, so process.env would be empty without this call.
 // ================================================
+
+import dotenv from 'dotenv';
+dotenv.config();
 
 const ALLOWED_HEADERS = ['Content-Type', 'Authorization', 'X-Request-ID'];
 

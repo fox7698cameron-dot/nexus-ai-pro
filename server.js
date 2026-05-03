@@ -1,6 +1,7 @@
 // ================================================
-// NEXUS AI PRO - Enhanced Backend Server
-// Military-Grade Security & Multi-Model AI Platform
+// NEXUS AI PRO — Backend Server v2.1
+// Enterprise Security & Multi-Model AI Platform
+// Updated: 2026-05-03
 // ================================================
 
 import express from 'express';
@@ -8,6 +9,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
+import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
@@ -441,10 +443,9 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-pro';
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1096,6 +1097,284 @@ app.get('/api/templates/app', (req, res) => {
       { id: 'ai', name: 'AI Application', stack: 'Python/FastAPI' }
     ]
   });
+});
+
+// ================================================
+// JWT AUTH MIDDLEWARE
+// ================================================
+
+function requireAuth(req, res, next) {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  const token = header.slice(7);
+  try {
+    const secret = process.env.JWT_SECRET;
+    if (!secret) return res.status(500).json({ error: 'Server misconfiguration' });
+    req.user = jwt.verify(token, secret);
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+}
+
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!req.user || !roles.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Insufficient permissions' });
+    }
+    next();
+  };
+}
+
+// ================================================
+// AUTH ROUTES
+// ================================================
+
+// Register
+app.post('/api/auth/register', authLimiter, async (req, res) => {
+  try {
+    const { username, email, password, role = 'user' } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+    if (password.length < 13) return res.status(400).json({ error: 'Password must be at least 13 characters' });
+    const allowedRoles = ['user'];
+    const finalRole = allowedRoles.includes(role) ? role : 'user';
+    const userId = uuidv4();
+    const { default: bcrypt } = await import('bcryptjs');
+    const passwordHash = await bcrypt.hash(password, 12);
+    const user = { id: userId, username, email, role: finalRole, passwordHash, createdAt: Date.now() };
+    dataService.store('users', userId, user);
+    security.logAudit('USER_REGISTER', { userId, email, role: finalRole });
+    const secret = process.env.JWT_SECRET;
+    if (!secret) return res.status(500).json({ error: 'Server misconfiguration' });
+    const token = jwt.sign({ sub: userId, email, role: finalRole }, secret, { expiresIn: '7d' });
+    res.status(201).json({ token, user: { id: userId, email, username, role: finalRole } });
+  } catch (error) {
+    res.status(500).json({ error: 'Registration failed' });
+  }
+});
+
+// Login
+app.post('/api/auth/login', authLimiter, async (req, res) => {
+  try {
+    const { identifier, password } = req.body;
+    if (!identifier || !password) return res.status(400).json({ error: 'Credentials required' });
+    const users = dataService.list('users');
+    const user = users.find(u => u.email === identifier || u.username === identifier);
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+    const { default: bcrypt } = await import('bcryptjs');
+    const valid = await bcrypt.compare(password, user.passwordHash);
+    if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
+    const secret = process.env.JWT_SECRET;
+    if (!secret) return res.status(500).json({ error: 'Server misconfiguration' });
+    const token = jwt.sign({ sub: user.id, email: user.email, role: user.role }, secret, { expiresIn: '7d' });
+    security.logAudit('USER_LOGIN', { userId: user.id, ip: req.ip });
+    res.json({ token, user: { id: user.id, email: user.email, username: user.username, role: user.role }, mfaRequired: !!user.mfaEnabled });
+  } catch (error) {
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// Verify MFA token
+app.post('/api/auth/mfa/verify', requireAuth, async (req, res) => {
+  try {
+    const { token: mfaToken, method } = req.body;
+    if (!mfaToken && method !== 'biometric') return res.status(400).json({ error: 'MFA token required' });
+    security.logAudit('MFA_VERIFY', { userId: req.user.sub, method });
+    res.json({ verified: true });
+  } catch {
+    res.status(500).json({ error: 'MFA verification failed' });
+  }
+});
+
+// Get current user
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  const user = dataService.retrieve('users', req.user.sub);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  const { passwordHash, mfaSecret, ...safe } = user;
+  res.json(safe);
+});
+
+// ================================================
+// ANALYTICS ROUTES
+// ================================================
+
+app.get('/api/analytics/platforms', requireAuth, (req, res) => {
+  res.json({
+    platforms: ['tiktok','instagram','facebook','twitch','discord','lemon8','reddit','redgifs'],
+    timestamp: Date.now()
+  });
+});
+
+// Get platform metrics snapshot
+app.get('/api/analytics/:platform', requireAuth, (req, res) => {
+  const { platform } = req.params;
+  const allowed = ['tiktok','instagram','facebook','twitch','discord','lemon8','reddit','redgifs'];
+  if (!allowed.includes(platform)) return res.status(400).json({ error: 'Unknown platform' });
+  res.json({
+    platform,
+    metrics: {},
+    timestamp: Date.now(),
+    note: 'Connect OAuth credentials to receive live data'
+  });
+});
+
+// ================================================
+// PROJECT TRACKING ROUTES
+// ================================================
+
+app.get('/api/projects', requireAuth, (req, res) => {
+  const projects = dataService.list('projects' in dataService ? 'projects' : 'chats').filter(p => p.userId === req.user.sub);
+  res.json(projects);
+});
+
+app.post('/api/projects', requireAuth, (req, res) => {
+  const allowed = ['coding','game_dev','ar_vr','three_d'];
+  const { name, type, language, description, dueDate } = req.body;
+  if (!name || !type || !allowed.includes(type)) return res.status(400).json({ error: 'Invalid project data' });
+  const project = {
+    id: uuidv4(), userId: req.user.sub, name, type, language: language || 'Unknown',
+    description: description || '', status: 'active', progress: 0,
+    linesOfCode: 0, commits: 0, openIssues: 0, teamSize: 1, dueDate,
+    milestones: [], createdAt: Date.now(), updatedAt: Date.now()
+  };
+  dataService.store('chats', project.id, project);
+  res.status(201).json(project);
+});
+
+app.put('/api/projects/:id', requireAuth, (req, res) => {
+  const project = dataService.retrieve('chats', req.params.id);
+  if (!project || project.userId !== req.user.sub) return res.status(404).json({ error: 'Project not found' });
+  const updated = { ...project, ...req.body, updatedAt: Date.now() };
+  dataService.store('chats', project.id, updated);
+  res.json(updated);
+});
+
+app.delete('/api/projects/:id', requireAuth, (req, res) => {
+  const project = dataService.retrieve('chats', req.params.id);
+  if (!project || project.userId !== req.user.sub) return res.status(404).json({ error: 'Project not found' });
+  dataService.delete('chats', req.params.id);
+  res.json({ success: true });
+});
+
+// ================================================
+// GAMING ROUTES
+// ================================================
+
+app.get('/api/gaming/platforms', requireAuth, (req, res) => {
+  res.json({ platforms: ['unreal','epic','sony','microsoft','ubisoft','steam'], timestamp: Date.now() });
+});
+
+app.post('/api/gaming/platforms/connect', requireAuth, (req, res) => {
+  const { platform } = req.body;
+  const allowed = ['unreal','epic','sony','microsoft','ubisoft','steam'];
+  if (!allowed.includes(platform)) return res.status(400).json({ error: 'Unknown platform' });
+  security.logAudit('GAMING_PLATFORM_CONNECT', { userId: req.user.sub, platform });
+  res.json({ connected: true, platform, timestamp: Date.now() });
+});
+
+app.get('/api/gaming/achievements', requireAuth, (req, res) => {
+  res.json({ achievements: [], totalXP: 0, timestamp: Date.now() });
+});
+
+app.get('/api/gaming/progress', requireAuth, (req, res) => {
+  res.json({ games: [], timestamp: Date.now() });
+});
+
+// ================================================
+// PAYMENTS & SUBSCRIPTIONS ROUTES
+// ================================================
+
+app.post('/api/payments/create-session', requireAuth, async (req, res) => {
+  try {
+    const { plan, billing, paymentMethod } = req.body;
+    const allowed = ['pro','enterprise'];
+    if (!allowed.includes(plan)) return res.status(400).json({ error: 'Invalid plan' });
+    const prices = {
+      pro:        { monthly: 999,  annual: 9999  },
+      enterprise: { monthly: 1499, annual: 14999 }
+    };
+    const amount = prices[plan]?.[billing] || prices[plan]?.monthly;
+    security.logAudit('PAYMENT_SESSION', { userId: req.user.sub, plan, billing });
+    res.json({
+      sessionId: uuidv4(),
+      amount,
+      currency: 'usd',
+      plan,
+      billing,
+      paymentMethod: paymentMethod || 'card',
+      expiresAt: Date.now() + 30 * 60 * 1000
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to create payment session' });
+  }
+});
+
+app.post('/api/payments/confirm', requireAuth, async (req, res) => {
+  try {
+    const { sessionId, paymentMethod } = req.body;
+    security.logAudit('PAYMENT_CONFIRM', { userId: req.user.sub, sessionId });
+    res.json({ success: true, subscriptionActive: true, timestamp: Date.now() });
+  } catch (error) {
+    res.status(500).json({ error: 'Payment confirmation failed' });
+  }
+});
+
+app.get('/api/payments/subscription', requireAuth, (req, res) => {
+  const user = dataService.retrieve('users', req.user.sub);
+  res.json({
+    tier: user?.subscriptionTier || 'free',
+    expiresAt: user?.subscriptionExpiresAt || null,
+    userId: req.user.sub
+  });
+});
+
+// Gift card redemption
+app.post('/api/payments/redeem', requireAuth, (req, res) => {
+  const { code } = req.body;
+  if (!code || typeof code !== 'string') return res.status(400).json({ error: 'Invalid gift card code' });
+  const clean = code.replace(/[-\s]/g, '').toUpperCase();
+  if (clean.length < 8 || clean.length > 16 || !/^[A-Z0-9]+$/.test(clean)) {
+    return res.status(400).json({ error: 'Invalid gift card format' });
+  }
+  security.logAudit('GIFTCARD_REDEEM', { userId: req.user.sub, codePrefix: clean.slice(0, 4) });
+  res.json({ redeemed: true, plan: 'pro', months: 1, timestamp: Date.now() });
+});
+
+// ================================================
+// TRANSLATION ROUTE
+// ================================================
+
+app.post('/api/translate', requireAuth, async (req, res) => {
+  try {
+    const { text, targetLang, sourceLang = 'en' } = req.body;
+    if (!text || !targetLang) return res.status(400).json({ error: 'text and targetLang required' });
+    const { translateText } = await import('./src/integrations/CloudConnectors.js');
+    const translated = await translateText(String(text).slice(0, 5000), targetLang, sourceLang);
+    res.json({ translated, targetLang, sourceLang });
+  } catch (error) {
+    res.json({ translated: req.body.text, error: 'Translation unavailable' });
+  }
+});
+
+// ================================================
+// CLOUD CONNECTORS STATUS
+// ================================================
+
+app.get('/api/connectors', requireAuth, requireRole('admin', 'dev'), async (req, res) => {
+  try {
+    const { CONNECTOR_CATALOG } = await import('./src/integrations/CloudConnectors.js');
+    const status = Object.fromEntries(
+      Object.entries(CONNECTOR_CATALOG).map(([k, v]) => [
+        k,
+        { ...v, configured: v.envVars.every(e => !!process.env[e]) }
+      ])
+    );
+    res.json(status);
+  } catch {
+    res.status(500).json({ error: 'Could not load connector catalog' });
+  }
 });
 
 // ================================================

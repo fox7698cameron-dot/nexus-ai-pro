@@ -15,6 +15,9 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import authRouter from './src/server/routes/auth.js';
+import subscriptionsRouter from './src/server/routes/subscriptions.js';
+import integrationsRouter from './src/server/routes/integrations.js';
 
 dotenv.config();
 
@@ -441,8 +444,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-2.0-flash-exp';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -806,7 +808,6 @@ class WorkflowEngine {
     if (typeof condition !== 'string' || !condition.trim()) {
       return { conditionResult: false };
     }
-    const { transform } = node.config || {};
     try {
       const result = await Jexl.eval(condition, context);
       return { conditionResult: !!result };
@@ -816,6 +817,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -832,6 +834,24 @@ const workflowEngine = new WorkflowEngine();
 
 // ================================================
 // API ROUTES
+// ================================================
+
+// ================================================
+// ROUTE MODULES
+// ================================================
+
+// Stripe webhook needs raw body — mount before json middleware applies
+app.post('/api/subscriptions/webhook',
+  express.raw({ type: 'application/json' }),
+  (req, res, next) => subscriptionsRouter.handle(req, res, next)
+);
+
+app.use('/api/auth',          authRouter);
+app.use('/api/subscriptions', subscriptionsRouter);
+app.use('/api/integrations',  integrationsRouter);
+
+// ================================================
+// HEALTH CHECK
 // ================================================
 
 // Health check

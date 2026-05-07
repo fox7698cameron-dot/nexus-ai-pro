@@ -80,10 +80,32 @@
     "uuid": "^11.0.4",
     "winston": "^3.17.0",
     "zod": "^3.24.1",
-    "jexl": "^2.3.0"
+    "jexl": "^2.3.0",
+    "stripe": "^17.7.0",
+    "ioredis": "^5.4.2",
+    "@azure/storage-blob": "^12.26.0",
+    "@azure/identity": "^4.6.0",
+    "@aws-sdk/client-s3": "^3.775.0",
+    "@slack/web-api": "^7.9.0",
+    "@octokit/rest": "^21.1.1",
+    "googleapis": "^148.0.0",
+    "speakeasy": "^2.0.0",
+    "qrcode": "^1.5.4",
+    "i18next": "^24.2.3",
+    "otplib": "^12.0.1",
+    "passport": "^0.7.0",
+    "passport-jwt": "^4.0.1",
+    "passport-local": "^1.0.0",
+    "argon2": "^0.43.0",
+    "node-cache": "^5.1.2",
+    "ws": "^8.18.1",
+    "express-validator": "^7.2.1",
+    "node-cron": "^3.0.3",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0"
   },
   "devDependencies": {
-    "@capacitor/cli": "^6.2.0",
+    "@capacitor/cli": "^8.3.1",
     "@eslint/js": "^9.39.2",
     "@types/node": "^22.10.5",
     "@vitejs/plugin-react": "^4.3.4",
@@ -100,8 +122,9 @@
     "workbox-window": "^7.3.0"
   },
   "overrides": {
-    "esbuild": "^0.24.2",
-    "rollup": "^4.29.1"
+    "esbuild": "^0.25.0",
+    "rollup": "^4.29.1",
+    "tar": "^7.5.14"
   },
   "capacitor": {
     "appId": "com.cameronfox.nexusaipro",

@@ -1,6 +1,7 @@
 // ================================================
-// NEXUS AI PRO - Enhanced Backend Server
+// NEXUS AI PRO - Enhanced Backend Server v2.1
 // Military-Grade Security & Multi-Model AI Platform
+// Date: 2026-05-07
 // ================================================
 
 import express from 'express';
@@ -15,6 +16,7 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import jwt from 'jsonwebtoken';
 
 dotenv.config();
 
@@ -441,8 +443,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-2.0-flash';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +817,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -1099,33 +1101,460 @@ app.get('/api/templates/app', (req, res) => {
 });
 
 // ================================================
+// JWT AUTH MIDDLEWARE
+// ================================================
+
+function requireAuth(req, res, next) {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Missing authorization token' });
+  }
+  const token = header.slice(7);
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = payload;
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+}
+
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!req.user || !roles.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Insufficient permissions' });
+    }
+    next();
+  };
+}
+
+// ================================================
+// AUTH ROUTES
+// ================================================
+
+// Lazy-load auth service to avoid circular issues
+let _authService = null;
+async function getAuthService() {
+  if (!_authService) {
+    const { AuthService } = await import('./src/auth/authService.js');
+    _authService = new AuthService();
+  }
+  return _authService;
+}
+
+app.use('/api/auth', authLimiter);
+
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const auth = await getAuthService();
+    const user = await auth.registerUser(req.body);
+    res.status(201).json(user);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const auth = await getAuthService();
+    const result = await auth.loginUser(req.body.email, req.body.password);
+    res.json(result);
+  } catch (err) {
+    res.status(401).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/refresh', async (req, res) => {
+  try {
+    const auth = await getAuthService();
+    const result = await auth.refreshToken(req.body.refreshToken);
+    res.json(result);
+  } catch (err) {
+    res.status(401).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/mfa/setup', requireAuth, async (req, res) => {
+  try {
+    const auth = await getAuthService();
+    const result = await auth.setupMFA(req.user.userId);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/mfa/verify', requireAuth, async (req, res) => {
+  try {
+    const auth = await getAuthService();
+    const valid = await auth.verifyMFA(req.user.userId, req.body.token);
+    res.json({ valid });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/biometric/challenge', requireAuth, async (req, res) => {
+  try {
+    const auth = await getAuthService();
+    const challenge = await auth.generateBiometricChallenge(req.user.userId);
+    res.json(challenge);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/biometric/verify', requireAuth, async (req, res) => {
+  try {
+    const auth = await getAuthService();
+    const valid = await auth.verifyBiometric(req.user.userId, req.body);
+    res.json({ valid });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/password/change', requireAuth, async (req, res) => {
+  try {
+    const auth = await getAuthService();
+    await auth.changePassword(req.user.userId, req.body.oldPassword, req.body.newPassword);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/logout', requireAuth, async (req, res) => {
+  try {
+    const auth = await getAuthService();
+    await auth.revokeSession(req.user.sessionId);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/auth/me', requireAuth, async (req, res) => {
+  try {
+    const auth = await getAuthService();
+    const user = await auth.getUserById(req.user.userId);
+    res.json(user);
+  } catch (err) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
+// ================================================
+// SESSION MANAGEMENT (SECURITY DASHBOARD)
+// ================================================
+
+app.delete('/api/security/sessions/:sessionId', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const auth = await getAuthService();
+    await auth.revokeSession(req.params.sessionId);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================================================
+// SUBSCRIPTION / PAYMENT ROUTES
+// ================================================
+
+let _paymentService = null;
+async function getPaymentService() {
+  if (!_paymentService) {
+    const { PaymentService } = await import('./src/payments/paymentService.js');
+    _paymentService = new PaymentService();
+  }
+  return _paymentService;
+}
+
+app.post('/api/payments/customer', requireAuth, async (req, res) => {
+  try {
+    const ps = await getPaymentService();
+    const customer = await ps.createCustomer(req.user.userId, req.body.email, req.body.name);
+    res.json(customer);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/payments/subscribe', requireAuth, async (req, res) => {
+  try {
+    const ps = await getPaymentService();
+    const sub = await ps.createSubscription(req.user.userId, req.body.priceId, req.body.paymentMethodId);
+    res.json(sub);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/payments/cancel', requireAuth, async (req, res) => {
+  try {
+    const ps = await getPaymentService();
+    const result = await ps.cancelSubscription(req.body.subscriptionId);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/payments/intent', requireAuth, async (req, res) => {
+  try {
+    const ps = await getPaymentService();
+    const intent = await ps.createPaymentIntent(req.body.amount, req.body.currency || 'usd', { userId: req.user.userId });
+    res.json(intent);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/payments/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  try {
+    const ps = await getPaymentService();
+    const result = await ps.handleWebhook(req.body, req.headers['stripe-signature']);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/payments/gift-card/create', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const ps = await getPaymentService();
+    const card = await ps.createGiftCard(req.body.amount, req.body.currency || 'usd');
+    res.json(card);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/payments/gift-card/redeem', requireAuth, async (req, res) => {
+  try {
+    const ps = await getPaymentService();
+    const result = await ps.redeemGiftCard(req.body.code, req.user.userId);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/payments/crypto', requireAuth, async (req, res) => {
+  try {
+    const ps = await getPaymentService();
+    const result = await ps.initCryptoPayment(req.body.amount, req.body.currency, req.body.coin);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/payments/status', requireAuth, async (req, res) => {
+  try {
+    const ps = await getPaymentService();
+    const status = await ps.getSubscriptionStatus(req.user.userId);
+    res.json(status);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================================================
+// ANALYTICS ROUTES
+// ================================================
+
+const analyticsData = new Map();
+
+app.get('/api/analytics/:platform', requireAuth, (req, res) => {
+  const { platform } = req.params;
+  const { range = '7d' } = req.query;
+  const data = analyticsData.get(`${req.user.userId}:${platform}:${range}`);
+  res.json(data || { platform, range, metrics: {}, topContent: [], lastUpdated: null });
+});
+
+app.post('/api/analytics/:platform', requireAuth, (req, res) => {
+  const { platform } = req.params;
+  const key = `${req.user.userId}:${platform}:${req.body.range || '7d'}`;
+  analyticsData.set(key, { ...req.body, platform, updatedAt: new Date().toISOString() });
+  io.to(`user:${req.user.userId}`).emit('analytics:update', { platform, metrics: req.body });
+  res.json({ success: true });
+});
+
+// ================================================
+// GAMING / PROJECT TRACKING ROUTES
+// ================================================
+
+let _gameService = null;
+async function getGameService() {
+  if (!_gameService) {
+    const { GameTrackingService } = await import('./src/gaming/gameTrackingService.js');
+    _gameService = new GameTrackingService();
+  }
+  return _gameService;
+}
+
+app.post('/api/projects', requireAuth, async (req, res) => {
+  try {
+    const gs = await getGameService();
+    const project = await gs.createProject({ ...req.body, userId: req.user.userId });
+    res.status(201).json(project);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/projects', requireAuth, async (req, res) => {
+  try {
+    const gs = await getGameService();
+    const projects = await gs.listProjects(req.user.userId, req.query);
+    res.json(projects);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/projects/:id', requireAuth, async (req, res) => {
+  try {
+    const gs = await getGameService();
+    const project = await gs.getProject(req.params.id);
+    res.json(project || { error: 'Not found' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/projects/:id', requireAuth, async (req, res) => {
+  try {
+    const gs = await getGameService();
+    const project = await gs.updateProject(req.params.id, req.body);
+    res.json(project);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/projects/:id/progress', requireAuth, async (req, res) => {
+  try {
+    const gs = await getGameService();
+    const result = await gs.updateProjectProgress(req.params.id, req.body.percent, req.body.milestone);
+    io.to(`user:${req.user.userId}`).emit('game:progress', { projectId: req.params.id, ...result });
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/achievements/:userId', requireAuth, async (req, res) => {
+  try {
+    const gs = await getGameService();
+    const achievements = await gs.getAchievements(req.params.userId);
+    res.json(achievements);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/projects/:id/session/start', requireAuth, async (req, res) => {
+  try {
+    const gs = await getGameService();
+    const session = await gs.startTracking(req.params.id, { userId: req.user.userId, ...req.body });
+    res.json(session);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/projects/:id/session/:sessionId/end', requireAuth, async (req, res) => {
+  try {
+    const gs = await getGameService();
+    const result = await gs.endTracking(req.params.id, req.params.sessionId);
+    io.to(`user:${req.user.userId}`).emit('game:session:update', { projectId: req.params.id, stats: result });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================================================
+// INTEGRATION STATUS ROUTE
+// ================================================
+
+app.get('/api/integrations/status', requireAuth, requireRole('admin', 'dev'), (req, res) => {
+  res.json({
+    available: ['azure', 'aws', 'slack', 'github', 'bitbucket', 'zoom', 'adobe', 'google', 'redis'],
+    configured: Object.entries({
+      azure: !!process.env.AZURE_STORAGE_CONNECTION_STRING,
+      aws: !!(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY),
+      slack: !!process.env.SLACK_BOT_TOKEN,
+      github: !!process.env.GITHUB_TOKEN,
+      bitbucket: !!(process.env.BITBUCKET_USERNAME && process.env.BITBUCKET_APP_PASSWORD),
+      zoom: !!(process.env.ZOOM_ACCOUNT_ID && process.env.ZOOM_CLIENT_ID),
+      adobe: !!process.env.ADOBE_CLIENT_ID,
+      google: !!process.env.GOOGLE_API_KEY,
+      redis: !!process.env.REDIS_URL,
+    }).filter(([, v]) => v).map(([k]) => k),
+  });
+});
+
+// ================================================
+// TRANSLATE ROUTE
+// ================================================
+
+app.post('/api/translate', requireAuth, async (req, res) => {
+  try {
+    const { text, targetLanguage, sourceLanguage } = req.body;
+    if (!text || !targetLanguage) return res.status(400).json({ error: 'text and targetLanguage required' });
+    const apiKey = process.env.GOOGLE_TRANSLATE_API_KEY || process.env.GOOGLE_API_KEY;
+    if (!apiKey) return res.status(503).json({ error: 'Translation service not configured' });
+    const url = `https://translation.googleapis.com/language/translate/v2?key=${apiKey}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: text, target: targetLanguage, source: sourceLanguage }),
+    });
+    if (!response.ok) throw new Error('Translation API error');
+    const data = await response.json();
+    res.json({ translated: data.data.translations[0].translatedText, detectedSourceLanguage: data.data.translations[0].detectedSourceLanguage });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================================================
 // WEBSOCKET HANDLING
 // ================================================
 
 io.use((socket, next) => {
-  // Authenticate socket connection
   const token = socket.handshake.auth.token;
   if (token) {
-    // Verify token
-    socket.userId = security.hash(token);
-    next();
+    try {
+      const payload = jwt.verify(token, process.env.JWT_SECRET);
+      socket.userId = payload.userId;
+      socket.userRole = payload.role || 'user';
+    } catch {
+      socket.userId = uuidv4();
+      socket.userRole = 'user';
+    }
   } else {
     socket.userId = uuidv4();
-    next();
+    socket.userRole = 'user';
   }
+  next();
 });
 
 io.on('connection', (socket) => {
-  console.log(`Client connected: ${socket.id}`);
+  socket.join(`user:${socket.userId}`);
+  if (socket.userRole === 'admin') socket.join('admin:all');
+
   security.logAudit('SOCKET_CONNECT', { socketId: socket.id, userId: socket.userId });
 
-  // Voice call handling
-  socket.on('voice:start', (data) => {
+  socket.on('voice:start', () => {
     socket.broadcast.emit('voice:started', { userId: socket.userId });
   });
 
   socket.on('voice:data', (data) => {
-    // Encrypt voice data
     const encrypted = security.encrypt(JSON.stringify(data));
     socket.broadcast.emit('voice:data', encrypted);
   });
@@ -1134,19 +1563,41 @@ io.on('connection', (socket) => {
     socket.broadcast.emit('voice:ended', { userId: socket.userId });
   });
 
-  // Real-time chat
   socket.on('chat:message', (data) => {
     const encrypted = security.encrypt(JSON.stringify(data));
     socket.broadcast.emit('chat:message', encrypted);
   });
 
-  // Workflow updates
   socket.on('workflow:update', (data) => {
     socket.broadcast.emit('workflow:updated', data);
   });
 
+  // Security dashboard — push real-time threat to admin room
+  socket.on('security:report', (data) => {
+    if (socket.userRole === 'admin' || socket.userRole === 'dev') {
+      io.to('admin:all').emit('security:threat', {
+        type: data.type || 'UNKNOWN',
+        ip: data.ip || socket.handshake.address,
+        user: socket.userId,
+        severity: data.severity || 'low',
+        message: data.message || '',
+        timestamp: new Date().toISOString(),
+      });
+    }
+  });
+
+  // Analytics — subscribe to platform updates
+  socket.on('analytics:subscribe', ({ platform }) => {
+    if (platform) socket.join(`analytics:${platform}:${socket.userId}`);
+  });
+
+  // Game tracking — subscribe to project updates
+  socket.on('game:subscribe', ({ projectId }) => {
+    if (projectId) socket.join(`game:${projectId}`);
+  });
+
   socket.on('disconnect', () => {
-    security.logAudit('SOCKET_DISCONNECT', { socketId: socket.id });
+    security.logAudit('SOCKET_DISCONNECT', { socketId: socket.id, userId: socket.userId });
   });
 });
 

@@ -8,9 +8,9 @@ const Store = require('electron-store');
 const keytar = require('keytar');
 const ElectronSecurityService = require('./electron-security-service');
 
-// Initialize secure storage
+// Initialize secure storage — key sourced from env, never hardcoded
 const store = new Store({
-  encryptionKey: 'nexus-ai-pro-encryption-key-v2',
+  encryptionKey: process.env.ELECTRON_STORE_KEY || app.getPath('userData'),
   name: 'nexus-ai-config'
 });
 

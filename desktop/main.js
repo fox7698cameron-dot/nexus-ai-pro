@@ -30,7 +30,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const store = new Store({
-  encryptionKey: 'nexus-ai-pro-secure-key-' + app.getVersion(),
+  encryptionKey: process.env.ELECTRON_STORE_KEY || app.getPath('userData'),
   name: 'nexus-config'
 });
 

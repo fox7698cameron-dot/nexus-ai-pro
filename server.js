@@ -1,6 +1,8 @@
 // ================================================
-// NEXUS AI PRO - Enhanced Backend Server
+// NEXUS AI PRO - Enterprise Backend Server
 // Military-Grade Security & Multi-Model AI Platform
+// Copyright © 2025-2026 Cameron Fox. All rights reserved.
+// Created: 2026-05-08
 // ================================================
 
 import express from 'express';
@@ -15,8 +17,31 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import cron from 'node-cron';
+
+// Service imports
+import { AuthService, ROLES } from './src/auth/authService.js';
+import { createKVStore, createBlobStorage } from './src/storage/index.js';
+import { initI18n, i18nMiddleware } from './src/i18n/index.js';
+import { SocialAnalyticsAggregator } from './src/connectors/socialAnalytics.js';
+import { GameEngineConnectorRegistry } from './src/connectors/gameEngines.js';
+import { CloudConnectorRegistry } from './src/connectors/cloudServices.js';
+import { createAuthRouter } from './src/routes/auth.routes.js';
+import { createPaymentsRouter } from './src/routes/payments.routes.js';
+import { createAnalyticsRouter } from './src/routes/analytics.routes.js';
+import { createProjectsRouter } from './src/routes/projects.routes.js';
+import { createAdminRouter } from './src/routes/admin.routes.js';
+import { createConnectorsRouter } from './src/routes/connectors.routes.js';
 
 dotenv.config();
+
+// Validate critical environment variables
+const REQUIRED_ENV = ['JWT_SECRET', 'JWT_REFRESH_SECRET', 'ENCRYPTION_SECRET'];
+const missingEnv = REQUIRED_ENV.filter(k => !process.env[k]);
+if (missingEnv.length > 0) {
+  console.error(`[FATAL] Missing required environment variables: ${missingEnv.join(', ')}`);
+  process.exit(1);
+}
 
 const app = express();
 const httpServer = createServer(app);
@@ -266,6 +291,38 @@ class SecurityModule {
 const security = new SecurityModule();
 
 // ================================================
+// SERVICE INITIALIZATION
+// ================================================
+
+const kvStore = createKVStore();
+const blobStorage = createBlobStorage();
+
+// Auth service — depends on kvStore
+const authService = new AuthService({
+  dataStore: kvStore,
+  auditLogger: { log: (event, details) => security.logAudit(event, details) },
+});
+
+// Social analytics aggregator
+const socialAggregator = new SocialAnalyticsAggregator();
+
+// Game engine registry
+const gameRegistry = new GameEngineConnectorRegistry(kvStore);
+
+// Cloud connector registry
+const cloudRegistry = new CloudConnectorRegistry();
+
+// Stripe service (lazy init to avoid crashing if key not set in dev)
+let stripeService = null;
+if (process.env.STRIPE_SECRET_KEY) {
+  const { getStripeService } = await import('./src/payments/stripeService.js');
+  stripeService = getStripeService();
+}
+
+// i18n
+await initI18n();
+
+// ================================================
 // SOCKET.IO WITH ENCRYPTION
 // ================================================
 const io = new Server(httpServer, {
@@ -302,32 +359,48 @@ app.use(helmet({
 // Compression
 app.use(compression());
 
-// Rate limiting
+// Rate limiting — no retry/backoff: clients should respect 429 headers
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   message: { error: 'Too many requests, please try again later.' },
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
+  skipSuccessfulRequests: false,
 });
 app.use('/api/', limiter);
 
 // Stricter rate limit for auth endpoints
 const authLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
-  max: 5,
-  message: { error: 'Too many authentication attempts.' }
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  message: { error: 'Too many authentication attempts.' },
+  standardHeaders: true,
+  legacyHeaders: false,
 });
+app.use('/api/auth/', authLimiter);
 
 // CORS
+const allowedOrigins = (process.env.CORS_ORIGIN || '*').split(',').map(o => o.trim());
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*',
+  origin: (origin, cb) => {
+    if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID', 'Accept-Language'],
 }));
 
+// i18n language detection
+app.use(i18nMiddleware());
+
 // Body parsing with size limits
+// Stripe webhooks need raw body — keep raw for /api/payments/webhook
+app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -816,6 +889,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -831,6 +905,69 @@ class WorkflowEngine {
 const workflowEngine = new WorkflowEngine();
 
 // ================================================
+// NEW SERVICE ROUTES
+// ================================================
+
+// Auth routes
+app.use('/api/auth', createAuthRouter(authService));
+
+// Analytics routes
+app.use('/api/analytics', createAnalyticsRouter(socialAggregator, authService));
+
+// Project tracking routes
+app.use('/api/projects', createProjectsRouter(kvStore, gameRegistry, authService));
+
+// Admin / moderator routes
+app.use('/api/admin', createAdminRouter(authService, kvStore));
+
+// Cloud + service connector routes
+app.use('/api/connectors', createConnectorsRouter(cloudRegistry, authService));
+
+// Payment routes (only if Stripe is configured)
+if (stripeService) {
+  app.use('/api/payments', createPaymentsRouter(stripeService, authService));
+} else {
+  app.use('/api/payments', (req, res) => {
+    res.status(503).json({ error: 'Payment service not configured. Set STRIPE_SECRET_KEY.' });
+  });
+}
+
+// Blob storage endpoints
+app.post('/api/storage/upload', authService.requireAuth(), upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    const blobName = `${req.user.sub}/${uuidv4()}-${req.file.originalname}`;
+    const url = await blobStorage.upload(blobName, req.file.buffer, req.file.mimetype);
+    security.logAudit('FILE_UPLOADED', { userId: req.user.sub, blobName, size: req.file.size });
+    res.json({ url, blobName });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/storage/list', authService.requireAuth(), async (req, res) => {
+  try {
+    const blobs = await blobStorage.list(`${req.user.sub}/`);
+    res.json({ blobs });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// i18n translate proxy
+app.post('/api/translate', authService.requireAuth(), async (req, res) => {
+  const { text, targetLang, sourceLang = 'en' } = req.body;
+  if (!text || !targetLang) return res.status(400).json({ error: 'text and targetLang required' });
+  const { autoTranslate } = await import('./src/i18n/index.js');
+  try {
+    const translated = await autoTranslate(text, targetLang, sourceLang);
+    res.json({ original: text, translated, targetLang, sourceLang });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================================================
 // API ROUTES
 // ================================================
 
@@ -838,7 +975,15 @@ const workflowEngine = new WorkflowEngine();
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'healthy',
+    version: '2.0.0',
     security: security.getSecurityStatus(),
+    services: {
+      auth: true,
+      payments: !!stripeService,
+      redis: !!process.env.REDIS_URL,
+      blobStorage: !!process.env.AZURE_STORAGE_CONNECTION_STRING,
+      i18n: true,
+    },
     timestamp: Date.now()
   });
 });
@@ -1151,18 +1296,21 @@ io.on('connection', (socket) => {
 });
 
 // ================================================
-// AUTO-PATCHING SCHEDULER
+// SCHEDULED JOBS (node-cron — no setInterval loops)
 // ================================================
 
-setInterval(async () => {
-  console.log('Running automated security scan...');
+// Hourly security scan
+cron.schedule('0 * * * *', async () => {
   const scan = await security.scanVulnerabilities();
-
   if (scan.vulnerabilities.length > 0) {
-    console.log('Vulnerabilities detected, auto-patching...');
     await security.autoPatch();
   }
-}, 60 * 60 * 1000); // Every hour
+});
+
+// Daily key rotation at 3:00 AM UTC
+cron.schedule('0 3 * * *', () => {
+  security.rotateKeys();
+});
 
 // ================================================
 // ERROR HANDLING

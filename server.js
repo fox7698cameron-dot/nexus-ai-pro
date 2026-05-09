@@ -3,6 +3,10 @@
 // Military-Grade Security & Multi-Model AI Platform
 // ================================================
 
+// Copyright © 2025-2026 Cameron Fox. All rights reserved.
+// Licensed under the Apache License, Version 2.0
+// File: server.js | Last updated: 2026-05-09
+
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -15,6 +19,12 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import speakeasy from 'speakeasy';
+import QRCode from 'qrcode';
+import Stripe from 'stripe';
+import cron from 'node-cron';
 
 dotenv.config();
 
@@ -441,8 +451,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-2.0-flash';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +825,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -1099,6 +1109,517 @@ app.get('/api/templates/app', (req, res) => {
 });
 
 // ================================================
+// AUTH ROUTES (role-based: admin / dev / moderator / user)
+// ================================================
+
+const stripe = process.env.STRIPE_SECRET_KEY
+  ? new Stripe(process.env.STRIPE_SECRET_KEY)
+  : null;
+
+// Password policy: min 13 chars, at least one uppercase, lowercase, digit, special char
+const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{13,}$/;
+const VALID_ROLES = ['admin', 'dev', 'moderator', 'user'];
+
+// In-memory user store (replace with DB in production)
+const userStore = new Map();
+
+function signJWT(payload) {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new Error('JWT_SECRET not configured');
+  return jwt.sign(payload, secret, { expiresIn: '24h', algorithm: 'HS256' });
+}
+
+function verifyJWT(token) {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new Error('JWT_SECRET not configured');
+  return jwt.verify(token, secret, { algorithms: ['HS256'] });
+}
+
+function authMiddleware(requiredRoles = []) {
+  return (req, res, next) => {
+    const auth = req.headers.authorization;
+    if (!auth || !auth.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    try {
+      const payload = verifyJWT(auth.slice(7));
+      if (requiredRoles.length && !requiredRoles.includes(payload.role)) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+      req.user = payload;
+      next();
+    } catch {
+      res.status(401).json({ error: 'Invalid or expired token' });
+    }
+  };
+}
+
+// Register
+app.post('/api/auth/register', authLimiter, async (req, res) => {
+  try {
+    const { username, email, password, role = 'user' } = req.body;
+    if (!username || !email || !password) {
+      return res.status(400).json({ error: 'username, email, and password are required' });
+    }
+    if (!PASSWORD_REGEX.test(password)) {
+      return res.status(400).json({
+        error: 'Password must be at least 13 characters and contain uppercase, lowercase, digit, and special character'
+      });
+    }
+    const sanitizedRole = VALID_ROLES.includes(role) ? role : 'user';
+    const existing = [...userStore.values()].find(u => u.email === email);
+    if (existing) return res.status(409).json({ error: 'Email already registered' });
+
+    const hash = await bcrypt.hash(password, 14);
+    const id = uuidv4();
+    const mfaSecret = speakeasy.generateSecret({ length: 20, name: `NexusAI:${email}` });
+    const user = {
+      id,
+      username,
+      email,
+      passwordHash: hash,
+      role: sanitizedRole,
+      mfaEnabled: false,
+      mfaSecret: mfaSecret.base32,
+      biometricEnabled: false,
+      createdAt: Date.now()
+    };
+    userStore.set(id, user);
+    security.logAudit('USER_REGISTERED', { id, email, role: sanitizedRole });
+
+    const qrUrl = await QRCode.toDataURL(mfaSecret.otpauth_url);
+    res.status(201).json({
+      id,
+      username,
+      email,
+      role: sanitizedRole,
+      mfaSetupQR: qrUrl,
+      mfaSecret: mfaSecret.base32
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Registration failed' });
+  }
+});
+
+// Login
+app.post('/api/auth/login', authLimiter, async (req, res) => {
+  try {
+    const { email, password, mfaToken } = req.body;
+    const user = [...userStore.values()].find(u => u.email === email);
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+
+    const valid = await bcrypt.compare(password, user.passwordHash);
+    if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
+
+    if (user.mfaEnabled) {
+      if (!mfaToken) return res.status(200).json({ requireMFA: true });
+      const verified = speakeasy.totp.verify({
+        secret: user.mfaSecret,
+        encoding: 'base32',
+        token: mfaToken,
+        window: 1
+      });
+      if (!verified) return res.status(401).json({ error: 'Invalid MFA token' });
+    }
+
+    const token = signJWT({ id: user.id, email: user.email, role: user.role, username: user.username });
+    security.logAudit('USER_LOGIN', { id: user.id, email: user.email });
+    res.json({ token, role: user.role, username: user.username, id: user.id });
+  } catch (err) {
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// Enable MFA
+app.post('/api/auth/mfa/enable', authMiddleware(), async (req, res) => {
+  try {
+    const { token } = req.body;
+    const user = userStore.get(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const verified = speakeasy.totp.verify({
+      secret: user.mfaSecret,
+      encoding: 'base32',
+      token,
+      window: 1
+    });
+    if (!verified) return res.status(400).json({ error: 'Invalid TOTP token' });
+    user.mfaEnabled = true;
+    userStore.set(user.id, user);
+    security.logAudit('MFA_ENABLED', { userId: user.id });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'MFA enable failed' });
+  }
+});
+
+// Biometric registration
+app.post('/api/auth/biometric/register', authMiddleware(), (req, res) => {
+  const { type, credentialId } = req.body;
+  const allowed = ['fingerprint', 'face_id', 'touch_id', 'retina'];
+  if (!allowed.includes(type)) return res.status(400).json({ error: 'Invalid biometric type' });
+  const user = userStore.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  user.biometricEnabled = true;
+  user.biometricType = type;
+  user.biometricCredentialId = credentialId;
+  userStore.set(user.id, user);
+  security.logAudit('BIOMETRIC_REGISTERED', { userId: user.id, type });
+  res.json({ success: true, type });
+});
+
+// Current user profile
+app.get('/api/auth/me', authMiddleware(), (req, res) => {
+  const user = userStore.get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'Not found' });
+  const { passwordHash, mfaSecret, ...safe } = user;
+  res.json(safe);
+});
+
+// ================================================
+// ANALYTICS ROUTES (social media real-time metrics)
+// ================================================
+
+// Analytics state (in production: backed by DB + real API integrations)
+const analyticsCache = new Map();
+
+function platformMetrics(platform, overrides = {}) {
+  return {
+    platform,
+    followers: Math.floor(Math.random() * 1000000) + 10000,
+    views: Math.floor(Math.random() * 5000000) + 50000,
+    likes: Math.floor(Math.random() * 500000) + 5000,
+    reach: Math.floor(Math.random() * 2000000) + 20000,
+    retention: +(Math.random() * 40 + 60).toFixed(1),
+    engagement: +(Math.random() * 10 + 2).toFixed(2),
+    posts: Math.floor(Math.random() * 200) + 10,
+    timestamp: Date.now(),
+    ...overrides
+  };
+}
+
+app.get('/api/analytics/dashboard', authMiddleware(), (req, res) => {
+  const platforms = ['tiktok', 'instagram', 'facebook', 'twitch', 'discord', 'lemon8', 'reddit', 'redgifs'];
+  const data = {};
+  for (const p of platforms) {
+    const cached = analyticsCache.get(p);
+    data[p] = cached || platformMetrics(p);
+    if (!cached) analyticsCache.set(p, data[p]);
+  }
+  res.json({ platforms: data, updatedAt: Date.now() });
+});
+
+app.get('/api/analytics/:platform', authMiddleware(), (req, res) => {
+  const { platform } = req.params;
+  const allowed = ['tiktok', 'instagram', 'facebook', 'twitch', 'discord', 'lemon8', 'reddit', 'redgifs'];
+  if (!allowed.includes(platform)) return res.status(400).json({ error: 'Unknown platform' });
+  const data = analyticsCache.get(platform) || platformMetrics(platform);
+  analyticsCache.set(platform, data);
+  res.json(data);
+});
+
+// Refresh analytics (simulate real-time update)
+app.post('/api/analytics/refresh', authMiddleware(), (req, res) => {
+  const platforms = ['tiktok', 'instagram', 'facebook', 'twitch', 'discord', 'lemon8', 'reddit', 'redgifs'];
+  const updated = {};
+  for (const p of platforms) {
+    const fresh = platformMetrics(p);
+    analyticsCache.set(p, fresh);
+    updated[p] = fresh;
+  }
+  io.emit('analytics:update', updated);
+  res.json({ updated: Object.keys(updated), timestamp: Date.now() });
+});
+
+// ================================================
+// PROJECT TRACKING ROUTES
+// ================================================
+
+const projectStore = new Map();
+
+app.post('/api/projects', authMiddleware(), (req, res) => {
+  const { name, type, description, platform, engine, language, status = 'active' } = req.body;
+  if (!name || !type) return res.status(400).json({ error: 'name and type are required' });
+  const validTypes = ['coding', 'game', 'ar', 'vr', '3d'];
+  if (!validTypes.includes(type)) return res.status(400).json({ error: 'Invalid project type' });
+  const id = uuidv4();
+  const project = {
+    id,
+    userId: req.user.id,
+    name,
+    type,
+    description: description || '',
+    platform: platform || '',
+    engine: engine || '',
+    language: language || '',
+    status,
+    progress: 0,
+    commits: 0,
+    tasks: [],
+    milestones: [],
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  };
+  projectStore.set(id, project);
+  security.logAudit('PROJECT_CREATED', { id, userId: req.user.id, type });
+  res.status(201).json(project);
+});
+
+app.get('/api/projects', authMiddleware(), (req, res) => {
+  const { type } = req.query;
+  let projects = [...projectStore.values()].filter(p => p.userId === req.user.id);
+  if (type) projects = projects.filter(p => p.type === type);
+  res.json(projects.sort((a, b) => b.updatedAt - a.updatedAt));
+});
+
+app.get('/api/projects/:id', authMiddleware(), (req, res) => {
+  const p = projectStore.get(req.params.id);
+  if (!p || p.userId !== req.user.id) return res.status(404).json({ error: 'Not found' });
+  res.json(p);
+});
+
+app.put('/api/projects/:id', authMiddleware(), (req, res) => {
+  const p = projectStore.get(req.params.id);
+  if (!p || p.userId !== req.user.id) return res.status(404).json({ error: 'Not found' });
+  const updated = { ...p, ...req.body, id: p.id, userId: p.userId, updatedAt: Date.now() };
+  projectStore.set(p.id, updated);
+  io.emit('project:updated', { id: p.id, ...updated });
+  res.json(updated);
+});
+
+app.delete('/api/projects/:id', authMiddleware(), (req, res) => {
+  const p = projectStore.get(req.params.id);
+  if (!p || p.userId !== req.user.id) return res.status(404).json({ error: 'Not found' });
+  projectStore.delete(req.params.id);
+  res.json({ success: true });
+});
+
+// ================================================
+// GAME PLATFORM CONNECTORS + ACHIEVEMENT TRACKING
+// ================================================
+
+const achievementStore = new Map();
+const gamePlatformConnectors = {
+  epic: { name: 'Epic Games / Unreal Engine', endpoint: process.env.EPIC_API_URL || '', apiKey: process.env.EPIC_API_KEY || '' },
+  sony: { name: 'Sony PlayStation', endpoint: process.env.SONY_API_URL || '', apiKey: process.env.SONY_API_KEY || '' },
+  microsoft: { name: 'Xbox / Microsoft', endpoint: process.env.MICROSOFT_API_URL || '', apiKey: process.env.MICROSOFT_API_KEY || '' },
+  ubisoft: { name: 'Ubisoft Connect', endpoint: process.env.UBISOFT_API_URL || '', apiKey: process.env.UBISOFT_API_KEY || '' }
+};
+
+app.get('/api/games/platforms', authMiddleware(), (req, res) => {
+  const platforms = Object.entries(gamePlatformConnectors).map(([id, cfg]) => ({
+    id,
+    name: cfg.name,
+    connected: Boolean(cfg.apiKey)
+  }));
+  res.json(platforms);
+});
+
+app.get('/api/games/achievements', authMiddleware(), (req, res) => {
+  const userId = req.user.id;
+  const achievements = achievementStore.get(userId) || [];
+  res.json(achievements);
+});
+
+app.post('/api/games/achievements', authMiddleware(), (req, res) => {
+  const { title, description, platform, game, points = 10, icon = '🏆' } = req.body;
+  if (!title || !platform) return res.status(400).json({ error: 'title and platform required' });
+  const userId = req.user.id;
+  const list = achievementStore.get(userId) || [];
+  const achievement = {
+    id: uuidv4(),
+    userId,
+    title,
+    description: description || '',
+    platform,
+    game: game || '',
+    points,
+    icon,
+    unlockedAt: Date.now()
+  };
+  list.push(achievement);
+  achievementStore.set(userId, list);
+  io.emit('achievement:unlocked', { userId, achievement });
+  res.status(201).json(achievement);
+});
+
+app.get('/api/games/progress/:gameId', authMiddleware(), (req, res) => {
+  res.json({
+    gameId: req.params.gameId,
+    userId: req.user.id,
+    completion: Math.floor(Math.random() * 100),
+    playtime: Math.floor(Math.random() * 200),
+    lastPlayed: Date.now() - Math.floor(Math.random() * 86400000),
+    achievements: (achievementStore.get(req.user.id) || []).length
+  });
+});
+
+// ================================================
+// SUBSCRIPTION / PAYMENT ROUTES (Stripe + crypto)
+// ================================================
+
+const PLANS = {
+  free: { id: 'free', name: 'Free', price: 0, features: ['5 AI requests/day', 'Basic analytics'] },
+  pro: { id: 'pro', name: 'Pro', price: 999, priceId: process.env.STRIPE_PRO_PRICE_ID || '', features: ['Unlimited AI', 'Full analytics', 'Project tracking'] },
+  enterprise: { id: 'enterprise', name: 'Enterprise', price: 4999, priceId: process.env.STRIPE_ENT_PRICE_ID || '', features: ['All Pro features', 'Admin dashboard', 'Priority support', 'Custom connectors'] }
+};
+
+app.get('/api/subscriptions/plans', (req, res) => {
+  res.json(Object.values(PLANS));
+});
+
+app.post('/api/subscriptions/checkout', authMiddleware(), async (req, res) => {
+  if (!stripe) return res.status(503).json({ error: 'Payment service unavailable - STRIPE_SECRET_KEY not set' });
+  try {
+    const { planId, paymentMethod = 'card', giftCode, cryptoToken } = req.body;
+    const plan = PLANS[planId];
+    if (!plan || plan.price === 0) return res.status(400).json({ error: 'Invalid plan' });
+
+    // Gift card redemption (validate against your gift card service)
+    if (paymentMethod === 'gift' && giftCode) {
+      res.json({ success: true, method: 'gift', plan: plan.id, message: 'Gift code accepted' });
+      return;
+    }
+
+    // Crypto payment intent (placeholder - integrate with your crypto processor)
+    if (paymentMethod === 'crypto' && cryptoToken) {
+      res.json({ success: true, method: 'crypto', plan: plan.id, cryptoToken, message: 'Crypto payment initiated' });
+      return;
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      payment_method_types: ['card'],
+      line_items: [{ price: plan.priceId, quantity: 1 }],
+      success_url: `${process.env.APP_URL || 'http://localhost:5173'}/dashboard?checkout=success`,
+      cancel_url: `${process.env.APP_URL || 'http://localhost:5173'}/pricing`,
+      metadata: { userId: req.user.id, planId }
+    });
+
+    security.logAudit('CHECKOUT_INITIATED', { userId: req.user.id, planId, method: paymentMethod });
+    res.json({ url: session.url, sessionId: session.id });
+  } catch (err) {
+    res.status(500).json({ error: 'Checkout failed' });
+  }
+});
+
+// Stripe webhook
+app.post('/api/subscriptions/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!stripe || !webhookSecret) return res.status(400).json({ error: 'Webhook not configured' });
+  try {
+    const event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
+    security.logAudit('STRIPE_WEBHOOK', { type: event.type });
+    res.json({ received: true });
+  } catch (err) {
+    res.status(400).json({ error: 'Webhook signature verification failed' });
+  }
+});
+
+// ================================================
+// CLOUD CONNECTOR ROUTES
+// ================================================
+
+const connectorStatus = {
+  azure: { connected: false, service: 'Azure' },
+  aws: { connected: false, service: 'AWS' },
+  adobe: { connected: false, service: 'Adobe' },
+  google: { connected: false, service: 'Google Cloud' },
+  slack: { connected: false, service: 'Slack' },
+  zoom: { connected: false, service: 'Zoom' },
+  github: { connected: false, service: 'GitHub' },
+  bitbucket: { connected: false, service: 'Bitbucket' }
+};
+
+app.get('/api/connectors', authMiddleware(), (req, res) => {
+  res.json(Object.entries(connectorStatus).map(([id, s]) => ({
+    id,
+    ...s,
+    hasKey: Boolean(process.env[`${id.toUpperCase()}_API_KEY`] || process.env[`${id.toUpperCase()}_TOKEN`])
+  })));
+});
+
+app.post('/api/connectors/:connector/connect', authMiddleware(['admin', 'dev']), (req, res) => {
+  const { connector } = req.params;
+  if (!connectorStatus[connector]) return res.status(400).json({ error: 'Unknown connector' });
+  const { token } = req.body;
+  if (!token) return res.status(400).json({ error: 'token required' });
+  connectorStatus[connector].connected = true;
+  security.logAudit('CONNECTOR_CONNECTED', { connector, userId: req.user.id });
+  res.json({ success: true, connector, status: 'connected' });
+});
+
+app.post('/api/connectors/:connector/disconnect', authMiddleware(['admin']), (req, res) => {
+  const { connector } = req.params;
+  if (!connectorStatus[connector]) return res.status(400).json({ error: 'Unknown connector' });
+  connectorStatus[connector].connected = false;
+  security.logAudit('CONNECTOR_DISCONNECTED', { connector, userId: req.user.id });
+  res.json({ success: true, connector, status: 'disconnected' });
+});
+
+// ================================================
+// I18N ROUTES (multi-language support)
+// ================================================
+
+const SUPPORTED_LOCALES = ['en', 'es', 'fr', 'de', 'ja', 'zh', 'ko', 'pt', 'ar', 'hi', 'ru', 'it'];
+
+app.get('/api/i18n/locales', (req, res) => {
+  res.json({ supported: SUPPORTED_LOCALES, default: 'en' });
+});
+
+app.post('/api/i18n/translate', authMiddleware(), async (req, res) => {
+  const { text, targetLanguage, sourceLanguage = 'en' } = req.body;
+  if (!text || !targetLanguage) return res.status(400).json({ error: 'text and targetLanguage required' });
+  if (!SUPPORTED_LOCALES.includes(targetLanguage)) return res.status(400).json({ error: 'Unsupported locale' });
+
+  // Use configured AI model for translation (no hardcoded keys)
+  const googleKey = process.env.GOOGLE_API_KEY;
+  if (!googleKey) {
+    return res.json({ translated: text, note: 'GOOGLE_API_KEY not configured' });
+  }
+
+  try {
+    const url = `https://translation.googleapis.com/language/translate/v2?key=${googleKey}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: text, target: targetLanguage, source: sourceLanguage, format: 'text' })
+    });
+    const data = await response.json();
+    const translated = data?.data?.translations?.[0]?.translatedText || text;
+    res.json({ translated, sourceLanguage, targetLanguage });
+  } catch (err) {
+    res.status(500).json({ error: 'Translation failed' });
+  }
+});
+
+// ================================================
+// ADMIN ROUTES
+// ================================================
+
+app.get('/api/admin/users', authMiddleware(['admin']), (req, res) => {
+  const users = [...userStore.values()].map(({ passwordHash, mfaSecret, ...safe }) => safe);
+  res.json(users);
+});
+
+app.put('/api/admin/users/:id/role', authMiddleware(['admin']), (req, res) => {
+  const { role } = req.body;
+  if (!VALID_ROLES.includes(role)) return res.status(400).json({ error: 'Invalid role' });
+  const user = userStore.get(req.params.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  user.role = role;
+  userStore.set(user.id, user);
+  security.logAudit('ROLE_CHANGED', { targetId: user.id, newRole: role, by: req.user.id });
+  res.json({ success: true });
+});
+
+app.get('/api/admin/audit', authMiddleware(['admin']), (req, res) => {
+  const { limit = 200 } = req.query;
+  const safeLimit = Math.min(parseInt(limit, 10) || 200, 1000);
+  res.json({ logs: security.auditLog.slice(-safeLimit), total: security.auditLog.length });
+});
+
+// ================================================
 // WEBSOCKET HANDLING
 // ================================================
 
@@ -1151,18 +1672,27 @@ io.on('connection', (socket) => {
 });
 
 // ================================================
-// AUTO-PATCHING SCHEDULER
+// SCHEDULED JOBS
 // ================================================
 
-setInterval(async () => {
-  console.log('Running automated security scan...');
+// Hourly security scan via cron (no setInterval drift)
+cron.schedule('0 * * * *', async () => {
   const scan = await security.scanVulnerabilities();
+  if (scan.vulnerabilities.length > 0) await security.autoPatch();
+  io.emit('security:scan:complete', { timestamp: Date.now(), vulns: scan.vulnerabilities.length });
+});
 
-  if (scan.vulnerabilities.length > 0) {
-    console.log('Vulnerabilities detected, auto-patching...');
-    await security.autoPatch();
+// Refresh analytics cache every 5 minutes
+cron.schedule('*/5 * * * *', () => {
+  const platforms = ['tiktok', 'instagram', 'facebook', 'twitch', 'discord', 'lemon8', 'reddit', 'redgifs'];
+  const updated = {};
+  for (const p of platforms) {
+    const fresh = platformMetrics(p);
+    analyticsCache.set(p, fresh);
+    updated[p] = fresh;
   }
-}, 60 * 60 * 1000); // Every hour
+  io.emit('analytics:update', updated);
+});
 
 // ================================================
 // ERROR HANDLING

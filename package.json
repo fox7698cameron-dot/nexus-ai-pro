@@ -80,7 +80,17 @@
     "uuid": "^11.0.4",
     "winston": "^3.17.0",
     "zod": "^3.24.1",
-    "jexl": "^2.3.0"
+    "jexl": "^2.3.0",
+    "stripe": "^22.1.1",
+    "react-router-dom": "^7.15.0",
+    "speakeasy": "^2.0.0",
+    "qrcode": "^1.5.4",
+    "i18next": "^26.0.10",
+    "react-i18next": "^17.0.7",
+    "i18next-browser-languagedetector": "^8.2.1",
+    "ioredis": "^5.10.1",
+    "node-cron": "^4.2.1",
+    "otpauth": "^9.5.1"
   },
   "devDependencies": {
     "@capacitor/cli": "^6.2.0",
@@ -100,8 +110,9 @@
     "workbox-window": "^7.3.0"
   },
   "overrides": {
-    "esbuild": "^0.24.2",
-    "rollup": "^4.29.1"
+    "esbuild": "^0.25.0",
+    "rollup": "^4.29.1",
+    "tar": "^7.5.15"
   },
   "capacitor": {
     "appId": "com.cameronfox.nexusaipro",

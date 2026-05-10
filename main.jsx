@@ -1,6 +1,8 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import NexusAI from './app.jsx';
+import AppRouter from './src/routes/AppRouter.jsx';
+import { AuthProvider } from './src/contexts/AuthContext.jsx';
+import { I18nProvider } from './src/contexts/I18nContext.jsx';
 
 // Security: Disable React DevTools in production
 if (typeof window.__REACT_DEVTOOLS_GLOBAL_HOOK__ === 'object') {
@@ -84,7 +86,11 @@ const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
     <ErrorBoundary>
-      <NexusAI />
+      <I18nProvider>
+        <AuthProvider>
+          <AppRouter />
+        </AuthProvider>
+      </I18nProvider>
     </ErrorBoundary>
   </React.StrictMode>
 );

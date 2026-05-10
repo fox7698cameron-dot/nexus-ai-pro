@@ -27,6 +27,7 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
+    target: 'es2022',
     minify: 'terser',
     terserOptions: {
       compress: {
@@ -37,15 +38,15 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          'react-vendor': ['react', 'react-dom'],
-          'ai-vendor': ['@anthropic-ai/sdk', 'openai'],
-          'ui-vendor': ['lucide-react']
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'ui-vendor': ['lucide-react'],
+          'auth-vendor': ['@stripe/stripe-js']
         }
       }
     },
-    chunkSizeWarningLimit: 1000
+    chunkSizeWarningLimit: 2000
   },
   optimizeDeps: {
-    include: ['react', 'react-dom', 'lucide-react']
+    include: ['react', 'react-dom', 'lucide-react', 'react-router-dom', 'socket.io-client']
   }
 });

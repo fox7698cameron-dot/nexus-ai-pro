@@ -1,6 +1,7 @@
 // ================================================
 // NEXUS AI PRO - Enhanced Backend Server
-// Military-Grade Security & Multi-Model AI Platform
+// Copyright © 2025-2026 Cameron Fox. All rights reserved. | Apache-2.0
+// Updated: 2026-05-10
 // ================================================
 
 import express from 'express';
@@ -15,8 +16,25 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import cookieParser from 'cookie-parser';
 
 dotenv.config();
+
+// ── Route modules (lazy import after dotenv loads) ────────────
+const [
+  authRoutes, analyticsRoutes, securityRoutes, projectsRoutes,
+  paymentsRoutes, connectorsRoutes, adminRoutes, moderatorRoutes, translateRoutes
+] = await Promise.all([
+  import('./src/server/auth-routes.js').then(m => m.default),
+  import('./src/server/analytics-routes.js').then(m => m.default),
+  import('./src/server/security-routes.js').then(m => ({ router: m.default, init: m.init })),
+  import('./src/server/projects-routes.js').then(m => ({ router: m.default, setIo: m.setIo })),
+  import('./src/server/payments-routes.js').then(m => m.default),
+  import('./src/server/connectors-routes.js').then(m => m.default),
+  import('./src/server/admin-routes.js').then(m => m.default),
+  import('./src/server/moderator-routes.js').then(m => m.default),
+  import('./src/server/translate-routes.js').then(m => m.default)
+]);
 
 const app = express();
 const httpServer = createServer(app);
@@ -276,6 +294,13 @@ const io = new Server(httpServer, {
   pingTimeout: 60000
 });
 
+// Expose io instance to route handlers via app.set
+app.set('io', io);
+
+// Wire Socket.IO into route modules that emit events
+if (typeof securityRoutes.init === 'function') securityRoutes.init(io);
+if (typeof projectsRoutes.setIo === 'function') projectsRoutes.setIo(io);
+
 // ================================================
 // MIDDLEWARE STACK
 // ================================================
@@ -330,6 +355,7 @@ app.use(cors({
 // Body parsing with size limits
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(cookieParser());
 
 // Request ID and timing
 app.use((req, res, next) => {
@@ -441,7 +467,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
+    const model = options.model || 'gemini-1.5-pro';
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
@@ -829,6 +855,20 @@ class WorkflowEngine {
 }
 
 const workflowEngine = new WorkflowEngine();
+
+// ================================================
+// FEATURE MODULE ROUTES
+// ================================================
+app.use('/api/auth', authRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/security', securityRoutes.router ?? securityRoutes);
+app.use('/api/projects', projectsRoutes.router ?? projectsRoutes);
+app.use('/api/game', projectsRoutes.router ?? projectsRoutes);
+app.use('/api/payments', paymentsRoutes);
+app.use('/api/connectors', connectorsRoutes.router ?? connectorsRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/mod', moderatorRoutes);
+app.use('/api/translate', translateRoutes);
 
 // ================================================
 // API ROUTES

@@ -3,6 +3,9 @@
 // Military-Grade Security & Multi-Model AI Platform
 // ================================================
 
+// server.js — Nexus AI Pro backend
+// Date: 2026-06-02
+
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -15,6 +18,12 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+
+// Route modules
+import authRouter from './src/routes/auth.js';
+import analyticsRouter from './src/routes/analytics.js';
+import projectsRouter from './src/routes/projects.js';
+import subscriptionsRouter from './src/routes/subscriptions.js';
 
 dotenv.config();
 
@@ -327,6 +336,9 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID']
 }));
 
+// Raw body for Stripe webhook signature verification
+app.use('/api/subscriptions/webhook', express.raw({ type: 'application/json' }));
+
 // Body parsing with size limits
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -441,8 +453,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-pro';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -829,6 +840,15 @@ class WorkflowEngine {
 }
 
 const workflowEngine = new WorkflowEngine();
+
+// ================================================
+// MODULAR ROUTE MOUNTING
+// ================================================
+
+app.use('/api/auth', authRouter);
+app.use('/api/analytics', analyticsRouter);
+app.use('/api/projects', projectsRouter);
+app.use('/api/subscriptions', subscriptionsRouter);
 
 // ================================================
 // API ROUTES

@@ -27,6 +27,7 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
+    target: ['es2022', 'chrome100', 'firefox100', 'safari15'],
     minify: 'terser',
     terserOptions: {
       compress: {
@@ -39,11 +40,12 @@ export default defineConfig({
         manualChunks: {
           'react-vendor': ['react', 'react-dom'],
           'ai-vendor': ['@anthropic-ai/sdk', 'openai'],
-          'ui-vendor': ['lucide-react']
+          'ui-vendor': ['lucide-react'],
+          'i18n-vendor': ['i18next', 'react-i18next'],
         }
       }
     },
-    chunkSizeWarningLimit: 1000
+    chunkSizeWarningLimit: 1500
   },
   optimizeDeps: {
     include: ['react', 'react-dom', 'lucide-react']

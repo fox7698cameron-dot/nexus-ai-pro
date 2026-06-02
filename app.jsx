@@ -2,8 +2,18 @@
    Updated: make UI more responsive for mobile/desktop, persist model selection, chats, memories, settings,
    ensure AES-256 label present, and small responsive CSS tweaks.
 */
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+// app.jsx — Nexus AI Pro frontend
+// Date: 2026-06-02
+import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense, lazy } from 'react';
+import { useTranslation } from 'react-i18next';
 import { securityService } from './src/security-service.js';
+
+const AnalyticsDashboard = lazy(() => import('./src/components/AnalyticsDashboard.jsx'));
+const ProjectDashboard = lazy(() => import('./src/components/ProjectDashboard.jsx'));
+const SubscriptionCheckout = lazy(() => import('./src/components/SubscriptionCheckout.jsx'));
+const SecurityDashboardPanel = lazy(() => import('./src/SecurityDashboard.jsx'));
+const AdminDashboard = lazy(() => import('./src/components/AdminDashboard.jsx'));
+const AuthGate = lazy(() => import('./src/components/AuthForms.jsx'));
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
   Settings, Menu, X, Plus, Trash2, Download, Upload,
@@ -461,7 +471,11 @@ const TOOLS = {
   appdev: { name: 'App Dev', icon: Smartphone, description: 'Application development' },
   automation: { name: 'Automation', icon: Workflow, description: 'N8N-style workflows' },
   deploy: { name: 'Deploy', icon: Rocket, description: 'App deployment' },
-  security: { name: 'Security', icon: Shield, description: 'Security analysis' },
+  security: { name: 'Security', icon: Shield, description: 'Security dashboard' },
+  analytics: { name: 'Analytics', icon: BarChart3, description: 'Social media analytics' },
+  projects: { name: 'Projects', icon: Database, description: 'Project & game dev tracking' },
+  subscription: { name: 'Upgrade', icon: Star, description: 'Subscription plans' },
+  admin: { name: 'Admin', icon: Users, description: 'Admin dashboard' },
   schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' }
 };
 
@@ -598,6 +612,12 @@ const WORKFLOW_NODES = {
 // MAIN APP COMPONENT
 // ============================================
 export default function NexusAI() {
+  const { t, i18n } = useTranslation();
+
+  // Auth state
+  const [authToken, setAuthToken] = useState(() => sessionStorage.getItem('nexus:token') || null);
+  const [currentUser, setCurrentUser] = useState(null);
+
   // State
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -945,8 +965,9 @@ export default function NexusAI() {
           <div className="tool-panel">
             {Object.entries(TOOLS).map(([key, tool]) => {
               const Icon = tool.icon;
+              const dashboardTools = ['gamedev', 'appdev', 'automation', 'security', 'analytics', 'projects', 'subscription', 'admin'];
               return (
-                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security'].includes(key)) setShowToolContent(true); }}>
+                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (dashboardTools.includes(key)) setShowToolContent(true); else setShowToolContent(false); }}>
                   <Icon size={18} />
                   <span>{tool.name}</span>
                 </button>
@@ -995,10 +1016,14 @@ export default function NexusAI() {
             </div>
           )}
 
-          {/* Security Dashboard */}
+          {/* Security Dashboard — full real-time panel */}
           {showToolContent && activeTool === 'security' && (
-            <div className="tool-content security-dashboard">
-              <div className="panel-header">
+            <div className="tool-content security-dashboard" style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 200px)' }}>
+              <Suspense fallback={<div className="text-gray-400 p-8 text-center">Loading…</div>}>
+                <SecurityDashboardPanel token={authToken} />
+              </Suspense>
+              {/* Legacy inline content below for fallback */}
+              <div className="panel-header" style={{ display: 'none' }}>
                 <ShieldCheck size={18} />
                 <h3>Security Dashboard</h3>
               </div>
@@ -1101,6 +1126,39 @@ export default function NexusAI() {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* New dashboard panels */}
+          {showToolContent && activeTool === 'analytics' && (
+            <div className="tool-content" style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 200px)' }}>
+              <Suspense fallback={<div className="text-gray-400 p-8 text-center">Loading…</div>}>
+                <AnalyticsDashboard token={authToken} />
+              </Suspense>
+            </div>
+          )}
+
+          {showToolContent && activeTool === 'projects' && (
+            <div className="tool-content" style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 200px)' }}>
+              <Suspense fallback={<div className="text-gray-400 p-8 text-center">Loading…</div>}>
+                <ProjectDashboard token={authToken} />
+              </Suspense>
+            </div>
+          )}
+
+          {showToolContent && activeTool === 'subscription' && (
+            <div className="tool-content" style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 200px)' }}>
+              <Suspense fallback={<div className="text-gray-400 p-8 text-center">Loading…</div>}>
+                <SubscriptionCheckout token={authToken} currentPlan={currentUser?.plan || 'free'} />
+              </Suspense>
+            </div>
+          )}
+
+          {showToolContent && activeTool === 'admin' && (
+            <div className="tool-content" style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 200px)' }}>
+              <Suspense fallback={<div className="text-gray-400 p-8 text-center">Loading…</div>}>
+                <AdminDashboard token={authToken} userRole={currentUser?.role || 'user'} />
+              </Suspense>
             </div>
           )}
 

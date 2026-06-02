@@ -7,18 +7,87 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
--- Users table
+-- Users table — supports unicode/emoji usernames, MFA, roles
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    username TEXT NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
-    display_name VARCHAR(255),
+    role VARCHAR(20) NOT NULL DEFAULT 'user' CHECK (role IN ('super_admin','admin','dev','moderator','user')),
+    language VARCHAR(10) DEFAULT 'en',
+    region VARCHAR(10) DEFAULT 'US',
+    mfa_enabled BOOLEAN DEFAULT FALSE,
+    mfa_secret TEXT,
+    backup_code_hashes TEXT[] DEFAULT '{}',
+    email_verified BOOLEAN DEFAULT FALSE,
+    plan VARCHAR(20) DEFAULT 'free' CHECK (plan IN ('free','pro','enterprise')),
+    plan_expires_at TIMESTAMP WITH TIME ZONE,
+    stripe_customer_id TEXT,
     avatar_url TEXT,
     settings JSONB DEFAULT '{}',
-    api_keys JSONB DEFAULT '{}',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     last_login TIMESTAMP WITH TIME ZONE
+);
+
+-- Projects table
+CREATE TABLE IF NOT EXISTS projects (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    type VARCHAR(30) NOT NULL,
+    description TEXT DEFAULT '',
+    platform VARCHAR(50),
+    technologies TEXT[] DEFAULT '{}',
+    target_platforms TEXT[] DEFAULT '{}',
+    is_public BOOLEAN DEFAULT FALSE,
+    milestones JSONB DEFAULT '[]',
+    achievements JSONB DEFAULT '[]',
+    connectors JSONB DEFAULT '[]',
+    progress INTEGER DEFAULT 0 CHECK (progress BETWEEN 0 AND 100),
+    lines_of_code INTEGER DEFAULT 0,
+    commits INTEGER DEFAULT 0,
+    bugs_fixed INTEGER DEFAULT 0,
+    hours_logged NUMERIC(10,2) DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Subscriptions table
+CREATE TABLE IF NOT EXISTS subscriptions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE UNIQUE,
+    plan VARCHAR(20) NOT NULL DEFAULT 'free',
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    stripe_subscription_id TEXT,
+    stripe_customer_id TEXT,
+    gift_card_code TEXT,
+    renews_at TIMESTAMP WITH TIME ZONE,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Gift cards table
+CREATE TABLE IF NOT EXISTS gift_cards (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    code TEXT UNIQUE NOT NULL,
+    plan VARCHAR(20) NOT NULL DEFAULT 'pro',
+    duration_days INTEGER NOT NULL DEFAULT 30,
+    redeemed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    redeemed_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Social analytics connections
+CREATE TABLE IF NOT EXISTS social_connections (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    platform VARCHAR(30) NOT NULL,
+    access_token_enc TEXT,
+    refresh_token_enc TEXT,
+    connected_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, platform)
 );
 
 -- Chats table
@@ -121,6 +190,11 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_user_id ON audit_log(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_api_usage_user_id ON api_usage(user_id);
 CREATE INDEX IF NOT EXISTS idx_api_usage_created_at ON api_usage(created_at);
+CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id);
+CREATE INDEX IF NOT EXISTS idx_social_connections_user_id ON social_connections(user_id);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 
 -- Create updated_at trigger function
 CREATE OR REPLACE FUNCTION update_updated_at_column()

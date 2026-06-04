@@ -1,6 +1,8 @@
 // ================================================
-// NEXUS AI PRO - Enhanced Backend Server
+// NEXUS AI PRO — Enhanced Backend Server
 // Military-Grade Security & Multi-Model AI Platform
+// Roles: admin | dev | moderator | user
+// Created / Updated: 2026-06-04
 // ================================================
 
 import express from 'express';
@@ -15,6 +17,12 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import { authRouter } from './src/api/auth.js';
+import { analyticsRouter, bindAnalyticsSocket } from './src/api/analytics.js';
+import { projectsRouter, bindProjectSocket } from './src/api/projects.js';
+import { gamedevRouter } from './src/api/gamedev.js';
+import { paymentsRouter } from './src/api/payments.js';
+import { integrationsRouter } from './src/api/integrations.js';
 
 dotenv.config();
 
@@ -276,6 +284,10 @@ const io = new Server(httpServer, {
   pingTimeout: 60000
 });
 
+// Bind real-time namespaces
+bindAnalyticsSocket(io);
+bindProjectSocket(io);
+
 // ================================================
 // MIDDLEWARE STACK
 // ================================================
@@ -326,6 +338,17 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID']
 }));
+
+// Raw body capture for Stripe webhook signature verification
+app.use((req, res, next) => {
+  if (req.path === '/api/payments/webhook') {
+    let raw = '';
+    req.on('data', chunk => { raw += chunk; });
+    req.on('end', () => { req.rawBody = raw; next(); });
+  } else {
+    next();
+  }
+});
 
 // Body parsing with size limits
 app.use(express.json({ limit: '10mb' }));
@@ -441,8 +464,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-ultra';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +838,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -831,7 +854,20 @@ class WorkflowEngine {
 const workflowEngine = new WorkflowEngine();
 
 // ================================================
-// API ROUTES
+// API ROUTES — New Modules
+// ================================================
+app.use('/api/auth', authRouter);
+app.use('/api/analytics', analyticsRouter);
+app.use('/api/projects', projectsRouter);
+app.use('/api/gamedev', gamedevRouter);
+app.use('/api/payments', paymentsRouter);
+app.use('/api/integrations', integrationsRouter);
+
+// Auth service status (used by network health checks)
+app.get('/api/auth/status', (req, res) => { res.json({ status: 'ok' }); });
+
+// ================================================
+// API ROUTES — Core
 // ================================================
 
 // Health check

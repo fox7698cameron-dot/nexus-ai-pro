@@ -1,19 +1,30 @@
 -- ================================================
--- NEXUS AI PRO - Database Initialization
--- PostgreSQL schema for production deployment
+-- NEXUS AI PRO - Database Initialization v2.1
+-- 2026-06-06 | Enterprise schema
 -- ================================================
 
 -- Enable extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
--- Users table
+-- Users table (extended: roles, MFA, biometrics, i18n, subscription)
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email VARCHAR(255) UNIQUE NOT NULL,
+    username VARCHAR(32) UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     display_name VARCHAR(255),
     avatar_url TEXT,
+    role VARCHAR(20) NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'moderator', 'dev', 'admin')),
+    subscription VARCHAR(20) DEFAULT 'free' CHECK (subscription IN ('free', 'pro', 'enterprise')),
+    stripe_customer_id VARCHAR(100),
+    mfa_enabled BOOLEAN DEFAULT FALSE,
+    mfa_secret TEXT,
+    biometric_key_id TEXT,
+    biometric_platform VARCHAR(20),
+    warnings JSONB DEFAULT '[]',
+    locale VARCHAR(10) DEFAULT 'en',
+    timezone VARCHAR(50) DEFAULT 'UTC',
     settings JSONB DEFAULT '{}',
     api_keys JSONB DEFAULT '{}',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -163,6 +174,138 @@ INSERT INTO users (email, password_hash, display_name)
 VALUES ('system@nexusai.pro', 'SYSTEM_ACCOUNT_NO_LOGIN', 'System')
 ON CONFLICT (email) DO NOTHING;
 
+-- ─── Analytics ───────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS analytics_connections (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    platform VARCHAR(30) NOT NULL,
+    account_id VARCHAR(255),
+    encrypted_token TEXT,
+    scopes TEXT[] DEFAULT '{}',
+    connected_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user_id, platform)
+);
+
+CREATE TABLE IF NOT EXISTS analytics_snapshots (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    platform VARCHAR(30) NOT NULL,
+    metrics JSONB DEFAULT '{}',
+    snapshot_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user_id, platform, snapshot_date)
+);
+
+-- ─── Projects ─────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS projects (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    type VARCHAR(30) NOT NULL,
+    description TEXT,
+    engine VARCHAR(50),
+    platform TEXT[] DEFAULT '{}',
+    tags TEXT[] DEFAULT '{}',
+    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'paused', 'completed', 'archived')),
+    progress INTEGER DEFAULT 0 CHECK (progress BETWEEN 0 AND 100),
+    commits INTEGER DEFAULT 0,
+    lines_of_code INTEGER DEFAULT 0,
+    build_status VARCHAR(20) DEFAULT 'unknown',
+    last_build_at TIMESTAMP WITH TIME ZONE,
+    milestones JSONB DEFAULT '[]',
+    connectors JSONB DEFAULT '{}',
+    collaborators UUID[] DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS achievements (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    platform VARCHAR(30) NOT NULL,
+    achievement_id VARCHAR(255) NOT NULL,
+    name VARCHAR(255),
+    description TEXT,
+    unlocked_at TIMESTAMP WITH TIME ZONE,
+    metadata JSONB DEFAULT '{}',
+    UNIQUE (user_id, platform, achievement_id)
+);
+
+CREATE TABLE IF NOT EXISTS game_progress (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    game_id VARCHAR(255) NOT NULL,
+    platform VARCHAR(30) NOT NULL,
+    completion_percent INTEGER DEFAULT 0,
+    playtime INTEGER DEFAULT 0,
+    level INTEGER DEFAULT 1,
+    checkpoints JSONB DEFAULT '[]',
+    achievements JSONB DEFAULT '[]',
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user_id, game_id)
+);
+
+-- ─── Payments ─────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    stripe_subscription_id VARCHAR(100) UNIQUE,
+    stripe_customer_id VARCHAR(100),
+    plan VARCHAR(30) NOT NULL DEFAULT 'free',
+    status VARCHAR(20) NOT NULL DEFAULT 'inactive',
+    current_period_start TIMESTAMP WITH TIME ZONE,
+    current_period_end TIMESTAMP WITH TIME ZONE,
+    cancel_at_period_end BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS gift_cards (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    code VARCHAR(50) UNIQUE NOT NULL,
+    plan VARCHAR(30) NOT NULL,
+    credits INTEGER DEFAULT 1,
+    used BOOLEAN DEFAULT FALSE,
+    redeemed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    redeemed_at TIMESTAMP WITH TIME ZONE,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ─── Connectors ───────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS platform_connectors (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    service VARCHAR(50) NOT NULL,
+    account_id VARCHAR(255),
+    encrypted_credentials TEXT,
+    scopes TEXT[] DEFAULT '{}',
+    connected_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user_id, service)
+);
+
+-- ─── Additional indexes ───────────────────────────────────────────────────────
+
+CREATE INDEX IF NOT EXISTS idx_analytics_connections_user ON analytics_connections(user_id);
+CREATE INDEX IF NOT EXISTS idx_analytics_snapshots_user_platform ON analytics_snapshots(user_id, platform);
+CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
+CREATE INDEX IF NOT EXISTS idx_projects_type ON projects(type);
+CREATE INDEX IF NOT EXISTS idx_achievements_user ON achievements(user_id);
+CREATE INDEX IF NOT EXISTS idx_game_progress_user ON game_progress(user_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id);
+CREATE INDEX IF NOT EXISTS idx_platform_connectors_user ON platform_connectors(user_id);
+
+-- Trigger for projects updated_at
+CREATE TRIGGER update_projects_updated_at BEFORE UPDATE ON projects
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_subscriptions_updated_at BEFORE UPDATE ON subscriptions
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
 -- Grant permissions
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO postgres;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO postgres;
@@ -170,5 +313,5 @@ GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO postgres;
 -- Success message
 DO $$
 BEGIN
-    RAISE NOTICE '✅ Nexus AI Pro database initialized successfully!';
+    RAISE NOTICE '✅ Nexus AI Pro v2.1 database initialized successfully!';
 END $$;

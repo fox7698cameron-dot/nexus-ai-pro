@@ -1,6 +1,6 @@
 // ================================================
-// NEXUS AI PRO - Enhanced Backend Server
-// Military-Grade Security & Multi-Model AI Platform
+// NEXUS AI PRO - Enhanced Backend Server v2.1
+// 2026-06-06 | Enterprise-grade AI platform
 // ================================================
 
 import express from 'express';
@@ -15,6 +15,14 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+
+// New route modules
+import authRouter from './server/routes/auth.js';
+import analyticsRouter, { registerAnalyticsRealtime } from './server/routes/analytics.js';
+import paymentsRouter from './server/routes/payments.js';
+import projectsRouter from './server/routes/projects.js';
+import adminRouter from './server/routes/admin.js';
+import connectorsRouter from './server/routes/connectors.js';
 
 dotenv.config();
 
@@ -441,8 +449,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-2.0-flash';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -1099,14 +1106,69 @@ app.get('/api/templates/app', (req, res) => {
 });
 
 // ================================================
+// NEW ENTERPRISE ROUTES
+// ================================================
+
+// Auth: register, login, 2FA, MFA, biometrics
+app.use('/api/auth', authRouter);
+
+// Analytics: social media metrics (TikTok, Instagram, etc.)
+app.use('/api/analytics', analyticsRouter);
+
+// Payments: Stripe subscriptions, gift cards
+// Raw body needed for Stripe webhook signature verification
+app.post('/api/payments/webhook', express.raw({ type: 'application/json' }), (req, res, next) => {
+  req.rawBody = req.body;
+  next();
+});
+app.use('/api/payments', paymentsRouter);
+
+// Projects: coding, game, AR/VR, 3D tracking + game engine connectors
+app.use('/api/projects', projectsRouter);
+
+// Admin: role-based admin/dev/moderator management
+app.use('/api/admin', adminRouter);
+
+// Cloud & platform connectors: Azure, AWS, Google, Slack, Zoom, GitHub, Bitbucket
+app.use('/api/connectors', connectorsRouter);
+
+// i18n auto-translate endpoint
+app.post('/api/i18n/translate', async (req, res) => {
+  const { text, targetLocale, sourceLocale = 'en' } = req.body;
+  if (!text || !targetLocale) return res.status(400).json({ error: 'text and targetLocale required' });
+  if (targetLocale === sourceLocale) return res.json({ translatedText: text });
+
+  const apiKey = process.env.GOOGLE_TRANSLATE_API_KEY;
+  if (!apiKey) return res.json({ translatedText: text, note: 'GOOGLE_TRANSLATE_API_KEY not configured' });
+
+  try {
+    const resp = await fetch(
+      `https://translation.googleapis.com/language/translate/v2?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q: text, source: sourceLocale, target: targetLocale, format: 'text' })
+      }
+    );
+    const data = await resp.json();
+    const translated = data?.data?.translations?.[0]?.translatedText || text;
+    res.json({ translatedText: translated });
+  } catch (err) {
+    res.json({ translatedText: text, error: err.message });
+  }
+});
+
+// ================================================
 // WEBSOCKET HANDLING
 // ================================================
+
+// Register real-time analytics push
+registerAnalyticsRealtime(io);
 
 io.use((socket, next) => {
   // Authenticate socket connection
   const token = socket.handshake.auth.token;
   if (token) {
-    // Verify token
     socket.userId = security.hash(token);
     next();
   } else {
@@ -1116,6 +1178,9 @@ io.use((socket, next) => {
 });
 
 io.on('connection', (socket) => {
+  // Room join/leave for scoped real-time events
+  socket.on('join', (room) => socket.join(room));
+  socket.on('leave', (room) => socket.leave(room));
   console.log(`Client connected: ${socket.id}`);
   security.logAudit('SOCKET_CONNECT', { socketId: socket.id, userId: socket.userId });
 

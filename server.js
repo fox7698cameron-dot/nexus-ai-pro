@@ -1,6 +1,8 @@
 // ================================================
 // NEXUS AI PRO - Enhanced Backend Server
 // Military-Grade Security & Multi-Model AI Platform
+// Author: Cameron Fox <contact@nexusai.pro>
+// Date: 2026-06-09
 // ================================================
 
 import express from 'express';
@@ -15,6 +17,15 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+
+// New feature modules
+import authRouter         from './src/server/auth.js';
+import analyticsRouter    from './src/server/analytics.js';
+import subscriptionsRouter from './src/server/subscriptions.js';
+import projectsRouter     from './src/server/project-tracking.js';
+import gamesRouter        from './src/server/game-connectors.js';
+import connectorsRouter   from './src/server/connectors.js';
+import { i18nMiddleware } from './src/i18n/index.js';
 
 dotenv.config();
 
@@ -441,7 +452,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
+    const model = options.model || 'gemini-2.0-flash';
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
@@ -816,6 +827,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -833,6 +845,25 @@ const workflowEngine = new WorkflowEngine();
 // ================================================
 // API ROUTES
 // ================================================
+
+// ================================================
+// I18N MIDDLEWARE
+// ================================================
+app.use(i18nMiddleware);
+
+// ================================================
+// FEATURE ROUTES
+// ================================================
+// Note: /api/subscriptions/webhook is handled inside subscriptionsRouter with express.raw()
+// for Stripe signature verification. Mount after global middleware — express.raw() in the
+// route handler re-buffers for that specific path.
+
+app.use('/api/auth',          authRouter);
+app.use('/api/analytics',     analyticsRouter);
+app.use('/api/subscriptions', subscriptionsRouter);
+app.use('/api/projects',      projectsRouter);
+app.use('/api/games',         gamesRouter);
+app.use('/api/connectors',    connectorsRouter);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -874,8 +905,8 @@ app.get('/api/security/dashboard', async (req, res) => {
   try {
     const status = security.getSecurityStatus();
     const recentLogs = security.auditLog.slice(-10);
-    const threatsSummary = recentLogs.filter(l => l.type.includes('THREAT') || l.type.includes('ATTACK'));
-    
+    const threatsSummary = recentLogs.filter(l => (l.event || '').includes('THREAT') || (l.event || '').includes('ATTACK'));
+
     res.json({
       overallScore: status.securityScore || 92,
       encryptionStatus: 'AES-256-GCM',
@@ -887,7 +918,7 @@ app.get('/api/security/dashboard', async (req, res) => {
         { id: 3, name: 'TLS/SSL Configuration', severity: 'high', status: 'resolved' }
       ],
       threats: threatsSummary.slice(0, 5).map(log => ({
-        type: log.type,
+        type: log.event,
         status: 'blocked',
         timestamp: log.timestamp
       })),
@@ -901,7 +932,7 @@ app.get('/api/security/dashboard', async (req, res) => {
 // Security alerts endpoint
 app.get('/api/security/alerts', (req, res) => {
   const alerts = security.auditLog
-    .filter(l => l.type.includes('ERROR') || l.type.includes('THREAT') || l.type.includes('ATTACK'))
+    .filter(l => (l.event || '').includes('ERROR') || (l.event || '').includes('THREAT') || (l.event || '').includes('ATTACK'))
     .slice(-20);
   
   res.json({

@@ -1,6 +1,9 @@
+// main.jsx | Nexus AI Pro | © 2025-2026 Cameron Fox | 2026-06-10
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import './src/i18n/index.js';
 import NexusAI from './app.jsx';
+import MainDashboard from './src/components/MainDashboard.jsx';
 
 // Security: Disable React DevTools in production
 if (typeof window.__REACT_DEVTOOLS_GLOBAL_HOOK__ === 'object') {
@@ -80,11 +83,14 @@ class ErrorBoundary extends React.Component {
 }
 
 // Mount application
+// Use VITE_APP_MODE=dashboard to load the new unified dashboard
+const useDashboard = import.meta.env.VITE_APP_MODE === 'dashboard';
+
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
     <ErrorBoundary>
-      <NexusAI />
+      {useDashboard ? <MainDashboard /> : <NexusAI />}
     </ErrorBoundary>
   </React.StrictMode>
 );

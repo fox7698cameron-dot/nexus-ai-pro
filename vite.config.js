@@ -36,14 +36,17 @@ export default defineConfig({
     },
     rollupOptions: {
       output: {
-        manualChunks: {
-          'react-vendor': ['react', 'react-dom'],
-          'ai-vendor': ['@anthropic-ai/sdk', 'openai'],
-          'ui-vendor': ['lucide-react']
+        manualChunks(id) {
+          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) return 'react-vendor';
+          if (id.includes('node_modules/@anthropic-ai') || id.includes('node_modules/openai')) return 'ai-vendor';
+          if (id.includes('node_modules/lucide-react')) return 'ui-vendor';
+          if (id.includes('node_modules/recharts') || id.includes('node_modules/d3-')) return 'chart-vendor';
+          if (id.includes('node_modules/stripe') || id.includes('node_modules/@stripe')) return 'stripe-vendor';
+          if (id.includes('node_modules/i18next') || id.includes('node_modules/react-i18next')) return 'i18n-vendor';
         }
       }
     },
-    chunkSizeWarningLimit: 1000
+    chunkSizeWarningLimit: 1500
   },
   optimizeDeps: {
     include: ['react', 'react-dom', 'lucide-react']

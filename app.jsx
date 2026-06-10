@@ -737,7 +737,7 @@ export default function NexusAI() {
   // Security Scanning Functions
   const runSecurityScan = async () => {
     setSecurityScan(prev => ({ ...prev, isScanning: true }));
-    
+
     try {
       const dashboard = await securityService.runScan();
       setSecurityScan(prev => ({
@@ -757,13 +757,13 @@ export default function NexusAI() {
         { id: 2, name: 'API Key Exposure Risk', severity: 'low', status: 'info', description: 'Review environment variable handling' },
         { id: 3, name: 'TLS/SSL Configuration', severity: 'high', status: 'resolved', description: 'TLS 1.3 enabled and verified' }
       ];
-      
+
       const threats = [
         { type: 'Unauthorized Access', status: 'blocked', timestamp: Date.now() - 3600000 },
         { type: 'Injection Attack', status: 'prevented', timestamp: Date.now() - 7200000 },
         { type: 'XSS Attempt', status: 'filtered', timestamp: Date.now() - 86400000 }
       ];
-      
+
       setSecurityScan(prev => ({
         ...prev,
         isScanning: false,
@@ -1002,7 +1002,7 @@ export default function NexusAI() {
                 <ShieldCheck size={18} />
                 <h3>Security Dashboard</h3>
               </div>
-              
+
               <div className="security-grid">
                 {/* Overall Score */}
                 <div className="security-card score-card">
@@ -1024,7 +1024,7 @@ export default function NexusAI() {
 
                 {/* Scan Button */}
                 <div className="security-card action-card">
-                  <button 
+                  <button
                     className={`scan-btn ${securityScan.isScanning ? 'scanning' : ''}`}
                     onClick={runSecurityScan}
                     disabled={securityScan.isScanning}
@@ -1062,7 +1062,7 @@ export default function NexusAI() {
                           </div>
                           <div className="vuln-desc">{vuln.description}</div>
                           {vuln.status !== 'patched' && (
-                            <button 
+                            <button
                               className="patch-btn"
                               onClick={() => patchVulnerability(vuln.id)}
                             >

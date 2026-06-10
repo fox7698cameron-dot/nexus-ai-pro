@@ -1,7 +1,7 @@
 /**
  * Copyright © 2025-2026 Cameron Fox. All rights reserved.
  * Licensed under the Apache License, Version 2.0
- * 
+ *
  * Cross-Platform Security Service
  * Shared between web, iOS, Android, Desktop platforms
  */
@@ -24,13 +24,13 @@ export class SecurityService {
       const response = await fetch(`${this.apiBaseUrl}/security/dashboard`);
       if (!response.ok) throw new Error('Failed to fetch dashboard');
       const data = await response.json();
-      
+
       this.overallScore = data.overallScore;
       this.vulnerabilities = data.vulnerabilities;
       this.threats = data.threats;
       this.encryptionStatus = data.encryptionStatus;
       this.lastScanTime = data.lastScanTime;
-      
+
       return data;
     } catch (error) {
       console.error('Security dashboard fetch error:', error);
@@ -60,13 +60,13 @@ export class SecurityService {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       });
-      
+
       if (!response.ok) throw new Error('Scan failed');
       const results = await response.json();
-      
+
       this.vulnerabilities = results.vulnerabilities || [];
       this.lastScanTime = Date.now();
-      
+
       return results;
     } catch (error) {
       console.error('Security scan error:', error);
@@ -84,7 +84,7 @@ export class SecurityService {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ vulnerabilityId: vulnId })
       });
-      
+
       if (!response.ok) throw new Error('Patch failed');
       return await response.json();
     } catch (error) {
@@ -148,7 +148,7 @@ export class SecurityService {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       });
-      
+
       if (!response.ok) throw new Error('Key rotation failed');
       return await response.json();
     } catch (error) {
@@ -208,7 +208,7 @@ export class SecurityService {
     const dashboard = await this.getDashboard();
     const alerts = await this.getAlerts();
     const logs = await this.getAuditLogs(100);
-    
+
     return {
       generatedAt: new Date().toISOString(),
       platform: this.getPlatform(),

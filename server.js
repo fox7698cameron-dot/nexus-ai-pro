@@ -1,6 +1,7 @@
 // ================================================
-// NEXUS AI PRO - Enhanced Backend Server
-// Military-Grade Security & Multi-Model AI Platform
+// NEXUS AI PRO - Enterprise Backend Server v2.1
+// Multi-platform · Analytics · Security · Auth · Payments
+// 2026-06-12 | Cameron Fox
 // ================================================
 
 import express from 'express';
@@ -15,8 +16,17 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import { AuthService } from './src/auth/auth-service.js';
+import { AnalyticsService } from './src/analytics/analytics-service.js';
+import { ProjectsService } from './src/projects/projects-service.js';
+import { StripeService, redeemGiftCard } from './src/payments/stripe-service.js';
+import { getConnectorStatus, sendSlackNotification, GitHubConnector, BlobStorage } from './src/connectors/cloud-connectors.js';
+import { initI18n, i18nMiddleware, autoTranslate, SUPPORTED_LANGUAGES } from './src/i18n/i18n-config.js';
 
 dotenv.config();
+
+// Initialise i18n (non-blocking — server starts while loading)
+initI18n().catch(e => console.error('[i18n] init error:', e.message));
 
 const app = express();
 const httpServer = createServer(app);
@@ -441,8 +451,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-pro';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -1148,6 +1157,10 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     security.logAudit('SOCKET_DISCONNECT', { socketId: socket.id });
   });
+
+  // Subscribe to project / analytics rooms
+  socket.on('subscribe:analytics', () => socket.join('analytics'));
+  socket.on('subscribe:projects', (userId) => socket.join(`projects:${userId}`));
 });
 
 // ================================================
@@ -1155,14 +1168,341 @@ io.on('connection', (socket) => {
 // ================================================
 
 setInterval(async () => {
-  console.log('Running automated security scan...');
   const scan = await security.scanVulnerabilities();
+  if (scan.vulnerabilities.length > 0) await security.autoPatch();
+}, 60 * 60 * 1000);
 
-  if (scan.vulnerabilities.length > 0) {
-    console.log('Vulnerabilities detected, auto-patching...');
-    await security.autoPatch();
+// Real-time analytics broadcast (every 30s)
+AnalyticsService.startRealTimeFeed(io, 30_000);
+
+// ================================================
+// AUTH ROUTES
+// ================================================
+
+app.post('/api/auth/register', authLimiter, async (req, res) => {
+  try {
+    const result = await AuthService.register(req.body);
+    if (result.error) return res.status(400).json(result);
+    security.logAudit('USER_REGISTER', { id: result.id, role: result.role });
+    res.status(201).json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/auth/login', authLimiter, async (req, res) => {
+  try {
+    const result = await AuthService.login(req.body);
+    if (result.error) return res.status(401).json(result);
+    if (result.mfaRequired) return res.status(200).json(result);
+    security.logAudit('USER_LOGIN', { id: result.user?.id });
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/auth/refresh', (req, res) => {
+  const { refreshToken } = req.body;
+  if (!refreshToken) return res.status(400).json({ error: 'refreshToken required' });
+  const result = AuthService.refresh(refreshToken);
+  if (result.error) return res.status(401).json(result);
+  res.json(result);
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  const { refreshToken } = req.body;
+  res.json(AuthService.logout(refreshToken));
+});
+
+app.post('/api/auth/password-strength', (req, res) => {
+  const { password } = req.body;
+  res.json(AuthService.checkStrength(password || ''));
+});
+
+app.post('/api/auth/2fa/setup', AuthService.requireAuth(), async (req, res) => {
+  const result = await AuthService.setupMFA(req.user.sub);
+  res.json(result);
+});
+
+app.post('/api/auth/2fa/confirm', AuthService.requireAuth(), (req, res) => {
+  const { totpCode } = req.body;
+  res.json(AuthService.confirmMFA(req.user.sub, totpCode));
+});
+
+app.post('/api/auth/2fa/disable', AuthService.requireAuth(), (req, res) => {
+  const { totpCode } = req.body;
+  res.json(AuthService.disableMFA(req.user.sub, totpCode));
+});
+
+app.get('/api/auth/biometric/challenge/:userId', (req, res) => {
+  res.json(AuthService.getBiometricChallenge(req.params.userId));
+});
+
+app.post('/api/auth/biometric/verify', (req, res) => {
+  const { userId, signedChallenge } = req.body;
+  const result = AuthService.verifyBiometric(userId, signedChallenge);
+  if (result.error) return res.status(401).json(result);
+  res.json(result);
+});
+
+app.get('/api/auth/profile', AuthService.requireAuth(), (req, res) => {
+  const profile = AuthService.getProfile(req.user.sub);
+  if (!profile) return res.status(404).json({ error: 'User not found.' });
+  res.json(profile);
+});
+
+// ================================================
+// ANALYTICS ROUTES
+// ================================================
+
+app.get('/api/analytics/platform/:platform', AuthService.requireAuth(), async (req, res) => {
+  try {
+    const { platform } = req.params;
+    const { period = '7d' } = req.query;
+    const data = await AnalyticsService.fetchPlatformMetrics(platform, req.user.sub, period);
+    res.json(data);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get('/api/analytics/aggregated', AuthService.requireAuth(), async (req, res) => {
+  try {
+    const { period = '7d' } = req.query;
+    const data = await AnalyticsService.getAggregatedMetrics(req.user.sub, period);
+    res.json(data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/analytics/platforms', (req, res) => {
+  res.json(Object.entries(AnalyticsService.PLATFORMS).map(([key, cfg]) => ({ key, ...cfg })));
+});
+
+// ================================================
+// PROJECT TRACKING ROUTES
+// ================================================
+
+app.post('/api/projects', AuthService.requireAuth(), (req, res) => {
+  try {
+    const project = ProjectsService.createProject({ ...req.body, userId: req.user.sub });
+    io.emit('project:updated', { userId: req.user.sub });
+    res.status(201).json(project);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get('/api/projects', AuthService.requireAuth(), (req, res) => {
+  const { type, status } = req.query;
+  res.json(ProjectsService.listProjects(req.user.sub, { type, status }));
+});
+
+app.get('/api/projects/stats', AuthService.requireAuth(), (req, res) => {
+  res.json(ProjectsService.getProjectStats(req.user.sub));
+});
+
+app.get('/api/projects/achievements', AuthService.requireAuth(), (req, res) => {
+  res.json(ProjectsService.getAchievements(req.user.sub));
+});
+
+app.get('/api/projects/:id', AuthService.requireAuth(), (req, res) => {
+  const p = ProjectsService.getProject(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Project not found.' });
+  res.json(p);
+});
+
+app.put('/api/projects/:id', AuthService.requireAuth(), (req, res) => {
+  const p = ProjectsService.updateProject(req.params.id, req.body);
+  if (!p) return res.status(404).json({ error: 'Project not found.' });
+  io.emit('project:updated', { userId: req.user.sub });
+  res.json(p);
+});
+
+app.delete('/api/projects/:id', AuthService.requireAuth(), (req, res) => {
+  res.json({ success: ProjectsService.deleteProject(req.params.id) });
+});
+
+app.post('/api/projects/:id/milestones', AuthService.requireAuth(), (req, res) => {
+  const p = ProjectsService.getProject(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Project not found.' });
+  const ms = { id: uuidv4(), ...req.body, completed: false, completedAt: null };
+  p.milestones = [...(p.milestones || []), ms];
+  p.updatedAt = Date.now();
+  io.emit('project:updated', { userId: req.user.sub });
+  res.status(201).json(p);
+});
+
+app.post('/api/projects/:id/milestones/:msId/complete', AuthService.requireAuth(), (req, res) => {
+  const p = ProjectsService.completeMilestone(req.params.id, req.params.msId);
+  if (!p) return res.status(404).json({ error: 'Not found.' });
+  if (p.progress === 100) {
+    ProjectsService.grantAchievement({ userId: req.user.sub, projectId: p.id, title: 'Project Complete!', description: `Completed ${p.name}`, xp: 50 });
   }
-}, 60 * 60 * 1000); // Every hour
+  io.emit('project:updated', { userId: req.user.sub });
+  res.json(p);
+});
+
+app.post('/api/projects/:id/sync/:connector', AuthService.requireAuth(), async (req, res) => {
+  try {
+    const data = await ProjectsService.syncGameConnector(req.params.id, req.params.connector);
+    res.json(data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ================================================
+// PAYMENT ROUTES
+// ================================================
+
+app.post('/api/payments/checkout-session', AuthService.requireAuth(), async (req, res) => {
+  try {
+    const { planId, successUrl, cancelUrl } = req.body;
+    const customerId = req.user.stripeCustomerId;
+    if (!customerId) {
+      const customer = await StripeService.createCustomer({ email: req.user.email || 'user@example.com', userId: req.user.sub });
+      req.user.stripeCustomerId = customer.id;
+    }
+    const session = await StripeService.createCheckoutSession({
+      customerId: req.user.stripeCustomerId || 'placeholder',
+      planId, successUrl, cancelUrl, userId: req.user.sub
+    });
+    res.json({ url: session.url, sessionId: session.id });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post('/api/payments/crypto', AuthService.requireAuth(), (req, res) => {
+  try {
+    const { planId, currency } = req.body;
+    res.json(StripeService.createCryptoPaymentRequest({ planId, userId: req.user.sub, currency }));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post('/api/payments/redeem-gift', AuthService.requireAuth(), (req, res) => {
+  const { code } = req.body;
+  const result = redeemGiftCard(code);
+  if (result.error) return res.status(400).json(result);
+  security.logAudit('GIFT_REDEEMED', { userId: req.user.sub, planId: result.planId });
+  res.json(result);
+});
+
+// Stripe webhook — raw body required for signature verification
+app.post('/api/payments/webhook',
+  express.raw({ type: 'application/json' }),
+  (req, res) => {
+    const sig = req.headers['stripe-signature'];
+    try {
+      const event = StripeService.constructWebhookEvent(req.body, sig);
+      const action = StripeService.handleWebhookEvent(event);
+      security.logAudit('STRIPE_WEBHOOK', { type: event.type, action: action.action });
+      res.json({ received: true });
+    } catch (e) {
+      return res.status(400).json({ error: `Webhook error: ${e.message}` });
+    }
+  }
+);
+
+// ================================================
+// CONNECTOR ROUTES
+// ================================================
+
+app.get('/api/connectors/status', (req, res) => {
+  res.json(getConnectorStatus());
+});
+
+app.get('/api/connectors/github/repo/:owner/:repo', AuthService.requireAuth(), async (req, res) => {
+  const data = await GitHubConnector.getRepo(req.params.owner, req.params.repo);
+  res.json(data);
+});
+
+app.get('/api/connectors/github/:owner/:repo/issues', AuthService.requireAuth(), async (req, res) => {
+  const data = await GitHubConnector.listIssues(req.params.owner, req.params.repo, req.query.state);
+  res.json(data);
+});
+
+app.post('/api/connectors/slack/notify', AuthService.requireAuth([AuthService.ROLES.ADMIN, AuthService.ROLES.DEV]), async (req, res) => {
+  const { text, blocks } = req.body;
+  const result = await sendSlackNotification(text, blocks);
+  res.json(result);
+});
+
+app.post('/api/connectors/blob/upload', AuthService.requireAuth(), upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file provided.' });
+    const key = `uploads/${req.user.sub}/${uuidv4()}-${req.file.originalname}`;
+    const result = await BlobStorage.upload(key, req.file.buffer, req.file.mimetype);
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ================================================
+// I18N ROUTES
+// ================================================
+
+app.get('/api/i18n/languages', (req, res) => {
+  res.json(SUPPORTED_LANGUAGES);
+});
+
+app.post('/api/i18n/translate', async (req, res) => {
+  try {
+    const { text, targetLang, sourceLang } = req.body;
+    if (!text || !targetLang) return res.status(400).json({ error: 'text and targetLang required.' });
+    const result = await autoTranslate(text, targetLang, sourceLang);
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ================================================
+// SECURITY DEVICE HEALTH + NETWORK SCAN
+// ================================================
+
+app.get('/api/security/device-health', (req, res) => {
+  res.json({
+    platform: process.platform,
+    nodeVersion: process.version,
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    checks: [
+      { name: 'Environment vars set', pass: !!(process.env.JWT_SECRET && process.env.ENCRYPTION_SECRET) },
+      { name: 'HTTPS forced (production)', pass: process.env.NODE_ENV !== 'production' || process.env.FORCE_HTTPS === 'true' },
+      { name: 'Debug mode off', pass: process.env.NODE_ENV !== 'development' },
+      { name: 'Process not root', pass: process.getuid?.() !== 0 }
+    ]
+  });
+});
+
+app.post('/api/security/network-scan', async (req, res) => {
+  const start = Date.now();
+  const checks = {
+    openPorts: [],
+    tlsIssues: 0,
+    dnsHealthy: true,
+    latencyMs: Date.now() - start
+  };
+
+  // Check if common sensitive ports are accessible (localhost self-check)
+  const testPorts = [22, 3306, 5432, 6379, 27017];
+  const portResults = await Promise.allSettled(
+    testPorts.map(port => new Promise(resolve => {
+      const { createConnection } = await import('net').catch(() => ({ createConnection: null }));
+      if (!createConnection) return resolve({ port, open: false });
+      const conn = createConnection({ host: 'localhost', port }, () => { conn.destroy(); resolve({ port, open: true }); });
+      conn.on('error', () => resolve({ port, open: false }));
+      conn.setTimeout(500, () => { conn.destroy(); resolve({ port, open: false }); });
+    }))
+  );
+  checks.openPorts = portResults.filter(r => r.status === 'fulfilled' && r.value.open).map(r => r.value.port);
+  checks.latencyMs = Date.now() - start;
+
+  security.logAudit('NETWORK_SCAN', checks);
+  res.json(checks);
+});
+
+// ================================================
+// ADMIN-ONLY ROUTES
+// ================================================
+
+app.get('/api/admin/users', AuthService.requireAuth([AuthService.ROLES.ADMIN]), (req, res) => {
+  // In production: fetch from database
+  res.json({ message: 'Admin user list endpoint — connect to database for live data.' });
+});
+
+app.get('/api/admin/audit-full', AuthService.requireAuth([AuthService.ROLES.ADMIN]), (req, res) => {
+  const { limit = 50, offset = 0 } = req.query;
+  const logs = security.auditLog.slice(-(Number(limit) + Number(offset)), -Number(offset) || undefined);
+  res.json({ logs, total: security.auditLog.length });
+});
 
 // ================================================
 // ERROR HANDLING

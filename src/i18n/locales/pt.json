@@ -1,0 +1,8 @@
+{
+  "translation": {
+    "app": { "name": "Nexus AI Pro", "tagline": "Plataforma de IA de Nível Militar" },
+    "nav": { "dashboard": "Painel", "analytics": "Análises", "security": "Segurança", "projects": "Projetos", "payments": "Pagamentos", "settings": "Configurações", "admin": "Admin", "dev": "Desenvolvedor", "moderator": "Moderador" },
+    "auth": { "login": "Entrar", "register": "Criar Conta", "logout": "Sair", "email": "Endereço de e-mail", "password": "Senha", "username": "Nome de usuário", "confirmPassword": "Confirmar senha", "forgotPassword": "Esqueceu a senha?", "passwordRequirements": "13+ caracteres com maiúscula, minúscula, número e caractere especial", "mfaTitle": "Autenticação de Dois Fatores", "mfaDescription": "Digite seu código de autenticador", "mfaToken": "Código de 6 dígitos", "biometric": "Usar Biometria", "roles": { "admin": "Administrador", "dev": "Desenvolvedor", "moderator": "Moderador", "user": "Usuário" } },
+    "common": { "save": "Salvar", "cancel": "Cancelar", "delete": "Excluir", "edit": "Editar", "confirm": "Confirmar", "back": "Voltar", "next": "Próximo", "loading": "Carregando...", "error": "Erro", "success": "Sucesso", "warning": "Aviso", "info": "Informação" }
+  }
+}

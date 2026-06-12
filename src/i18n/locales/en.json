@@ -1,0 +1,50 @@
+{
+  "translation": {
+    "app": { "name": "Nexus AI Pro", "tagline": "Military-Grade AI Platform" },
+    "nav": {
+      "dashboard": "Dashboard", "analytics": "Analytics", "security": "Security",
+      "projects": "Projects", "payments": "Payments", "settings": "Settings",
+      "admin": "Admin", "dev": "Developer", "moderator": "Moderator"
+    },
+    "auth": {
+      "login": "Sign In", "register": "Create Account", "logout": "Sign Out",
+      "email": "Email address", "password": "Password", "username": "Username",
+      "confirmPassword": "Confirm password", "forgotPassword": "Forgot password?",
+      "passwordRequirements": "13+ characters with uppercase, lowercase, number, and special character",
+      "mfaTitle": "Two-Factor Authentication", "mfaDescription": "Enter your authenticator code",
+      "mfaToken": "6-digit code", "biometric": "Use Biometric",
+      "roles": { "admin": "Administrator", "dev": "Developer", "moderator": "Moderator", "user": "User" }
+    },
+    "analytics": {
+      "title": "Analytics Dashboard", "overview": "Overview", "platforms": "Platforms",
+      "followers": "Followers", "views": "Views", "likes": "Likes", "reach": "Reach",
+      "engagement": "Engagement Rate", "retention": "Retention", "impressions": "Impressions",
+      "realTime": "Real-time", "history": "History", "last30Days": "Last 30 Days"
+    },
+    "security": {
+      "title": "Security Dashboard", "score": "Security Score", "scan": "Run Scan",
+      "scanning": "Scanning...", "lastScan": "Last Scan", "threats": "Threats",
+      "vulnerabilities": "Vulnerabilities", "network": "Network", "device": "Device",
+      "encryption": "Encryption", "status": "Status"
+    },
+    "projects": {
+      "title": "Projects", "new": "New Project", "progress": "Progress",
+      "milestones": "Milestones", "achievements": "Achievements", "status": "Status",
+      "types": {
+        "coding": "Coding", "game": "Game Dev", "ar_vr": "AR/VR",
+        "3d": "3D", "mobile": "Mobile", "web": "Web"
+      }
+    },
+    "payments": {
+      "title": "Subscription", "plans": "Plans", "upgrade": "Upgrade",
+      "currentPlan": "Current Plan", "card": "Credit / Debit Card",
+      "crypto": "Cryptocurrency", "giftCard": "Gift Card",
+      "monthly": "per month", "free": "Free", "pro": "Pro", "enterprise": "Enterprise"
+    },
+    "common": {
+      "save": "Save", "cancel": "Cancel", "delete": "Delete", "edit": "Edit",
+      "confirm": "Confirm", "back": "Back", "next": "Next", "loading": "Loading...",
+      "error": "Error", "success": "Success", "warning": "Warning", "info": "Info"
+    }
+  }
+}

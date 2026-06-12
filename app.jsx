@@ -1,9 +1,16 @@
-/* app.jsx
-   Updated: make UI more responsive for mobile/desktop, persist model selection, chats, memories, settings,
-   ensure AES-256 label present, and small responsive CSS tweaks.
-*/
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+// app.jsx - 2026-06-12
+// Main application: multi-dashboard, auth, analytics, projects, payments, integrations
+import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense, lazy } from 'react';
 import { securityService } from './src/security-service.js';
+
+// Lazy-load heavy dashboards
+const AnalyticsDashboard = lazy(() => import('./src/components/AnalyticsDashboard.jsx'));
+const ProjectTracker = lazy(() => import('./src/components/ProjectTracker.jsx'));
+const PaymentSystem = lazy(() => import('./src/components/PaymentSystem.jsx'));
+const EnhancedSecurityDashboard = lazy(() => import('./src/components/EnhancedSecurityDashboard.jsx'));
+const AdminDashboard = lazy(() => import('./src/admin/AdminDashboard.jsx'));
+const EnterpriseConnectors = lazy(() => import('./src/components/EnterpriseConnectors.jsx'));
+const AuthModal = lazy(() => import('./src/components/AuthModal.jsx'));
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
   Settings, Menu, X, Plus, Trash2, Download, Upload,
@@ -462,7 +469,12 @@ const TOOLS = {
   automation: { name: 'Automation', icon: Workflow, description: 'N8N-style workflows' },
   deploy: { name: 'Deploy', icon: Rocket, description: 'App deployment' },
   security: { name: 'Security', icon: Shield, description: 'Security analysis' },
-  schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' }
+  schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' },
+  analytics: { name: 'Analytics', icon: BarChart3, description: 'Social media analytics' },
+  projects: { name: 'Projects', icon: Activity, description: 'Project & game tracking' },
+  payments: { name: 'Payments', icon: Database, description: 'Subscriptions & billing' },
+  integrations: { name: 'Integrations', icon: Network, description: 'Enterprise connectors' },
+  admin: { name: 'Admin', icon: Users, description: 'User & role management', adminOnly: true }
 };
 
 // ============================================
@@ -615,6 +627,13 @@ export default function NexusAI() {
   const [gameTemplate, setGameTemplate] = useState(null);
   const [appTemplate, setAppTemplate] = useState(null);
   const [showToolContent, setShowToolContent] = useState(false);
+
+  // Auth state
+  const [authUser, setAuthUser] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('nexus:user') || 'null'); } catch { return null; }
+  });
+  const [authToken, setAuthToken] = useState(() => localStorage.getItem('nexus:token') || null);
+  const [showAuthModal, setShowAuthModal] = useState(false);
 
   // Security Dashboard State
   const [securityScan, setSecurityScan] = useState({
@@ -817,6 +836,22 @@ export default function NexusAI() {
 
   const deleteMemory = (index) => setMemories(memories.filter((_, i) => i !== index));
 
+  // Auth handlers
+  const handleAuthSuccess = useCallback(({ token, user }) => {
+    setAuthToken(token);
+    setAuthUser(user);
+    localStorage.setItem('nexus:token', token);
+    localStorage.setItem('nexus:user', JSON.stringify(user));
+    setShowAuthModal(false);
+  }, []);
+
+  const handleLogout = useCallback(() => {
+    setAuthToken(null);
+    setAuthUser(null);
+    localStorage.removeItem('nexus:token');
+    localStorage.removeItem('nexus:user');
+  }, []);
+
   // Group models by capability for selector
   const modelGroups = useMemo(() => {
     const groups = {
@@ -915,7 +950,24 @@ export default function NexusAI() {
           <button className="icon-btn" onClick={() => setIsMemoryOpen(!isMemoryOpen)}><Brain size={20} /></button>
           <button className="icon-btn" onClick={() => setIsCallActive(true)}><Phone size={20} /></button>
           <button className="icon-btn" onClick={() => setIsSettingsOpen(true)}><Settings size={20} /></button>
-          <div className="user-avatar">{userAvatar?.emoji || '≡ƒæñ'}</div>
+          {authUser ? (
+            <button
+              className="user-avatar"
+              title={`${authUser.username} (${authUser.role}) — click to sign out`}
+              onClick={handleLogout}
+              style={{ cursor: 'pointer', fontSize: '0.65rem', padding: '4px 8px', background: 'var(--bg-3)', borderRadius: '20px', border: '1px solid var(--border)' }}
+            >
+              {authUser.username?.slice(0, 8)}
+            </button>
+          ) : (
+            <button
+              onClick={() => setShowAuthModal(true)}
+              style={{ fontSize: '0.75rem', padding: '5px 12px', background: 'linear-gradient(135deg, #3b82f6, #6366f1)', borderRadius: '20px', border: 'none', color: '#fff', cursor: 'pointer', fontWeight: 600 }}
+            >
+              Sign In
+            </button>
+          )}
+          <div className="user-avatar">{userAvatar?.emoji || '🧑'}</div>
         </div>
       </header>
 
@@ -946,7 +998,15 @@ export default function NexusAI() {
             {Object.entries(TOOLS).map(([key, tool]) => {
               const Icon = tool.icon;
               return (
-                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security'].includes(key)) setShowToolContent(true); }}>
+                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => {
+                    if (tool.adminOnly && authUser?.role !== 'admin') {
+                      if (!authUser) setShowAuthModal(true);
+                      return;
+                    }
+                    setActiveTool(key);
+                    if (['gamedev', 'appdev', 'automation', 'security', 'analytics', 'projects', 'payments', 'integrations', 'admin'].includes(key)) setShowToolContent(true);
+                    else setShowToolContent(false);
+                  }}>
                   <Icon size={18} />
                   <span>{tool.name}</span>
                 </button>
@@ -1104,8 +1164,65 @@ export default function NexusAI() {
             </div>
           )}
 
+          {/* New Dashboard Panels */}
+          {showToolContent && activeTool === 'analytics' && (
+            <div style={{ flex: 1, overflow: 'hidden' }}>
+              <Suspense fallback={<div className="p-8 text-center text-gray-400">Loading analytics...</div>}>
+                <AnalyticsDashboard token={authToken} />
+              </Suspense>
+            </div>
+          )}
+
+          {showToolContent && activeTool === 'projects' && (
+            <div style={{ flex: 1, overflow: 'hidden' }}>
+              <Suspense fallback={<div className="p-8 text-center text-gray-400">Loading project tracker...</div>}>
+                <ProjectTracker token={authToken} />
+              </Suspense>
+            </div>
+          )}
+
+          {showToolContent && activeTool === 'payments' && (
+            <div style={{ flex: 1, overflow: 'hidden' }}>
+              <Suspense fallback={<div className="p-8 text-center text-gray-400">Loading payments...</div>}>
+                <PaymentSystem token={authToken} currentUser={authUser} />
+              </Suspense>
+            </div>
+          )}
+
+          {showToolContent && activeTool === 'integrations' && (
+            <div style={{ flex: 1, overflow: 'hidden' }}>
+              <Suspense fallback={<div className="p-8 text-center text-gray-400">Loading integrations...</div>}>
+                <EnterpriseConnectors token={authToken} />
+              </Suspense>
+            </div>
+          )}
+
+          {showToolContent && activeTool === 'admin' && authUser?.role === 'admin' && (
+            <div style={{ flex: 1, overflow: 'hidden' }}>
+              <Suspense fallback={<div className="p-8 text-center text-gray-400">Loading admin...</div>}>
+                <AdminDashboard token={authToken} />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Enhanced Security Dashboard (replaces old security panel) */}
+          {showToolContent && activeTool === 'security_enhanced' && (
+            <div style={{ flex: 1, overflow: 'hidden' }}>
+              <Suspense fallback={<div className="p-8 text-center text-gray-400">Loading security...</div>}>
+                <EnhancedSecurityDashboard token={authToken} />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Auth Modal */}
+          {showAuthModal && (
+            <Suspense fallback={null}>
+              <AuthModal onAuth={handleAuthSuccess} onClose={() => setShowAuthModal(false)} />
+            </Suspense>
+          )}
+
           {/* Messages */}
-          <div className="messages-container">
+          <div className="messages-container" style={{ display: showToolContent && ['analytics', 'projects', 'payments', 'integrations', 'admin', 'security_enhanced'].includes(activeTool) ? 'none' : undefined }}>
             {messages.length === 0 ? (
               <div className="welcome">
                 <div className="welcome-icon"><Sparkles size={48} /></div>

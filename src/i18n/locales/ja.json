@@ -1,0 +1,8 @@
+{
+  "translation": {
+    "app": { "name": "Nexus AI Pro", "tagline": "軍事グレードのAIプラットフォーム" },
+    "nav": { "dashboard": "ダッシュボード", "analytics": "アナリティクス", "security": "セキュリティ", "projects": "プロジェクト", "payments": "支払い", "settings": "設定", "admin": "管理者", "dev": "開発者", "moderator": "モデレーター" },
+    "auth": { "login": "ログイン", "register": "アカウント作成", "logout": "ログアウト", "email": "メールアドレス", "password": "パスワード", "username": "ユーザー名", "confirmPassword": "パスワード確認", "forgotPassword": "パスワードを忘れた方", "passwordRequirements": "13文字以上、大文字・小文字・数字・特殊文字を含む", "mfaTitle": "二段階認証", "mfaDescription": "認証コードを入力してください", "mfaToken": "6桁のコード", "biometric": "生体認証を使用", "roles": { "admin": "管理者", "dev": "開発者", "moderator": "モデレーター", "user": "ユーザー" } },
+    "common": { "save": "保存", "cancel": "キャンセル", "delete": "削除", "edit": "編集", "confirm": "確認", "back": "戻る", "next": "次へ", "loading": "読み込み中...", "error": "エラー", "success": "成功", "warning": "警告", "info": "情報" }
+  }
+}

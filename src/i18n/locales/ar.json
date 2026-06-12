@@ -1,0 +1,8 @@
+{
+  "translation": {
+    "app": { "name": "Nexus AI Pro", "tagline": "منصة الذكاء الاصطناعي العسكرية" },
+    "nav": { "dashboard": "لوحة التحكم", "analytics": "التحليلات", "security": "الأمان", "projects": "المشاريع", "payments": "المدفوعات", "settings": "الإعدادات", "admin": "المشرف", "dev": "المطور", "moderator": "المشرف" },
+    "auth": { "login": "تسجيل الدخول", "register": "إنشاء حساب", "logout": "تسجيل الخروج", "email": "البريد الإلكتروني", "password": "كلمة المرور", "username": "اسم المستخدم", "confirmPassword": "تأكيد كلمة المرور", "forgotPassword": "نسيت كلمة المرور؟", "passwordRequirements": "+13 حرف مع حرف كبير وصغير ورقم وحرف خاص", "mfaTitle": "المصادقة الثنائية", "mfaDescription": "أدخل رمز المصادقة الخاص بك", "mfaToken": "رمز مكون من 6 أرقام", "biometric": "استخدام القياسات الحيوية", "roles": { "admin": "مدير", "dev": "مطور", "moderator": "مشرف", "user": "مستخدم" } },
+    "common": { "save": "حفظ", "cancel": "إلغاء", "delete": "حذف", "edit": "تعديل", "confirm": "تأكيد", "back": "رجوع", "next": "التالي", "loading": "جار التحميل...", "error": "خطأ", "success": "نجاح", "warning": "تحذير", "info": "معلومات" }
+  }
+}

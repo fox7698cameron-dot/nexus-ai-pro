@@ -1,6 +1,6 @@
 // ================================================
 // NEXUS AI PRO - Enhanced Backend Server
-// Military-Grade Security & Multi-Model AI Platform
+// 2026-06-12 | Military-Grade Security & Multi-Model AI Platform
 // ================================================
 
 import express from 'express';
@@ -16,7 +16,22 @@ import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
 
+// Module routes
+import { createAuthRouter, InMemoryUserStore } from './src/auth/routes.js';
+import { createAnalyticsRouter } from './src/analytics/routes.js';
+import { createProjectsRouter, InMemoryProjectStore } from './src/projects/routes.js';
+import { createPaymentsRouter, InMemorySubscriptionStore } from './src/payments/routes.js';
+import { createIntegrationsRouter, InMemoryIntegrationStore } from './src/integrations/routes.js';
+
 dotenv.config();
+
+// ================================================
+// SHARED DATA STORES
+// ================================================
+const userStore = new InMemoryUserStore();
+const projectStore = new InMemoryProjectStore();
+const subscriptionStore = new InMemorySubscriptionStore();
+const integrationStore = new InMemoryIntegrationStore();
 
 const app = express();
 const httpServer = createServer(app);
@@ -441,8 +456,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-pro';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +830,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -829,6 +844,22 @@ class WorkflowEngine {
 }
 
 const workflowEngine = new WorkflowEngine();
+
+// ================================================
+// MODULE ROUTES
+// ================================================
+
+// Stripe webhook needs raw body — mount before json middleware
+app.post('/api/payments/webhook', express.raw({ type: 'application/json' }), (req, res, next) => {
+  req._rawBody = req.body;
+  next();
+});
+
+app.use('/api/auth', createAuthRouter(userStore, (event, details) => security.logAudit(event, details)));
+app.use('/api/analytics', createAnalyticsRouter());
+app.use('/api/projects', createProjectsRouter(projectStore));
+app.use('/api/payments', createPaymentsRouter(subscriptionStore));
+app.use('/api/integrations', createIntegrationsRouter(integrationStore));
 
 // ================================================
 // API ROUTES

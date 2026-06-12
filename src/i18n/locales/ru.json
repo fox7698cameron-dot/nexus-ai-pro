@@ -1,0 +1,8 @@
+{
+  "translation": {
+    "app": { "name": "Nexus AI Pro", "tagline": "AI-платформа военного класса" },
+    "nav": { "dashboard": "Панель", "analytics": "Аналитика", "security": "Безопасность", "projects": "Проекты", "payments": "Платежи", "settings": "Настройки", "admin": "Администратор", "dev": "Разработчик", "moderator": "Модератор" },
+    "auth": { "login": "Войти", "register": "Создать аккаунт", "logout": "Выйти", "email": "Электронная почта", "password": "Пароль", "username": "Имя пользователя", "confirmPassword": "Подтвердите пароль", "forgotPassword": "Забыли пароль?", "passwordRequirements": "13+ символов с заглавными, строчными буквами, цифрой и спецсимволом", "mfaTitle": "Двухфакторная аутентификация", "mfaDescription": "Введите ваш код аутентификации", "mfaToken": "6-значный код", "biometric": "Использовать биометрию", "roles": { "admin": "Администратор", "dev": "Разработчик", "moderator": "Модератор", "user": "Пользователь" } },
+    "common": { "save": "Сохранить", "cancel": "Отмена", "delete": "Удалить", "edit": "Редактировать", "confirm": "Подтвердить", "back": "Назад", "next": "Далее", "loading": "Загрузка...", "error": "Ошибка", "success": "Успех", "warning": "Предупреждение", "info": "Информация" }
+  }
+}

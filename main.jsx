@@ -1,5 +1,7 @@
+// main.jsx - 2026-06-12
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import './src/i18n/config.js';
 import NexusAI from './app.jsx';
 
 // Security: Disable React DevTools in production

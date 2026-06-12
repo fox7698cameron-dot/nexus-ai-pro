@@ -1,0 +1,8 @@
+{
+  "translation": {
+    "app": { "name": "Nexus AI Pro", "tagline": "군사급 AI 플랫폼" },
+    "nav": { "dashboard": "대시보드", "analytics": "분석", "security": "보안", "projects": "프로젝트", "payments": "결제", "settings": "설정", "admin": "관리자", "dev": "개발자", "moderator": "중재자" },
+    "auth": { "login": "로그인", "register": "계정 만들기", "logout": "로그아웃", "email": "이메일 주소", "password": "비밀번호", "username": "사용자명", "confirmPassword": "비밀번호 확인", "forgotPassword": "비밀번호를 잊으셨나요?", "passwordRequirements": "대소문자, 숫자, 특수문자 포함 13자 이상", "mfaTitle": "이중 인증", "mfaDescription": "인증 코드를 입력하세요", "mfaToken": "6자리 코드", "biometric": "생체 인증 사용", "roles": { "admin": "관리자", "dev": "개발자", "moderator": "중재자", "user": "사용자" } },
+    "common": { "save": "저장", "cancel": "취소", "delete": "삭제", "edit": "편집", "confirm": "확인", "back": "뒤로", "next": "다음", "loading": "로딩 중...", "error": "오류", "success": "성공", "warning": "경고", "info": "정보" }
+  }
+}

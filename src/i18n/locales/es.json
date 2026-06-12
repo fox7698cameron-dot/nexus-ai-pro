@@ -1,0 +1,50 @@
+{
+  "translation": {
+    "app": { "name": "Nexus AI Pro", "tagline": "Plataforma de IA de Grado Militar" },
+    "nav": {
+      "dashboard": "Panel", "analytics": "Analíticas", "security": "Seguridad",
+      "projects": "Proyectos", "payments": "Pagos", "settings": "Configuración",
+      "admin": "Admin", "dev": "Desarrollador", "moderator": "Moderador"
+    },
+    "auth": {
+      "login": "Iniciar Sesión", "register": "Crear Cuenta", "logout": "Cerrar Sesión",
+      "email": "Correo electrónico", "password": "Contraseña", "username": "Nombre de usuario",
+      "confirmPassword": "Confirmar contraseña", "forgotPassword": "¿Olvidaste tu contraseña?",
+      "passwordRequirements": "13+ caracteres con mayúscula, minúscula, número y carácter especial",
+      "mfaTitle": "Autenticación de Dos Factores", "mfaDescription": "Ingresa tu código de autenticador",
+      "mfaToken": "Código de 6 dígitos", "biometric": "Usar Biometría",
+      "roles": { "admin": "Administrador", "dev": "Desarrollador", "moderator": "Moderador", "user": "Usuario" }
+    },
+    "analytics": {
+      "title": "Panel de Analíticas", "overview": "Resumen", "platforms": "Plataformas",
+      "followers": "Seguidores", "views": "Vistas", "likes": "Me gustas", "reach": "Alcance",
+      "engagement": "Tasa de Participación", "retention": "Retención", "impressions": "Impresiones",
+      "realTime": "Tiempo Real", "history": "Historial", "last30Days": "Últimos 30 Días"
+    },
+    "security": {
+      "title": "Panel de Seguridad", "score": "Puntuación de Seguridad", "scan": "Ejecutar Escaneo",
+      "scanning": "Escaneando...", "lastScan": "Último Escaneo", "threats": "Amenazas",
+      "vulnerabilities": "Vulnerabilidades", "network": "Red", "device": "Dispositivo",
+      "encryption": "Cifrado", "status": "Estado"
+    },
+    "projects": {
+      "title": "Proyectos", "new": "Nuevo Proyecto", "progress": "Progreso",
+      "milestones": "Hitos", "achievements": "Logros", "status": "Estado",
+      "types": {
+        "coding": "Programación", "game": "Desarrollo de Juegos", "ar_vr": "AR/VR",
+        "3d": "3D", "mobile": "Móvil", "web": "Web"
+      }
+    },
+    "payments": {
+      "title": "Suscripción", "plans": "Planes", "upgrade": "Actualizar",
+      "currentPlan": "Plan Actual", "card": "Tarjeta de Crédito/Débito",
+      "crypto": "Criptomoneda", "giftCard": "Tarjeta de Regalo",
+      "monthly": "por mes", "free": "Gratis", "pro": "Pro", "enterprise": "Empresarial"
+    },
+    "common": {
+      "save": "Guardar", "cancel": "Cancelar", "delete": "Eliminar", "edit": "Editar",
+      "confirm": "Confirmar", "back": "Atrás", "next": "Siguiente", "loading": "Cargando...",
+      "error": "Error", "success": "Éxito", "warning": "Advertencia", "info": "Información"
+    }
+  }
+}

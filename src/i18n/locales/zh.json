@@ -1,0 +1,8 @@
+{
+  "translation": {
+    "app": { "name": "Nexus AI Pro", "tagline": "军事级AI平台" },
+    "nav": { "dashboard": "仪表板", "analytics": "分析", "security": "安全", "projects": "项目", "payments": "支付", "settings": "设置", "admin": "管理员", "dev": "开发者", "moderator": "版主" },
+    "auth": { "login": "登录", "register": "创建账户", "logout": "退出登录", "email": "电子邮箱", "password": "密码", "username": "用户名", "confirmPassword": "确认密码", "forgotPassword": "忘记密码？", "passwordRequirements": "13位以上字符，包含大写、小写、数字和特殊字符", "mfaTitle": "双重身份验证", "mfaDescription": "输入您的验证码", "mfaToken": "6位验证码", "biometric": "使用生物识别", "roles": { "admin": "管理员", "dev": "开发者", "moderator": "版主", "user": "用户" } },
+    "common": { "save": "保存", "cancel": "取消", "delete": "删除", "edit": "编辑", "confirm": "确认", "back": "返回", "next": "下一步", "loading": "加载中...", "error": "错误", "success": "成功", "warning": "警告", "info": "信息" }
+  }
+}

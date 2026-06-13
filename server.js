@@ -1,6 +1,7 @@
 // ================================================
-// NEXUS AI PRO - Enhanced Backend Server
-// Military-Grade Security & Multi-Model AI Platform
+// NEXUS AI PRO - Enhanced Backend Server v2.0
+// Enterprise Full-Stack API
+// Updated: 2026-06-13
 // ================================================
 
 import express from 'express';
@@ -15,6 +16,16 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+
+// New modular API routers
+import authRouter    from './src/api/auth.js';
+import analyticsRouter from './src/api/analytics.js';
+import subscriptionsRouter from './src/api/subscriptions.js';
+import projectsRouter from './src/api/projects.js';
+import connectorsRouter from './src/api/connectors.js';
+import i18nRouter    from './src/api/i18n.js';
+import { setIO as setAnalyticsIO } from './src/api/analytics.js';
+import { setIO as setProjectsIO  } from './src/api/projects.js';
 
 dotenv.config();
 
@@ -269,12 +280,17 @@ const security = new SecurityModule();
 // SOCKET.IO WITH ENCRYPTION
 // ================================================
 const io = new Server(httpServer, {
+
   cors: {
     origin: process.env.CORS_ORIGIN || '*',
     methods: ['GET', 'POST']
   },
   pingTimeout: 60000
 });
+
+// Wire real-time IO to new modules
+setAnalyticsIO(io);
+setProjectsIO(io);
 
 // ================================================
 // MIDDLEWARE STACK
@@ -441,8 +457,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-2.0-flash';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +831,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -831,7 +847,21 @@ class WorkflowEngine {
 const workflowEngine = new WorkflowEngine();
 
 // ================================================
-// API ROUTES
+// MODULAR API ROUTES (v2)
+// ================================================
+
+// Mount raw body for Stripe webhook signature verification
+app.use('/api/subscriptions/webhook', express.raw({ type: '*/*' }));
+
+app.use('/api/auth',          authRouter);
+app.use('/api/analytics',     analyticsRouter);
+app.use('/api/subscriptions', subscriptionsRouter);
+app.use('/api/projects',      projectsRouter);
+app.use('/api/connectors',    connectorsRouter);
+app.use('/api/i18n',          i18nRouter);
+
+// ================================================
+// LEGACY API ROUTES
 // ================================================
 
 // Health check

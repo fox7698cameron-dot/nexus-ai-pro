@@ -128,17 +128,28 @@ export class CryptoService {
   }
 }
 
+// ── Token data shape ──────────────────────────────
+interface TokenData {
+  userId: string;
+  scope: string[];
+  issuedAt: number;
+  expiresAt: number;
+  refreshToken?: string;
+}
+
+// ── Audit entry shape ─────────────────────────────
+interface AuditEntry {
+  timestamp: Date;
+  userId: string;
+  action: string;
+  resource: string;
+  result: 'success' | 'failure';
+  details: Record<string, unknown>;
+}
+
 // ============ Authentication ============
 export class AuthService {
   private static tokens = new Map<string, TokenData>();
-
-  interface TokenData {
-    userId: string;
-    scope: string[];
-    issuedAt: number;
-    expiresAt: number;
-    refreshToken?: string;
-  }
 
   /**
    * Generate JWT token
@@ -259,7 +270,7 @@ export class ValidationService {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#x27;')
-      .replace(/\/g, '&#x2F;');
+      .replace(/\//g, '&#x2F;');
   }
 
   /**
@@ -301,10 +312,10 @@ export class ValidationService {
     const feedback: string[] = [];
     let score = 0;
 
-    if (password.length >= 8) score += 1;
-    else feedback.push('Password should be at least 8 characters');
+    if (password.length >= 13) score += 1;
+    else feedback.push('Password must be at least 13 characters');
 
-    if (password.length >= 12) score += 1;
+    if (password.length >= 20) score += 1;
     if (/[a-z]/.test(password)) score += 1;
     else feedback.push('Add lowercase letters');
 
@@ -329,19 +340,10 @@ export class ValidationService {
 export class SecurityAudit {
   private static auditLog: AuditEntry[] = [];
 
-  interface AuditEntry {
-    timestamp: Date;
-    userId: string;
-    action: string;
-    resource: string;
-    result: 'success' | 'failure';
-    details: Record<string, any>;
-  }
-
   /**
    * Log security event
    */
-  static logEvent(userId: string, action: string, resource: string, result: 'success' | 'failure', details: Record<string, any> = {}): void {
+  static logEvent(userId: string, action: string, resource: string, result: 'success' | 'failure', details: Record<string, unknown> = {}): void {
     this.auditLog.push({
       timestamp: new Date(),
       userId,
@@ -356,6 +358,7 @@ export class SecurityAudit {
    * Get audit log
    */
   static getAuditLog(userId?: string): AuditEntry[] {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if (userId) {
       return this.auditLog.filter(entry => entry.userId === userId);
     }

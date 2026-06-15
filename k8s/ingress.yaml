@@ -1,0 +1,164 @@
+---
+# ================================================
+# NEXUS AI PRO - Nginx Ingress
+# TLS via cert-manager (Let's Encrypt)
+#
+# Prerequisites:
+#   kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml
+#   kubectl apply -f https://github.com/cert-manager/cert-manager/releases/latest/download/cert-manager.yaml
+#
+# Replace nexus.example.com with your actual domain.
+# ================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nexus-ingress
+  namespace: nexus
+  labels:
+    app: nexus-ai-pro
+    version: "3.0.0"
+    component: ingress
+  annotations:
+    # ── Controller ──────────────────────────────
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+
+    # ── TLS / cert-manager ──────────────────────
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+
+    # ── Security headers ────────────────────────
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      more_set_headers "X-Frame-Options: DENY";
+      more_set_headers "X-Content-Type-Options: nosniff";
+      more_set_headers "X-XSS-Protection: 1; mode=block";
+      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+      more_set_headers "Permissions-Policy: geolocation=(), microphone=(), camera=()";
+      more_set_headers "Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://api.anthropic.com https://api.openai.com;";
+
+    # ── Rate limiting (at nginx level) ──────────
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+    nginx.ingress.kubernetes.io/limit-connections: "10"
+
+    # ── CORS (backends handle their own CORS) ───
+    nginx.ingress.kubernetes.io/enable-cors: "false"
+
+    # ── Body size limits ────────────────────────
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+
+    # ── WebSocket support (for Bun /ws) ─────────
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-http-version: "1.1"
+    nginx.ingress.kubernetes.io/connection-proxy-header: "upgrade"
+
+    # ── Timeouts ─────────────────────────────────
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - nexus.example.com
+        - api.nexus.example.com
+      secretName: nexus-tls-cert
+
+  rules:
+    # ── Main domain ──────────────────────────────
+    - host: nexus.example.com
+      http:
+        paths:
+          # ── Node.js API (/api — default backend)
+          - path: /api(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: nexus-node-svc
+                port:
+                  number: 3001
+
+          # ── Python FastAPI (/api/py prefix)
+          - path: /api/py(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: nexus-python-svc
+                port:
+                  number: 8000
+
+          # ── Bun server (/api/bun prefix)
+          - path: /api/bun(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: nexus-bun-svc
+                port:
+                  number: 3002
+
+          # ── WebSocket (Bun native WS)
+          - path: /ws(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: nexus-bun-svc
+                port:
+                  number: 3002
+
+          # ── Frontend (catch-all — must be last)
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nexus-frontend-svc
+                port:
+                  number: 80
+
+    # ── API subdomain (optional) ─────────────────
+    - host: api.nexus.example.com
+      http:
+        paths:
+          - path: /node
+            pathType: Prefix
+            backend:
+              service:
+                name: nexus-node-svc
+                port:
+                  number: 3001
+
+          - path: /python
+            pathType: Prefix
+            backend:
+              service:
+                name: nexus-python-svc
+                port:
+                  number: 8000
+
+          - path: /bun
+            pathType: Prefix
+            backend:
+              service:
+                name: nexus-bun-svc
+                port:
+                  number: 3002
+
+---
+# ── ClusterIssuer for Let's Encrypt ────────────
+# Apply once per cluster; requires cert-manager.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+  labels:
+    app: nexus-ai-pro
+    component: cert-manager
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    # Replace with your actual email address for ACME notifications
+    email: contact@nexusai.pro
+    privateKeySecretRef:
+      name: letsencrypt-prod-key
+    solvers:
+      - http01:
+          ingress:
+            class: nginx

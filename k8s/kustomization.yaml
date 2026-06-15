@@ -1,0 +1,42 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# ================================================
+# NEXUS AI PRO - Kustomize Root
+#
+# Usage:
+#   kubectl kustomize k8s/          # preview
+#   kubectl apply -k k8s/           # deploy
+# ================================================
+
+namespace: nexus
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - secrets.yaml
+  - deployment-node.yaml
+  - deployment-python.yaml
+  - deployment-bun.yaml
+  - service.yaml
+  - ingress.yaml
+  - hpa.yaml
+
+commonLabels:
+  app.kubernetes.io/name: nexus-ai-pro
+  app.kubernetes.io/version: "3.0.0"
+  app.kubernetes.io/managed-by: kustomize
+
+commonAnnotations:
+  maintainer: "Cameron Fox <contact@nexusai.pro>"
+
+images:
+  - name: nexus-ai-pro:node-latest
+    newName: nexus-ai-pro
+    newTag: node-3.0.0
+  - name: nexus-ai-pro:python-latest
+    newName: nexus-ai-pro
+    newTag: python-3.0.0
+  - name: nexus-ai-pro:bun-latest
+    newName: nexus-ai-pro
+    newTag: bun-3.0.0

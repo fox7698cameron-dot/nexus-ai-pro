@@ -1,54 +1,107 @@
-# ================================================
-# NEXUS AI PRO - Docker Compose Configuration
-# Complete development and production stack
-# ================================================
+# ════════════════════════════════════════════════════════════════════
+# NEXUS AI PRO v3.0.0 — Docker Compose
+# Three backend options: Node.js, Python FastAPI, Bun TypeScript
+# Run all:  docker-compose up -d
+# Node only: docker-compose up nexus-node nginx redis db
+# Python:    docker-compose up nexus-python nginx redis db
+# Bun:       docker-compose up nexus-bun nginx redis db
+# ════════════════════════════════════════════════════════════════════
 
 version: '3.8'
 
+x-common-env: &common-env
+  ANTHROPIC_API_KEY:    ${ANTHROPIC_API_KEY}
+  OPENAI_API_KEY:       ${OPENAI_API_KEY}
+  GOOGLE_API_KEY:       ${GOOGLE_API_KEY}
+  DEEPSEEK_API_KEY:     ${DEEPSEEK_API_KEY}
+  XAI_API_KEY:          ${XAI_API_KEY}
+  MISTRAL_API_KEY:      ${MISTRAL_API_KEY}
+  MOONSHOT_API_KEY:     ${MOONSHOT_API_KEY}
+  GROQ_API_KEY:         ${GROQ_API_KEY}
+  ENCRYPTION_SECRET:    ${ENCRYPTION_SECRET}
+  ENCRYPTION_SALT:      ${ENCRYPTION_SALT}
+  JWT_SECRET:           ${JWT_SECRET}
+  REDIS_URL:            redis://redis:6379
+  DATABASE_URL:         postgresql://postgres:postgres@db:5432/nexusai
+
+x-healthcheck: &api-healthcheck
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 40s
+
+x-resources: &standard-resources
+  deploy:
+    resources:
+      limits:   { cpus: '1', memory: 1G }
+      reservations: { cpus: '0.25', memory: 256M }
+
 services:
-  # Main Application
-  nexus-ai:
+  # ── Backend: Node.js + Express (port 3001) ─────────────────────────
+  nexus-node:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: nexus-ai-pro
+      target: node-runner
+    image: nexus-ai-pro:node-latest
+    container_name: nexus-node
     restart: unless-stopped
     ports:
       - "3001:3001"
     environment:
-      - NODE_ENV=${NODE_ENV:-production}
-      - PORT=3001
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-      - XAI_API_KEY=${XAI_API_KEY}
-      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
-      - ENCRYPTION_SECRET=${ENCRYPTION_SECRET}
-      - ENCRYPTION_SALT=${ENCRYPTION_SALT}
-      - REDIS_URL=redis://redis:6379
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/nexusai
-    depends_on:
-      - redis
-      - db
-    networks:
-      - nexus-network
+      <<: *common-env
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3001
+    depends_on: [redis, db]
+    networks: [nexus-network]
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/api/health"]
+      <<: *api-healthcheck
+    <<: *standard-resources
 
-  # Redis for caching and sessions
+  # ── Backend: Python FastAPI (port 8000) ────────────────────────────
+  nexus-python:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: python-runner
+    image: nexus-ai-pro:python-latest
+    container_name: nexus-python
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      <<: *common-env
+      PORT: 8000
+    depends_on: [redis, db]
+    networks: [nexus-network]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/api/health"]
+      <<: *api-healthcheck
+    <<: *standard-resources
+
+  # ── Backend: Bun TypeScript (port 3002) ────────────────────────────
+  nexus-bun:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: bun-runner
+    image: nexus-ai-pro:bun-latest
+    container_name: nexus-bun
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    environment:
+      <<: *common-env
+      PORT: 3002
+    depends_on: [redis, db]
+    networks: [nexus-network]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3002/api/health"]
+      <<: *api-healthcheck
+    <<: *standard-resources
+
+  # ── Redis (caching + sessions) ─────────────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: nexus-redis
@@ -57,16 +110,15 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
-    networks:
-      - nexus-network
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks: [nexus-network]
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # PostgreSQL Database
+  # ── PostgreSQL ──────────────────────────────────────────────────────
   db:
     image: postgres:16-alpine
     container_name: nexus-db
@@ -74,21 +126,20 @@ services:
     ports:
       - "5432:5432"
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=nexusai
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB:       nexusai
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
-    networks:
-      - nexus-network
+    networks: [nexus-network]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # Nginx Reverse Proxy
+  # ── Nginx (routes /api, /api/py, /api/bun to respective backends) ──
   nginx:
     image: nginx:alpine
     container_name: nexus-nginx
@@ -99,12 +150,10 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./ssl:/etc/nginx/ssl:ro
-    depends_on:
-      - nexus-ai
-    networks:
-      - nexus-network
+    depends_on: [nexus-node, nexus-python, nexus-bun]
+    networks: [nexus-network]
 
-  # Prometheus Metrics
+  # ── Prometheus ──────────────────────────────────────────────────────
   prometheus:
     image: prom/prometheus:latest
     container_name: nexus-prometheus
@@ -114,14 +163,13 @@ services:
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
-    networks:
-      - nexus-network
+    networks: [nexus-network]
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--web.enable-lifecycle'
 
-  # Grafana Dashboard
+  # ── Grafana ─────────────────────────────────────────────────────────
   grafana:
     image: grafana/grafana:latest
     container_name: nexus-grafana
@@ -129,34 +177,31 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
-      - GF_USERS_ALLOW_SIGN_UP=false
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP:    "false"
     volumes:
       - grafana-data:/var/lib/grafana
-    depends_on:
-      - prometheus
-    networks:
-      - nexus-network
+    depends_on: [prometheus]
+    networks: [nexus-network]
 
-  # Development Service (for testing)
-  app:
+  # ── Dev (hot-reload, all backends) ──────────────────────────────────
+  dev:
     build:
       context: .
       dockerfile: Dockerfile
-    env_file:
-      - .env
+      target: dev
+    container_name: nexus-dev
+    env_file: [.env]
     volumes:
-      - ./:/usr/src/app:cached
-      - /usr/src/app/node_modules
+      - ./:/app:cached
+      - /app/node_modules
     ports:
-      - "3001:3001"   # backend
-      - "5173:5173"   # frontend dev server (vite)
-    command: ["npm", "test"]
-    healthcheck:
-      test: ["CMD-SHELL", "node -e \"process.exit(0)\""]
-      interval: 1m
-      timeout: 10s
-      retries: 3
+      - "3001:3001"
+      - "3002:3002"
+      - "5173:5173"
+      - "8000:8000"
+    networks: [nexus-network]
+    profiles: [dev]
 
 networks:
   nexus-network:

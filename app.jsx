@@ -21,7 +21,10 @@ import {
   Bug, Wrench, Hammer, Cog, RotateCcw,
   ShieldCheck, ShieldAlert, Fingerprint, ScanFace,
   Network, Wifi, Radio, Antenna, Signal,
-  ArrowLeft, Film, ImagePlus, Clapperboard
+  ArrowLeft, Film, ImagePlus, Clapperboard,
+  BookOpen, GraduationCap, Calculator, FlaskConical,
+  Globe2, Utensils, ServerCog, Layers3, FolderCode,
+  FileCode2, Package, ChefHat, Wrench as WrenchTool
 } from 'lucide-react';
 
 // Persistence keys
@@ -85,7 +88,7 @@ const SUBSCRIPTION_TIERS = {
     color: 'from-purple-400 to-pink-600',
     textColor: 'text-purple-700',
     bgColor: 'bg-purple-50',
-    models: Object.keys(AI_MODELS),
+    models: [], // populated at runtime — all AI_MODELS keys are available to Enterprise
     features: ['Everything in Pro', 'Custom models', 'API access', 'Dedicated support', 'SLA guarantee'],
     badge: '👑',
     reasoningTime: '🔬 Expert',
@@ -453,16 +456,108 @@ const AI_MODELS = {
 // TOOL CATEGORIES
 // ============================================
 const TOOLS = {
-  chat: { name: 'Chat', icon: MessageSquare, description: 'Conversational AI' },
-  code: { name: 'Code', icon: Code, description: 'Code generation & debugging' },
-  image: { name: 'Image Gen', icon: ImagePlus, description: 'AI image generation' },
-  video: { name: 'Video Gen', icon: Clapperboard, description: 'AI video creation' },
-  gamedev: { name: 'Game Dev', icon: Gamepad2, description: 'Game development suite' },
-  appdev: { name: 'App Dev', icon: Smartphone, description: 'Application development' },
-  automation: { name: 'Automation', icon: Workflow, description: 'N8N-style workflows' },
-  deploy: { name: 'Deploy', icon: Rocket, description: 'App deployment' },
-  security: { name: 'Security', icon: Shield, description: 'Security analysis' },
-  schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' }
+  chat:       { name: 'Chat',       icon: MessageSquare, description: 'Conversational AI — 40+ models' },
+  code:       { name: 'Code',       icon: Code,          description: 'Code generation & debugging' },
+  image:      { name: 'Image Gen',  icon: ImagePlus,     description: 'AI image generation' },
+  video:      { name: 'Video Gen',  icon: Clapperboard,  description: 'AI video creation' },
+  gamedev:    { name: 'Game Dev',   icon: Gamepad2,      description: 'Unreal, Unity, Godot & more' },
+  appdev:     { name: 'App Dev',    icon: Smartphone,    description: 'Web, mobile & desktop apps' },
+  education:  { name: 'Education',  icon: GraduationCap, description: 'K-12 daily learning hub' },
+  devstudio:  { name: 'Dev Studio', icon: FolderCode,    description: 'Templates for every file type' },
+  automation: { name: 'Automation', icon: Workflow,      description: 'n8n-style workflow engine' },
+  deploy:     { name: 'Deploy',     icon: Rocket,        description: 'Multi-platform deployment' },
+  security:   { name: 'Security',   icon: Shield,        description: 'Security & threat dashboard' },
+  schedule:   { name: 'Schedule',   icon: Calendar,      description: 'Task scheduling' }
+};
+
+// ============================================
+// SERVER OPTIONS  (3 backend choices)
+// ============================================
+const SERVER_OPTIONS = {
+  node: {
+    name: 'Node.js + Express', icon: '🟢', lang: 'JavaScript', port: 3001,
+    startCmd: 'node server.js', devCmd: 'nodemon server.js',
+    description: 'Battle-tested JS runtime — production default',
+    features: ['Socket.IO WebSockets', 'Express middleware', 'npm ecosystem', 'Low memory'],
+    color: 'from-green-500 to-emerald-600'
+  },
+  python: {
+    name: 'Python + FastAPI', icon: '🐍', lang: 'Python', port: 8000,
+    startCmd: 'uvicorn server:app --host 0.0.0.0 --port 8000',
+    devCmd: 'uvicorn server:app --reload --port 8000',
+    description: 'Async Python — ideal for ML/AI pipelines',
+    features: ['FastAPI async', 'Pydantic validation', 'Auto OpenAPI docs', 'NumPy/Pandas ready'],
+    color: 'from-blue-500 to-indigo-600'
+  },
+  bun: {
+    name: 'Bun + TypeScript', icon: '🍞', lang: 'TypeScript', port: 3002,
+    startCmd: 'bun run server.bun.ts', devCmd: 'bun --hot server.bun.ts',
+    description: 'Ultra-fast all-in-one TS runtime — 3× faster cold start',
+    features: ['Native TypeScript', 'Built-in WebSocket', 'Built-in SQLite', 'Fastest startup'],
+    color: 'from-orange-500 to-amber-600'
+  }
+};
+
+// ============================================
+// K-12 EDUCATIONAL SUBJECTS
+// ============================================
+const EDUCATION_SUBJECTS = {
+  math:     { name: 'Mathematics',       icon: '📐', color: 'from-blue-500 to-cyan-500',
+    grades: ['K-2','3-5','6-8','9-12'],
+    topics: { 'K-2': ['Counting','Addition','Shapes','Patterns'], '3-5': ['Multiplication','Fractions','Decimals','Geometry'], '6-8': ['Algebra','Statistics','Ratios','Pre-Calc'], '9-12': ['Calculus','Trigonometry','Linear Algebra','Statistics'] } },
+  science:  { name: 'Science',           icon: '🔬', color: 'from-green-500 to-emerald-500',
+    grades: ['K-2','3-5','6-8','9-12'],
+    topics: { 'K-2': ['Living Things','Weather','Senses','Plants'], '3-5': ['Life Cycles','Matter','Forces','Ecosystems'], '6-8': ['Biology','Chemistry','Physics','Earth Sci'], '9-12': ['AP Biology','AP Chemistry','AP Physics','Env. Science'] } },
+  history:  { name: 'History',           icon: '📜', color: 'from-amber-500 to-orange-500',
+    grades: ['K-2','3-5','6-8','9-12'],
+    topics: { 'K-2': ['Family History','Community','Holidays','Maps'], '3-5': ['Native Americans','Revolution','Civil War','Exploration'], '6-8': ['Ancient Civilizations','Middle Ages','World Wars','Cold War'], '9-12': ['World History','US History','Government','Economics'] } },
+  physics:  { name: 'Physics',           icon: '⚛️', color: 'from-purple-500 to-violet-500',
+    grades: ['6-8','9-12'],
+    topics: { '6-8': ['Motion','Forces','Energy','Waves'], '9-12': ['Mechanics','Thermodynamics','Electromagnetism','Quantum Physics'] } },
+  geometry: { name: 'Geometry',          icon: '📏', color: 'from-pink-500 to-rose-500',
+    grades: ['3-5','6-8','9-12'],
+    topics: { '3-5': ['Shapes','Perimeter','Area','Lines'], '6-8': ['Angles','Polygons','Transformations','Coordinate Plane'], '9-12': ['Proofs','Circles','3D Solids','Trigonometry'] } },
+  cooking:  { name: 'Cooking & Nutrition', icon: '🍳', color: 'from-red-500 to-pink-500',
+    grades: ['K-2','3-5','6-8','9-12'],
+    topics: { 'K-2': ['Kitchen Safety','Food Groups','Simple Recipes'], '3-5': ['Measuring','Baking Basics','Nutrition Labels'], '6-8': ['World Cuisines','Meal Planning','Food Science'], '9-12': ['Culinary Arts','Food Chemistry','Restaurant Management'] } },
+  woodwork: { name: 'Woodworking & Shop', icon: '🪵', color: 'from-yellow-600 to-amber-600',
+    grades: ['6-8','9-12'],
+    topics: { '6-8': ['Safety Rules','Hand Tools','Basic Joints','Simple Projects'], '9-12': ['Power Tools','Furniture Building','Cabinetry','Wood Finishing'] } },
+  coding:   { name: 'Computer Science',  icon: '💻', color: 'from-indigo-500 to-blue-500',
+    grades: ['K-2','3-5','6-8','9-12'],
+    topics: { 'K-2': ['Scratch Jr','Sequencing','Algorithms'], '3-5': ['Scratch','Loops','Conditions'], '6-8': ['Python Basics','HTML/CSS','Data Structures'], '9-12': ['AP CS','Web Dev','Machine Learning','Robotics'] } },
+  art:      { name: 'Art & Design',      icon: '🎨', color: 'from-fuchsia-500 to-purple-500',
+    grades: ['K-2','3-5','6-8','9-12'],
+    topics: { 'K-2': ['Colors','Drawing','Crafts'], '3-5': ['Painting','Sculpture','Art History'], '6-8': ['Digital Art','Photography','Design Principles'], '9-12': ['Graphic Design','Animation','Portfolio'] } },
+  music:    { name: 'Music',             icon: '🎵', color: 'from-teal-500 to-cyan-500',
+    grades: ['K-2','3-5','6-8','9-12'],
+    topics: { 'K-2': ['Rhythm','Singing','Instruments'], '3-5': ['Notes','Scales','Music History'], '6-8': ['Theory','Composition','Band'], '9-12': ['Advanced Theory','Music Production','Audio Engineering'] } }
+};
+
+// ============================================
+// FILE TYPE TEMPLATES  (Dev Studio)
+// ============================================
+const FILE_TEMPLATES = {
+  typescript: { name: 'TypeScript', ext: '.ts',    icon: '📘', lang: 'typescript',
+    template: `// TypeScript module\nexport interface Config {\n  apiKey: string;\n  model: string;\n  temperature?: number;\n}\n\nexport async function callAI(config: Config, prompt: string): Promise<string> {\n  const res = await fetch('https://api.anthropic.com/v1/messages', {\n    method: 'POST',\n    headers: { 'x-api-key': config.apiKey, 'Content-Type': 'application/json', 'anthropic-version': '2023-06-01' },\n    body: JSON.stringify({ model: config.model, max_tokens: 1024, messages: [{ role: 'user', content: prompt }] })\n  });\n  const data = await res.json();\n  return data.content[0].text;\n}\n` },
+  tsx: { name: 'React TSX', ext: '.tsx', icon: '⚛️', lang: 'tsx',
+    template: `import React, { useState } from 'react';\n\ninterface Props {\n  title: string;\n  onSubmit: (value: string) => void;\n}\n\nexport const AIChat: React.FC<Props> = ({ title, onSubmit }) => {\n  const [value, setValue] = useState('');\n  const [loading, setLoading] = useState(false);\n  return (\n    <div style={{ padding: 24 }}>\n      <h1>{title}</h1>\n      <textarea value={value} onChange={e => setValue(e.target.value)} rows={4} />\n      <button disabled={loading} onClick={() => { setLoading(true); onSubmit(value); }}>Send</button>\n    </div>\n  );\n};\n` },
+  python: { name: 'Python', ext: '.py', icon: '🐍', lang: 'python',
+    template: `#!/usr/bin/env python3\n"""AI integration module."""\nfrom anthropic import Anthropic\n\nclient = Anthropic()\n\ndef call_claude(prompt: str, model: str = "claude-sonnet-4-6") -> str:\n    message = client.messages.create(\n        model=model, max_tokens=1024,\n        messages=[{"role": "user", "content": prompt}]\n    )\n    return message.content[0].text\n\nif __name__ == "__main__":\n    print(call_claude("Hello, Claude!"))\n` },
+  swift: { name: 'Swift', ext: '.swift', icon: '🍎', lang: 'swift',
+    template: `import Foundation\nimport SwiftUI\n\nstruct AIService {\n    let apiKey: String\n    func sendMessage(_ text: String) async throws -> String {\n        let url = URL(string: "https://api.anthropic.com/v1/messages")!\n        var req = URLRequest(url: url)\n        req.httpMethod = "POST"\n        req.setValue(apiKey, forHTTPHeaderField: "x-api-key")\n        req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")\n        req.setValue("application/json", forHTTPHeaderField: "Content-Type")\n        let body: [String: Any] = ["model": "claude-sonnet-4-6", "max_tokens": 1024,\n            "messages": [["role": "user", "content": text]]]\n        req.httpBody = try JSONSerialization.data(withJSONObject: body)\n        let (data, _) = try await URLSession.shared.data(for: req)\n        return String(data: data, encoding: .utf8) ?? ""\n    }\n}\n` },
+  dockerfile: { name: 'Dockerfile', ext: '', icon: '🐳', lang: 'dockerfile',
+    template: `# syntax=docker/dockerfile:1\nFROM node:20-alpine AS base\nWORKDIR /app\n\nFROM base AS deps\nCOPY package*.json ./\nRUN npm ci --only=production\n\nFROM base AS builder\nCOPY package*.json ./\nRUN npm ci\nCOPY . .\nRUN npm run build\n\nFROM base AS runner\nENV NODE_ENV=production\nCOPY --from=deps /app/node_modules ./node_modules\nCOPY --from=builder /app/dist ./dist\nCOPY server.js .\nEXPOSE 3001\nCMD ["node", "server.js"]\n` },
+  kubernetes: { name: 'K8s Deployment', ext: '.yaml', icon: '☸️', lang: 'yaml',
+    template: `apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: nexus-ai-pro\n  namespace: nexus\nspec:\n  replicas: 3\n  selector:\n    matchLabels:\n      app: nexus-ai-pro\n  template:\n    metadata:\n      labels:\n        app: nexus-ai-pro\n    spec:\n      containers:\n      - name: nexus-ai-pro\n        image: nexus-ai-pro:latest\n        ports:\n        - containerPort: 3001\n        resources:\n          requests:\n            memory: "256Mi"\n            cpu: "250m"\n          limits:\n            memory: "512Mi"\n            cpu: "500m"\n` },
+  yaml_ci: { name: 'GitHub Actions', ext: '.yml', icon: '⚙️', lang: 'yaml',
+    template: `name: CI/CD\non:\n  push:\n    branches: [main]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-node@v4\n        with:\n          node-version: 20\n          cache: npm\n      - run: npm ci\n      - run: npm test\n      - run: npm run build\n` },
+  unreal: { name: 'Unreal C++', ext: '.h', icon: '⚡', lang: 'cpp',
+    template: `#pragma once\n#include "CoreMinimal.h"\n#include "GameFramework/Character.h"\n#include "NexusCharacter.generated.h"\n\nUCLASS()\nclass NEXUSGAME_API ANexusCharacter : public ACharacter {\n  GENERATED_BODY()\npublic:\n  ANexusCharacter();\nprotected:\n  virtual void BeginPlay() override;\n  UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="AI")\n  float AIResponseTime = 0.5f;\n  UFUNCTION(BlueprintCallable, Category="AI")\n  void SendAIRequest(const FString& Prompt);\npublic:\n  virtual void Tick(float DeltaTime) override;\n  virtual void SetupPlayerInputComponent(class UInputComponent*) override;\n};\n` },
+  unity: { name: 'Unity C#', ext: '.cs', icon: '🎮', lang: 'csharp',
+    template: `using UnityEngine;\nusing UnityEngine.Networking;\nusing System.Collections;\nusing System.Text;\n\npublic class AIController : MonoBehaviour {\n  public string apiKey;\n  public string model = "claude-sonnet-4-6";\n  const string API = "https://api.anthropic.com/v1/messages";\n\n  public IEnumerator Ask(string prompt, System.Action<string> cb) {\n    var body = $"{{\"model\":\"{model}\",\"max_tokens\":1024,\"messages\":[{{\"role\":\"user\",\"content\":\"{prompt}\"}}]}}";\n    using var req = new UnityWebRequest(API, "POST");\n    req.uploadHandler   = new UploadHandlerRaw(Encoding.UTF8.GetBytes(body));\n    req.downloadHandler = new DownloadHandlerBuffer();\n    req.SetRequestHeader("x-api-key", apiKey);\n    req.SetRequestHeader("anthropic-version", "2023-06-01");\n    req.SetRequestHeader("Content-Type", "application/json");\n    yield return req.SendWebRequest();\n    cb(req.downloadHandler.text);\n  }\n}\n` },
+  electron_main: { name: 'Electron Main', ext: '.js', icon: '💻', lang: 'javascript',
+    template: `const { app, BrowserWindow, ipcMain } = require('electron');\nconst path = require('path');\n\nfunction createWindow() {\n  const win = new BrowserWindow({\n    width: 1400, height: 900,\n    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false }\n  });\n  if (process.env.NODE_ENV === 'development') {\n    win.loadURL('http://localhost:5173');\n  } else {\n    win.loadFile(path.join(__dirname, '../dist/index.html'));\n  }\n}\napp.whenReady().then(createWindow);\napp.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });\n` }
 };
 
 // ============================================
@@ -615,6 +710,10 @@ export default function NexusAI() {
   const [gameTemplate, setGameTemplate] = useState(null);
   const [appTemplate, setAppTemplate] = useState(null);
   const [showToolContent, setShowToolContent] = useState(false);
+  const [selectedServer, setSelectedServer] = useState('node');
+  const [eduSubject, setEduSubject] = useState(null);
+  const [eduGrade, setEduGrade] = useState('6-8');
+  const [devTemplate, setDevTemplate] = useState(null);
 
   // Security Dashboard State
   const [securityScan, setSecurityScan] = useState({
@@ -946,7 +1045,7 @@ export default function NexusAI() {
             {Object.entries(TOOLS).map(([key, tool]) => {
               const Icon = tool.icon;
               return (
-                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security'].includes(key)) setShowToolContent(true); }}>
+                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev','appdev','automation','security','education','devstudio'].includes(key)) setShowToolContent(true); else setShowToolContent(false); }}>
                   <Icon size={18} />
                   <span>{tool.name}</span>
                 </button>
@@ -1104,13 +1203,102 @@ export default function NexusAI() {
             </div>
           )}
 
+          {/* ── Education Panel ── */}
+          {showToolContent && activeTool === 'education' && (
+            <div className="tool-content education-panel">
+              <div className="panel-header">
+                <GraduationCap size={18} />
+                <h3>K-12 Learning Hub</h3>
+                <span className="badge-pill">Paced learning · AI tutoring</span>
+              </div>
+              <div className="edu-grade-tabs">
+                {['K-2','3-5','6-8','9-12'].map(g => (
+                  <button key={g} className={`grade-tab ${eduGrade === g ? 'active' : ''}`} onClick={() => setEduGrade(g)}>{g}</button>
+                ))}
+              </div>
+              <div className="edu-subjects">
+                {Object.entries(EDUCATION_SUBJECTS).map(([key, subj]) => {
+                  const topics = subj.topics[eduGrade];
+                  if (!topics) return null;
+                  return (
+                    <div key={key} className={`edu-card ${eduSubject === key ? 'active' : ''}`} onClick={() => { setEduSubject(key); setInput(`Teach me ${subj.name} for grade ${eduGrade}: ${topics[0]}`); }}>
+                      <div className="edu-card-header">
+                        <span className="edu-icon">{subj.icon}</span>
+                        <span className="edu-name">{subj.name}</span>
+                      </div>
+                      <div className="edu-topics">
+                        {topics.slice(0,3).map(t => <span key={t} className="edu-topic">{t}</span>)}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {eduSubject && (
+                <div className="edu-action-row">
+                  <button className="edu-start-btn" onClick={() => { setShowToolContent(false); setActiveTool('chat'); }}>
+                    <BookOpen size={16} /> Start Lesson with AI Tutor
+                  </button>
+                  <button className="edu-quiz-btn" onClick={() => { setInput(`Quiz me on ${EDUCATION_SUBJECTS[eduSubject]?.name} grade ${eduGrade}`); setShowToolContent(false); setActiveTool('chat'); }}>
+                    <Calculator size={16} /> Daily Quiz
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Dev Studio Panel ── */}
+          {showToolContent && activeTool === 'devstudio' && (
+            <div className="tool-content devstudio-panel">
+              <div className="panel-header">
+                <FolderCode size={18} />
+                <h3>Dev Studio — File Templates</h3>
+              </div>
+              <div className="server-options">
+                <h4><ServerCog size={14} /> Active Backend Server</h4>
+                <div className="server-grid">
+                  {Object.entries(SERVER_OPTIONS).map(([key, srv]) => (
+                    <button key={key} className={`server-card ${selectedServer === key ? 'active' : ''}`} onClick={() => setSelectedServer(key)}>
+                      <span className="server-icon">{srv.icon}</span>
+                      <div className="server-info">
+                        <span className="server-name">{srv.name}</span>
+                        <span className="server-desc">{srv.description}</span>
+                      </div>
+                      <code className="server-port">:{srv.port}</code>
+                    </button>
+                  ))}
+                </div>
+                <div className="server-cmd-box">
+                  <span className="cmd-label">Dev:</span>
+                  <code>{SERVER_OPTIONS[selectedServer]?.devCmd}</code>
+                </div>
+              </div>
+              <div className="template-grid-wrap">
+                <h4><FileCode2 size={14} /> Code Templates</h4>
+                <div className="template-grid">
+                  {Object.entries(FILE_TEMPLATES).map(([key, tmpl]) => (
+                    <button key={key} className={`template-card ${devTemplate === key ? 'active' : ''}`}
+                      onClick={() => { setDevTemplate(key); setInput(`Generate a ${tmpl.name} (${tmpl.ext || tmpl.lang}) file for my project using the Nexus AI Pro stack`); setShowToolContent(false); setActiveTool('code'); }}>
+                      <span className="template-icon">{tmpl.icon}</span>
+                      <span className="template-name">{tmpl.name}</span>
+                      <span className="template-meta">{tmpl.ext || '.'+tmpl.lang}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Messages */}
           <div className="messages-container">
             {messages.length === 0 ? (
               <div className="welcome">
                 <div className="welcome-icon"><Sparkles size={48} /></div>
                 <h2>Nexus AI Pro</h2>
-                <p>Military-grade encrypted AI ΓÇó 40+ Models</p>
+                <p>Military-grade encrypted · {Object.keys(AI_MODELS).length}+ AI Models · K-12 Education · Multi-platform</p>
+                <div className="server-indicator">
+                  <span className="srv-dot" style={{background: selectedServer==='python'?'#3b82f6':selectedServer==='bun'?'#f59e0b':'#10b981'}}></span>
+                  <span>{SERVER_OPTIONS[selectedServer]?.icon} {SERVER_OPTIONS[selectedServer]?.name} · port {SERVER_OPTIONS[selectedServer]?.port}</span>
+                </div>
                 <div className="model-badges">
                   {Object.entries(AI_MODELS).slice(0, 12).map(([key, m]) => (
                     <span key={key} className="badge" onClick={() => setSelectedModel(key)}>{m.icon} {m.name}</span>
@@ -1196,8 +1384,21 @@ export default function NexusAI() {
             </div>
             <div className="modal-body">
               <div className="setting-group">
+                <h4><ServerCog size={13} /> Backend Server</h4>
+                {Object.entries(SERVER_OPTIONS).map(([key, srv]) => (
+                  <div key={key} className={`setting-item server-radio ${selectedServer === key ? 'selected' : ''}`} onClick={() => setSelectedServer(key)}>
+                    <span>{srv.icon} {srv.name}</span>
+                    <span className="srv-meta">{srv.lang} · :{srv.port}</span>
+                    {selectedServer === key && <Check size={14} />}
+                  </div>
+                ))}
+                <div className="cmd-hint">
+                  <code>npm run dev:{selectedServer}</code>
+                </div>
+              </div>
+              <div className="setting-group">
                 <h4>API Keys</h4>
-                {['OpenAI', 'Anthropic', 'Google', 'xAI', 'DeepSeek'].map(provider => (
+                {['OpenAI','Anthropic','Google','xAI','DeepSeek','Mistral','Groq','Moonshot'].map(provider => (
                   <div key={provider} className="setting-item">
                     <label>{provider}</label>
                     <input type="password" placeholder={`${provider} API Key`} />
@@ -2145,6 +2346,52 @@ export default function NexusAI() {
 
         /* Accessibility: larger tap areas */
         .menu-btn, .icon-btn, .attach-btn, .voice-btn, .send-btn { min-width: 44px; min-height: 44px; }
+
+        /* ── Server indicator ── */
+        .server-indicator { display:flex;align-items:center;gap:8px;margin:8px 0 12px;padding:6px 14px;background:var(--bg-3);border:1px solid var(--border);border-radius:20px;font-size:0.78rem;color:var(--text-2); }
+        .srv-dot { width:8px;height:8px;border-radius:50%;flex-shrink:0; }
+
+        /* ── Education panel ── */
+        .education-panel {}
+        .badge-pill { background:var(--bg-4);border:1px solid var(--border);border-radius:12px;padding:2px 10px;font-size:0.72rem;color:var(--text-3); }
+        .edu-grade-tabs { display:flex;gap:8px;margin:12px 0; }
+        .grade-tab { padding:6px 16px;background:var(--bg-3);border:1px solid var(--border);border-radius:8px;color:var(--text-2);cursor:pointer;font-size:0.85rem;transition:all .15s; }
+        .grade-tab.active { background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;border-color:transparent; }
+        .edu-subjects { display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:14px; }
+        .edu-card { background:var(--bg-3);border:1px solid var(--border);border-radius:12px;padding:14px;cursor:pointer;transition:all .2s;text-align:left; }
+        .edu-card:hover,.edu-card.active { border-color:#667eea;background:rgba(102,126,234,.08); }
+        .edu-card-header { display:flex;align-items:center;gap:10px;margin-bottom:8px; }
+        .edu-icon { font-size:1.4rem; }
+        .edu-name { font-weight:600;font-size:0.9rem;color:var(--text-1); }
+        .edu-topics { display:flex;flex-wrap:wrap;gap:4px; }
+        .edu-topic { background:var(--bg-4);border-radius:6px;padding:2px 8px;font-size:0.7rem;color:var(--text-3); }
+        .edu-action-row { display:flex;gap:10px;margin-top:8px; }
+        .edu-start-btn,.edu-quiz-btn { display:flex;align-items:center;gap:6px;padding:10px 18px;border:none;border-radius:10px;font-size:0.85rem;font-weight:600;cursor:pointer;transition:all .2s; }
+        .edu-start-btn { background:linear-gradient(135deg,#667eea,#764ba2);color:#fff; }
+        .edu-quiz-btn { background:linear-gradient(135deg,#10b981,#059669);color:#fff; }
+
+        /* ── Dev Studio panel ── */
+        .devstudio-panel {}
+        .server-options { margin-bottom:20px; }
+        .server-options h4,.template-grid-wrap h4 { font-size:0.78rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;display:flex;align-items:center;gap:6px; }
+        .server-grid { display:flex;flex-direction:column;gap:8px;margin-bottom:10px; }
+        .server-card { display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--bg-3);border:1px solid var(--border);border-radius:10px;cursor:pointer;transition:all .2s;text-align:left; }
+        .server-card.active { border-color:#667eea;background:rgba(102,126,234,.1); }
+        .server-icon { font-size:1.5rem;flex-shrink:0; }
+        .server-info { flex:1;display:flex;flex-direction:column;gap:2px; }
+        .server-name { font-weight:600;font-size:0.9rem;color:var(--text-1); }
+        .server-desc { font-size:0.76rem;color:var(--text-3); }
+        .server-port { font-size:0.8rem;color:var(--text-2);background:var(--bg-4);padding:2px 8px;border-radius:6px; }
+        .server-cmd-box { display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;font-size:0.8rem; }
+        .cmd-label { color:var(--text-3); }
+        .server-cmd-box code { color:#10b981;font-family:'JetBrains Mono',monospace; }
+        .cmd-hint { margin-top:8px;font-size:0.78rem;color:var(--text-3); }
+        .cmd-hint code { color:#667eea;font-family:'JetBrains Mono',monospace; }
+
+        /* Server radio in settings */
+        .server-radio { cursor:pointer;justify-content:space-between; }
+        .server-radio.selected { border-color:#667eea;background:rgba(102,126,234,.08); }
+        .srv-meta { font-size:0.75rem;color:var(--text-3); }
 
       `}</style>
     </div>

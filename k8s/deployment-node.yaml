@@ -1,0 +1,163 @@
+---
+# ================================================
+# NEXUS AI PRO - Node.js Server Deployment
+# Port: 3001 | Replicas: 3
+# ================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexus-node
+  namespace: nexus
+  labels:
+    app: nexus-ai-pro
+    version: "3.0.0"
+    component: backend-node
+    tier: backend
+  annotations:
+    deployment.kubernetes.io/revision: "1"
+    description: "Nexus AI Pro — Node.js / Express backend server"
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: nexus-ai-pro
+      component: backend-node
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: nexus-ai-pro
+        version: "3.0.0"
+        component: backend-node
+        tier: backend
+      annotations:
+        # Force pod restart when config/secret changes
+        checksum/config: "{{ .Values.configChecksum }}"
+    spec:
+      # ── Security context ────────────────────────
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+
+      # ── Topology spread ─────────────────────────
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              component: backend-node
+
+      # ── Termination grace period ─────────────────
+      terminationGracePeriodSeconds: 30
+
+      containers:
+        - name: nexus-node
+          image: nexus-ai-pro:node-latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 3001
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+
+          # ── Environment ──────────────────────────
+          envFrom:
+            - configMapRef:
+                name: nexus-config
+            - secretRef:
+                name: nexus-secrets
+
+          env:
+            - name: PORT
+              value: "3001"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+
+          # ── Resource limits ───────────────────────
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+
+          # ── Probes ────────────────────────────────
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3001
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3001
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 3001
+              scheme: HTTP
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 12
+
+          # ── Container security ────────────────────
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+          # ── Volume mounts ─────────────────────────
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: logs
+              mountPath: /app/logs
+
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: logs
+          emptyDir: {}
+
+      # ── Image pull secrets (if using private registry) ──
+      # imagePullSecrets:
+      #   - name: nexus-registry-credentials

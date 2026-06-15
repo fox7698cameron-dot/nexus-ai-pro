@@ -1,0 +1,137 @@
+---
+# ================================================
+# NEXUS AI PRO - Kubernetes Services
+# ================================================
+
+# ── Node.js Backend Service ─────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexus-node-svc
+  namespace: nexus
+  labels:
+    app: nexus-ai-pro
+    version: "3.0.0"
+    component: backend-node
+    tier: backend
+  annotations:
+    description: "ClusterIP service for the Node.js / Express backend"
+spec:
+  type: ClusterIP
+  selector:
+    app: nexus-ai-pro
+    component: backend-node
+  ports:
+    - name: http
+      port: 3001
+      targetPort: 3001
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+  sessionAffinity: None
+
+---
+# ── Python FastAPI Backend Service ─────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexus-python-svc
+  namespace: nexus
+  labels:
+    app: nexus-ai-pro
+    version: "3.0.0"
+    component: backend-python
+    tier: backend
+  annotations:
+    description: "ClusterIP service for the Python / FastAPI backend"
+spec:
+  type: ClusterIP
+  selector:
+    app: nexus-ai-pro
+    component: backend-python
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+    - name: metrics
+      port: 9091
+      targetPort: 9091
+      protocol: TCP
+  sessionAffinity: None
+
+---
+# ── Bun Backend Service ─────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexus-bun-svc
+  namespace: nexus
+  labels:
+    app: nexus-ai-pro
+    version: "3.0.0"
+    component: backend-bun
+    tier: backend
+  annotations:
+    description: "ClusterIP service for the Bun TypeScript backend with native WebSocket"
+spec:
+  type: ClusterIP
+  selector:
+    app: nexus-ai-pro
+    component: backend-bun
+  ports:
+    - name: http
+      port: 3002
+      targetPort: 3002
+      protocol: TCP
+    - name: ws
+      port: 3002
+      targetPort: 3002
+      protocol: TCP
+    - name: metrics
+      port: 9092
+      targetPort: 9092
+      protocol: TCP
+  sessionAffinity: None
+
+---
+# ── Frontend LoadBalancer Service ───────────────
+# Exposes the pre-built static frontend (nginx/caddy)
+# behind a cloud provider LoadBalancer.
+# Swap type to ClusterIP if you route via Ingress only.
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexus-frontend-svc
+  namespace: nexus
+  labels:
+    app: nexus-ai-pro
+    version: "3.0.0"
+    component: frontend
+    tier: frontend
+  annotations:
+    description: "LoadBalancer service for the Nexus AI Pro web frontend"
+    # AWS ELB / NLB annotations (uncomment as needed)
+    # service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    # service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+    # GCP annotations
+    # cloud.google.com/load-balancer-type: "External"
+spec:
+  type: LoadBalancer
+  selector:
+    app: nexus-ai-pro
+    component: frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      protocol: TCP
+    - name: https
+      port: 443
+      targetPort: 443
+      protocol: TCP
+  # Preserve the client source IP
+  externalTrafficPolicy: Local
+  sessionAffinity: None

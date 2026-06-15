@@ -1,0 +1,16 @@
+---
+# ================================================
+# NEXUS AI PRO - Kubernetes Namespace
+# ================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nexus
+  labels:
+    app: nexus-ai-pro
+    version: "3.0.0"
+    component: infrastructure
+    managed-by: kustomize
+  annotations:
+    description: "Nexus AI Pro — Multi-model AI Platform"
+    contact: "contact@nexusai.pro"

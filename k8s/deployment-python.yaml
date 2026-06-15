@@ -1,0 +1,159 @@
+---
+# ================================================
+# NEXUS AI PRO - Python FastAPI Server Deployment
+# Port: 8000 | Replicas: 2
+# ================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexus-python
+  namespace: nexus
+  labels:
+    app: nexus-ai-pro
+    version: "3.0.0"
+    component: backend-python
+    tier: backend
+  annotations:
+    deployment.kubernetes.io/revision: "1"
+    description: "Nexus AI Pro — Python / FastAPI backend server"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: nexus-ai-pro
+      component: backend-python
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: nexus-ai-pro
+        version: "3.0.0"
+        component: backend-python
+        tier: backend
+    spec:
+      # ── Security context ────────────────────────
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+
+      # ── Topology spread ─────────────────────────
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              component: backend-python
+
+      terminationGracePeriodSeconds: 30
+
+      containers:
+        - name: nexus-python
+          image: nexus-ai-pro:python-latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+            - name: metrics
+              containerPort: 9091
+              protocol: TCP
+
+          # ── Environment ──────────────────────────
+          envFrom:
+            - configMapRef:
+                name: nexus-config
+            - secretRef:
+                name: nexus-secrets
+
+          env:
+            - name: PORT
+              value: "8000"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: PYTHONDONTWRITEBYTECODE
+              value: "1"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+          # ── Resource limits ───────────────────────
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+
+          # ── Probes ────────────────────────────────
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+              scheme: HTTP
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 8000
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 12
+
+          # ── Container security ────────────────────
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+          # ── Volume mounts ─────────────────────────
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: logs
+              mountPath: /app/logs
+            - name: pycache
+              mountPath: /app/__pycache__
+
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: logs
+          emptyDir: {}
+        - name: pycache
+          emptyDir: {}

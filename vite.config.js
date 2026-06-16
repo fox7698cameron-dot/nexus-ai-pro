@@ -26,6 +26,7 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
+    target: ['chrome96', 'firefox95', 'safari15', 'edge96'],
     sourcemap: false,
     minify: 'terser',
     terserOptions: {

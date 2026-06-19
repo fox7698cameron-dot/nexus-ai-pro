@@ -100,8 +100,9 @@
     "workbox-window": "^7.3.0"
   },
   "overrides": {
-    "esbuild": "^0.24.2",
-    "rollup": "^4.29.1"
+    "esbuild": "^0.25.0",
+    "rollup": "^4.34.9",
+    "tar": "^7.5.16"
   },
   "capacitor": {
     "appId": "com.cameronfox.nexusaipro",

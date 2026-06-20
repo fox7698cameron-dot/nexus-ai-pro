@@ -26,6 +26,7 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
+    target: 'es2022',
     sourcemap: false,
     minify: 'terser',
     terserOptions: {

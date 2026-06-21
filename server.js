@@ -806,7 +806,6 @@ class WorkflowEngine {
     if (typeof condition !== 'string' || !condition.trim()) {
       return { conditionResult: false };
     }
-    const { transform } = node.config || {};
     try {
       const result = await Jexl.eval(condition, context);
       return { conditionResult: !!result };
@@ -816,6 +815,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }

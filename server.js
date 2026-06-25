@@ -13,12 +13,16 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import multer from 'multer';
 import crypto from 'crypto';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
 dotenv.config();
+
+const execAsync = promisify(exec);
 
 const app = express();
 const httpServer = createServer(app);
@@ -41,6 +45,9 @@ class SecurityModule {
     this.vulnerabilityPatches = new Map();
     this.threatDatabase = new Set();
     this.lastScan = Date.now();
+    this.lastKeyRotation = Date.now();
+    this.dependencyAuditCache = null;
+    this.dependencyAuditCacheTime = 0;
   }
 
   // Derive master encryption key
@@ -144,69 +151,119 @@ class SecurityModule {
     return entry;
   }
 
-  // Vulnerability scanning
-  async scanVulnerabilities() {
-    const results = {
-      timestamp: Date.now(),
-      vulnerabilities: [],
-      status: 'secure'
+  // Parse a real `npm audit --json` report into our dashboard's vulnerability shape
+  parseAuditReport(stdout) {
+    const report = JSON.parse(stdout);
+    const counts = report.metadata?.vulnerabilities || {
+      info: 0, low: 0, moderate: 0, high: 0, critical: 0, total: 0
     };
-
-    // Check for common vulnerabilities
-    const checks = [
-      { name: 'SQL Injection', check: () => true, patched: true },
-      { name: 'XSS', check: () => true, patched: true },
-      { name: 'CSRF', check: () => true, patched: true },
-      { name: 'Path Traversal', check: () => true, patched: true },
-      { name: 'Rate Limiting', check: () => true, patched: true },
-      { name: 'Input Validation', check: () => true, patched: true },
-      { name: 'Encryption', check: () => !!this.masterKey, patched: true },
-      { name: 'Session Security', check: () => true, patched: true }
-    ];
-
-    for (const check of checks) {
-      if (!check.check()) {
-        results.vulnerabilities.push({
-          name: check.name,
-          severity: 'high',
-          patched: false
-        });
-        results.status = 'vulnerable';
-      }
-    }
-
-    this.lastScan = Date.now();
-    this.logAudit('VULNERABILITY_SCAN', results);
-
-    return results;
+    const vulnerabilities = Object.entries(report.vulnerabilities || {}).map(([name, v]) => ({
+      name,
+      severity: v.severity,
+      range: v.range,
+      fixAvailable: !!v.fixAvailable,
+      via: Array.isArray(v.via)
+        ? v.via.map(entry => (typeof entry === 'string' ? entry : entry.title)).filter(Boolean)
+        : []
+    }));
+    return { counts, vulnerabilities };
   }
 
-  // Auto-patch vulnerabilities
-  async autoPatch() {
-    const scan = await this.scanVulnerabilities();
-    const patches = [];
+  computeSecurityScore(counts) {
+    const score = 100
+      - (counts.critical || 0) * 25
+      - (counts.high || 0) * 10
+      - (counts.moderate || 0) * 5
+      - (counts.low || 0) * 1;
+    return Math.max(0, Math.min(100, score));
+  }
 
-    for (const vuln of scan.vulnerabilities) {
-      if (!vuln.patched) {
-        // Apply automatic patches
-        const patch = {
-          vulnerability: vuln.name,
-          patchedAt: Date.now(),
-          method: 'automatic'
-        };
-        this.vulnerabilityPatches.set(vuln.name, patch);
-        patches.push(patch);
-      }
+  // Real dependency vulnerability data, sourced from `npm audit --json`. Cached for 5 minutes
+  // so the dashboard doesn't spawn a new npm process on every load.
+  async runDependencyAudit(force = false) {
+    const cacheAge = Date.now() - this.dependencyAuditCacheTime;
+    if (!force && this.dependencyAuditCache && cacheAge < 5 * 60 * 1000) {
+      return this.dependencyAuditCache;
     }
 
-    this.logAudit('AUTO_PATCH', { patches });
-    return patches;
+    try {
+      const { stdout } = await execAsync('npm audit --json', { maxBuffer: 10 * 1024 * 1024 });
+      const { counts, vulnerabilities } = this.parseAuditReport(stdout);
+      this.dependencyAuditCache = { generatedAt: Date.now(), counts, vulnerabilities, stale: false };
+      this.dependencyAuditCacheTime = Date.now();
+      return this.dependencyAuditCache;
+    } catch (error) {
+      // npm audit exits non-zero when vulnerabilities are found, but still writes valid JSON to stdout
+      if (error.stdout) {
+        try {
+          const { counts, vulnerabilities } = this.parseAuditReport(error.stdout);
+          this.dependencyAuditCache = { generatedAt: Date.now(), counts, vulnerabilities, stale: false };
+          this.dependencyAuditCacheTime = Date.now();
+          return this.dependencyAuditCache;
+        } catch {
+          // fall through: stdout wasn't parseable JSON, treat as a real failure below
+        }
+      }
+
+      this.logAudit('SCAN_FAILED', { error: error.message });
+      if (this.dependencyAuditCache) {
+        return { ...this.dependencyAuditCache, stale: true };
+      }
+      return {
+        generatedAt: Date.now(),
+        counts: { info: 0, low: 0, moderate: 0, high: 0, critical: 0, total: 0 },
+        vulnerabilities: [],
+        stale: true
+      };
+    }
+  }
+
+  // Vulnerability scanning (real, never simulated)
+  async scanVulnerabilities() {
+    const audit = await this.runDependencyAudit(true);
+    this.lastScan = Date.now();
+    const result = {
+      timestamp: this.lastScan,
+      vulnerabilities: audit.vulnerabilities,
+      counts: audit.counts,
+      score: this.computeSecurityScore(audit.counts),
+      status: audit.counts.total > 0 ? 'vulnerable' : 'secure',
+      stale: !!audit.stale
+    };
+    this.logAudit('VULNERABILITY_SCAN', { counts: audit.counts, stale: result.stale });
+    io.emit('security:event', { type: 'SCAN_COMPLETE', timestamp: this.lastScan, counts: audit.counts, stale: result.stale });
+    return result;
+  }
+
+  // There is no real package-manager "fix" invocation wired up here, so this is honest about
+  // not being able to actually remediate anything automatically.
+  async autoPatch() {
+    const audit = await this.runDependencyAudit();
+    this.logAudit('PATCH_REQUESTED', { vulnerabilityCount: audit.counts.total });
+    return {
+      note: 'Automatic remediation is not performed. Run `npm audit fix` and review the resulting ' +
+        'lockfile changes manually, then re-run a scan to confirm.',
+      vulnerabilities: audit.vulnerabilities
+    };
+  }
+
+  // Flatten only the actual string values of a request payload, so structural JSON
+  // characters (the quotes around every key/value) never get scanned as user input.
+  flattenStringValues(value, acc = []) {
+    if (typeof value === 'string') {
+      acc.push(value);
+    } else if (Array.isArray(value)) {
+      value.forEach(item => this.flattenStringValues(item, acc));
+    } else if (value && typeof value === 'object') {
+      Object.values(value).forEach(item => this.flattenStringValues(item, acc));
+    }
+    return acc;
   }
 
   // Threat detection
   detectThreat(request) {
     const threats = [];
-    const { body, query, headers, ip } = request;
+    const { body, query, ip } = request;
 
     // SQL Injection patterns
     const sqlPatterns = /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER)\b|--|;|'|")/gi;
@@ -217,7 +274,7 @@ class SecurityModule {
     // Path traversal
     const pathPatterns = /\.\.\//g;
 
-    const checkData = JSON.stringify({ body, query });
+    const checkData = this.flattenStringValues({ body, query }).join(' ');
 
     if (sqlPatterns.test(checkData)) {
       threats.push({ type: 'SQL_INJECTION', severity: 'critical' });
@@ -239,6 +296,7 @@ class SecurityModule {
     if (threats.length > 0) {
       this.logAudit('THREAT_DETECTED', { ip, threats });
       this.threatDatabase.add(ip);
+      io.emit('security:event', { type: 'THREAT_DETECTED', timestamp: Date.now(), ip, threats });
     }
 
     return threats;
@@ -246,6 +304,7 @@ class SecurityModule {
 
   // Security status
   getSecurityStatus() {
+    const counts = this.dependencyAuditCache?.counts || { info: 0, low: 0, moderate: 0, high: 0, critical: 0, total: 0 };
     return {
       encryptionActive: true,
       algorithm: this.algorithm,
@@ -253,14 +312,17 @@ class SecurityModule {
       auditLogSize: this.auditLog.length,
       threatsBlocked: this.threatDatabase.size,
       patchesApplied: this.vulnerabilityPatches.size,
-      status: 'secure'
+      securityScore: this.computeSecurityScore(counts),
+      status: counts.total > 0 ? 'vulnerable' : 'secure'
     };
   }
 
   // Key rotation
   rotateKeys() {
     this.masterKey = this.deriveMasterKey();
-    this.logAudit('KEY_ROTATION', { timestamp: Date.now() });
+    this.lastKeyRotation = Date.now();
+    this.logAudit('KEY_ROTATION', { timestamp: this.lastKeyRotation });
+    io.emit('security:event', { type: 'KEY_ROTATION', timestamp: this.lastKeyRotation });
     return true;
   }
 }
@@ -308,9 +370,13 @@ app.use(compression());
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // limit each IP to 100 requests per windowMs
-  message: { error: 'Too many requests, please try again later.' },
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
+  handler: (req, res) => {
+    const entry = security.logAudit('REQUEST_BLOCKED', { ip: req.ip, path: req.path, reason: 'RATE_LIMIT' });
+    io.emit('security:event', { type: 'REQUEST_BLOCKED', timestamp: entry.timestamp, ip: req.ip, path: req.path, reason: 'RATE_LIMIT' });
+    res.status(429).json({ error: 'Too many requests, please try again later.' });
+  }
 });
 app.use('/api/', limiter);
 
@@ -318,7 +384,11 @@ app.use('/api/', limiter);
 const authLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
   max: 5,
-  message: { error: 'Too many authentication attempts.' }
+  handler: (req, res) => {
+    const entry = security.logAudit('REQUEST_BLOCKED', { ip: req.ip, path: req.path, reason: 'AUTH_RATE_LIMIT' });
+    io.emit('security:event', { type: 'REQUEST_BLOCKED', timestamp: entry.timestamp, ip: req.ip, path: req.path, reason: 'AUTH_RATE_LIMIT' });
+    res.status(429).json({ error: 'Too many authentication attempts.' });
+  }
 });
 
 // CORS
@@ -345,11 +415,12 @@ app.use((req, res, next) => {
 app.use((req, res, next) => {
   const threats = security.detectThreat(req);
   if (threats.some(t => t.severity === 'critical')) {
-    security.logAudit('REQUEST_BLOCKED', {
+    const entry = security.logAudit('REQUEST_BLOCKED', {
       ip: req.ip,
       path: req.path,
       threats
     });
+    io.emit('security:event', { type: 'REQUEST_BLOCKED', timestamp: entry.timestamp, ip: req.ip, path: req.path, threats });
     return res.status(403).json({ error: 'Request blocked by security system' });
   }
   next();
@@ -1077,13 +1148,12 @@ app.post('/api/security/scan', authenticateToken, requireRole('admin', 'develope
 });
 
 app.post('/api/security/patch', authenticateToken, requireRole('admin', 'developer'), async (req, res) => {
-  const patches = await security.autoPatch();
-  res.json({ patches });
+  res.json(await security.autoPatch());
 });
 
 app.post('/api/security/rotate-keys', authenticateToken, requireRole('admin'), (req, res) => {
   const success = security.rotateKeys();
-  res.json({ success });
+  res.json({ success, lastKeyRotation: security.lastKeyRotation });
 });
 
 app.get('/api/security/audit', authenticateToken, requireRole('admin', 'developer', 'moderator'), (req, res) => {
@@ -1095,22 +1165,20 @@ app.get('/api/security/audit', authenticateToken, requireRole('admin', 'develope
 // Comprehensive security dashboard endpoint (for all platforms)
 app.get('/api/security/dashboard', authenticateToken, async (req, res) => {
   try {
-    const status = security.getSecurityStatus();
+    const audit = await security.runDependencyAudit();
     const recentLogs = security.auditLog.slice(-10);
-    const threatsSummary = recentLogs.filter(l => l.type.includes('THREAT') || l.type.includes('ATTACK'));
-    
+    const threatsSummary = recentLogs.filter(l => l.event.includes('THREAT') || l.event.includes('ATTACK'));
+
     res.json({
-      overallScore: status.securityScore || 92,
+      overallScore: security.computeSecurityScore(audit.counts),
       encryptionStatus: 'AES-256-GCM',
       encryptionActive: true,
       lastScanTime: security.lastScan,
-      vulnerabilities: [
-        { id: 1, name: 'Outdated Dependencies', severity: 'medium', status: 'warning' },
-        { id: 2, name: 'API Key Exposure Risk', severity: 'low', status: 'info' },
-        { id: 3, name: 'TLS/SSL Configuration', severity: 'high', status: 'resolved' }
-      ],
+      vulnerabilities: audit.vulnerabilities,
+      vulnerabilityCounts: audit.counts,
+      stale: audit.stale,
       threats: threatsSummary.slice(0, 5).map(log => ({
-        type: log.type,
+        type: log.event,
         status: 'blocked',
         timestamp: log.timestamp
       })),
@@ -1124,13 +1192,17 @@ app.get('/api/security/dashboard', authenticateToken, async (req, res) => {
 // Security alerts endpoint
 app.get('/api/security/alerts', authenticateToken, requireRole('admin', 'developer', 'moderator'), (req, res) => {
   const alerts = security.auditLog
-    .filter(l => l.type.includes('ERROR') || l.type.includes('THREAT') || l.type.includes('ATTACK'))
-    .slice(-20);
-  
+    .filter(l => l.event.includes('ERROR') || l.event.includes('THREAT') || l.event.includes('ATTACK') || l.event === 'REQUEST_BLOCKED')
+    .slice(-20)
+    .map(l => ({
+      ...l,
+      severity: l.details?.threats?.[0]?.severity || (l.event.includes('ERROR') ? 'high' : 'medium')
+    }));
+
   res.json({
     alerts,
     criticalCount: alerts.filter(a => a.severity === 'critical').length,
-    warningCount: alerts.filter(a => a.severity === 'warning').length
+    warningCount: alerts.filter(a => a.severity === 'medium').length
   });
 });
 
@@ -1139,10 +1211,9 @@ app.get('/api/security/encryption-health', authenticateToken, (req, res) => {
   res.json({
     algorithm: 'AES-256-GCM',
     keyRotationInterval: '24h',
-    lastKeyRotation: security.lastKeyRotation || Date.now(),
-    nextKeyRotation: (security.lastKeyRotation || Date.now()) + 86400000,
-    status: 'healthy',
-    certificateExpiry: Date.now() + 30 * 24 * 60 * 60 * 1000
+    lastKeyRotation: security.lastKeyRotation,
+    nextKeyRotation: security.lastKeyRotation + 86400000,
+    status: 'healthy'
   });
 });
 

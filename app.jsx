@@ -6,6 +6,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { securityService } from './src/security-service.js';
 import { useAuth } from './src/auth/AuthContext.jsx';
 import { AdminUserTable } from './src/components/AdminUserTable.jsx';
+import { useSecuritySocket } from './src/security/useSecuritySocket.js';
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
   Settings, Menu, X, Plus, Trash2, Download, Upload,
@@ -600,7 +601,8 @@ const WORKFLOW_NODES = {
 // MAIN APP COMPONENT
 // ============================================
 export default function NexusAI() {
-  const { user, logout } = useAuth();
+  const { user, token, logout } = useAuth();
+  const canManageSecurity = user?.role === 'admin' || user?.role === 'developer';
 
   // State
   const [messages, setMessages] = useState([]);
@@ -624,11 +626,14 @@ export default function NexusAI() {
   // Security Dashboard State
   const [securityScan, setSecurityScan] = useState({
     isScanning: false,
+    isLoading: false,
     lastScanTime: null,
     vulnerabilities: [],
     threats: [],
     encryptionStatus: 'secure',
-    overallScore: 92
+    overallScore: null,
+    error: null,
+    patchNote: null
   });
 
   // User customization
@@ -739,56 +744,65 @@ export default function NexusAI() {
     }, 3000);
   };
 
-  // Security Scanning Functions
-  const runSecurityScan = async () => {
-    setSecurityScan(prev => ({ ...prev, isScanning: true }));
-    
+  // Security Scanning Functions — backed entirely by real /api/security/* data, never fabricated.
+  const applyDashboard = (dashboard) => {
+    setSecurityScan(prev => ({
+      ...prev,
+      isLoading: false,
+      isScanning: false,
+      error: null,
+      lastScanTime: dashboard.lastScanTime || prev.lastScanTime,
+      vulnerabilities: dashboard.vulnerabilities || [],
+      threats: dashboard.threats || [],
+      encryptionStatus: dashboard.encryptionStatus || prev.encryptionStatus,
+      overallScore: typeof dashboard.overallScore === 'number' ? dashboard.overallScore : prev.overallScore
+    }));
+  };
+
+  const loadSecurityDashboard = useCallback(async () => {
+    setSecurityScan(prev => ({ ...prev, isLoading: true }));
     try {
-      const dashboard = await securityService.runScan();
+      const dashboard = await securityService.getDashboard();
+      applyDashboard(dashboard);
+    } catch (error) {
+      setSecurityScan(prev => ({ ...prev, isLoading: false, error: error.message }));
+    }
+  }, []);
+
+  const runSecurityScan = async () => {
+    setSecurityScan(prev => ({ ...prev, isScanning: true, error: null }));
+    try {
+      const results = await securityService.runScan();
       setSecurityScan(prev => ({
         ...prev,
         isScanning: false,
-        lastScanTime: Date.now(),
-        vulnerabilities: dashboard.vulnerabilities || [],
-        threats: dashboard.threats || [],
-        encryptionStatus: dashboard.encryptionStatus || 'secure',
-        overallScore: dashboard.overallScore || 92
+        lastScanTime: results.timestamp || Date.now(),
+        vulnerabilities: results.vulnerabilities || [],
+        overallScore: typeof results.score === 'number' ? results.score : prev.overallScore
       }));
     } catch (error) {
-      console.warn('Security scan error, using fallback:', error);
-      // Fallback to local data if service fails
-      const vulnerabilities = [
-        { id: 1, name: 'Outdated Dependencies', severity: 'medium', status: 'warning', description: '2 npm packages have updates available' },
-        { id: 2, name: 'API Key Exposure Risk', severity: 'low', status: 'info', description: 'Review environment variable handling' },
-        { id: 3, name: 'TLS/SSL Configuration', severity: 'high', status: 'resolved', description: 'TLS 1.3 enabled and verified' }
-      ];
-      
-      const threats = [
-        { type: 'Unauthorized Access', status: 'blocked', timestamp: Date.now() - 3600000 },
-        { type: 'Injection Attack', status: 'prevented', timestamp: Date.now() - 7200000 },
-        { type: 'XSS Attempt', status: 'filtered', timestamp: Date.now() - 86400000 }
-      ];
-      
-      setSecurityScan(prev => ({
-        ...prev,
-        isScanning: false,
-        lastScanTime: Date.now(),
-        vulnerabilities,
-        threats,
-        encryptionStatus: 'secure',
-        overallScore: 92
-      }));
+      setSecurityScan(prev => ({ ...prev, isScanning: false, error: error.message }));
     }
   };
 
-  const patchVulnerability = (vulnId) => {
-    setSecurityScan(prev => ({
-      ...prev,
-      vulnerabilities: prev.vulnerabilities.map(v =>
-        v.id === vulnId ? { ...v, status: 'patched' } : v
-      )
-    }));
+  const requestPatchReview = async () => {
+    try {
+      const result = await securityService.patchVulnerability();
+      setSecurityScan(prev => ({ ...prev, patchNote: result.note || null }));
+    } catch (error) {
+      setSecurityScan(prev => ({ ...prev, error: error.message }));
+    }
   };
+
+  useEffect(() => {
+    if (activeTool === 'security' && showToolContent) {
+      loadSecurityDashboard();
+    }
+  }, [activeTool, showToolContent, loadSecurityDashboard]);
+
+  useSecuritySocket(token, useCallback(() => {
+    loadSecurityDashboard();
+  }, [loadSecurityDashboard]));
 
   // File handling
   const handleFileUpload = (e) => {
@@ -1018,11 +1032,15 @@ export default function NexusAI() {
                 <h3>Security Dashboard</h3>
               </div>
               
+              {securityScan.error && (
+                <div className="empty-state" style={{ color: '#ef4444' }}>{securityScan.error}</div>
+              )}
+
               <div className="security-grid">
                 {/* Overall Score */}
                 <div className="security-card score-card">
                   <div className="score-circle">
-                    <div className="score-value">{securityScan.overallScore}</div>
+                    <div className="score-value">{securityScan.overallScore ?? '—'}</div>
                     <div className="score-label">Security Score</div>
                   </div>
                   <div className="score-status">
@@ -1038,52 +1056,55 @@ export default function NexusAI() {
                 </div>
 
                 {/* Scan Button */}
-                <div className="security-card action-card">
-                  <button 
-                    className={`scan-btn ${securityScan.isScanning ? 'scanning' : ''}`}
-                    onClick={runSecurityScan}
-                    disabled={securityScan.isScanning}
-                  >
-                    {securityScan.isScanning ? (
-                      <>
-                        <Loader2 size={18} className="spin" />
-                        Scanning...
-                      </>
-                    ) : (
-                      <>
-                        <Zap size={18} />
-                        Run Full Scan
-                      </>
+                {canManageSecurity && (
+                  <div className="security-card action-card">
+                    <button
+                      className={`scan-btn ${securityScan.isScanning ? 'scanning' : ''}`}
+                      onClick={runSecurityScan}
+                      disabled={securityScan.isScanning}
+                    >
+                      {securityScan.isScanning ? (
+                        <>
+                          <Loader2 size={18} className="spin" />
+                          Scanning...
+                        </>
+                      ) : (
+                        <>
+                          <Zap size={18} />
+                          Run Full Scan
+                        </>
+                      )}
+                    </button>
+                    {securityScan.lastScanTime && (
+                      <div className="scan-time">
+                        Last scan: {new Date(securityScan.lastScanTime).toLocaleTimeString()}
+                      </div>
                     )}
-                  </button>
-                  {securityScan.lastScanTime && (
-                    <div className="scan-time">
-                      Last scan: {new Date(securityScan.lastScanTime).toLocaleTimeString()}
-                    </div>
-                  )}
-                </div>
+                  </div>
+                )}
 
                 {/* Vulnerabilities */}
                 <div className="security-card vulnerabilities-card">
                   <h4><AlertTriangle size={16} /> Vulnerabilities</h4>
+                  {canManageSecurity && (
+                    <button className="patch-btn" onClick={requestPatchReview}>
+                      <Wrench size={14} /> Check Remediation
+                    </button>
+                  )}
+                  {securityScan.patchNote && (
+                    <div className="empty-state">{securityScan.patchNote}</div>
+                  )}
                   <div className="vuln-list">
                     {securityScan.vulnerabilities.length > 0 ? (
                       securityScan.vulnerabilities.map(vuln => (
-                        <div key={vuln.id} className={`vuln-item severity-${vuln.severity} status-${vuln.status}`}>
+                        <div key={vuln.name} className={`vuln-item severity-${vuln.severity}`}>
                           <div className="vuln-header">
                             <span className={`severity-badge ${vuln.severity}`}>{vuln.severity.toUpperCase()}</span>
                             <span className="vuln-name">{vuln.name}</span>
-                            <span className={`status-badge ${vuln.status}`}>{vuln.status.toUpperCase()}</span>
+                            {vuln.fixAvailable && <span className="status-badge">FIX AVAILABLE</span>}
                           </div>
-                          <div className="vuln-desc">{vuln.description}</div>
-                          {vuln.status !== 'patched' && (
-                            <button 
-                              className="patch-btn"
-                              onClick={() => patchVulnerability(vuln.id)}
-                            >
-                              <Wrench size={14} /> Patch Now
-                            </button>
-                          )}
+                          {vuln.range && <div className="vuln-desc">Affected range: {vuln.range}</div>}
+                          {vuln.via?.length > 0 && <div className="vuln-desc">{vuln.via.join(', ')}</div>}
                         </div>
                       ))
                     ) : (
@@ -1100,13 +1121,11 @@ export default function NexusAI() {
                       securityScan.threats.map((threat, idx) => (
                         <div key={idx} className={`threat-item status-${threat.status}`}>
                           <div className="threat-status">
-                            {threat.status === 'blocked' && <ShieldAlert size={16} style={{ color: '#ef4444' }} />}
-                            {threat.status === 'prevented' && <ShieldCheck size={16} style={{ color: '#10b981' }} />}
-                            {threat.status === 'filtered' && <Eye size={16} style={{ color: '#f59e0b' }} />}
+                            <ShieldAlert size={16} style={{ color: '#ef4444' }} />
                           </div>
                           <div className="threat-info">
                             <div className="threat-type">{threat.type}</div>
-                            <div className="threat-time">{threat.status.toUpperCase()} ΓÇó {new Date(threat.timestamp).toLocaleTimeString()}</div>
+                            <div className="threat-time">{threat.status.toUpperCase()} • {new Date(threat.timestamp).toLocaleTimeString()}</div>
                           </div>
                         </div>
                       ))

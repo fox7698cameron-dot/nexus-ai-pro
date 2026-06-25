@@ -4,6 +4,8 @@
 */
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { securityService } from './src/security-service.js';
+import { useAuth } from './src/auth/AuthContext.jsx';
+import { AdminUserTable } from './src/components/AdminUserTable.jsx';
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
   Settings, Menu, X, Plus, Trash2, Download, Upload,
@@ -21,7 +23,7 @@ import {
   Bug, Wrench, Hammer, Cog, RotateCcw,
   ShieldCheck, ShieldAlert, Fingerprint, ScanFace,
   Network, Wifi, Radio, Antenna, Signal,
-  ArrowLeft, Film, ImagePlus, Clapperboard
+  ArrowLeft, Film, ImagePlus, Clapperboard, LogOut
 } from 'lucide-react';
 
 // Persistence keys
@@ -598,6 +600,8 @@ const WORKFLOW_NODES = {
 // MAIN APP COMPONENT
 // ============================================
 export default function NexusAI() {
+  const { user, logout } = useAuth();
+
   // State
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -608,6 +612,7 @@ export default function NexusAI() {
   const [isMemoryOpen, setIsMemoryOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSecurityOpen, setIsSecurityOpen] = useState(false);
+  const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isCallActive, setIsCallActive] = useState(false);
@@ -915,7 +920,17 @@ export default function NexusAI() {
           <button className="icon-btn" onClick={() => setIsMemoryOpen(!isMemoryOpen)}><Brain size={20} /></button>
           <button className="icon-btn" onClick={() => setIsCallActive(true)}><Phone size={20} /></button>
           <button className="icon-btn" onClick={() => setIsSettingsOpen(true)}><Settings size={20} /></button>
-          <div className="user-avatar">{userAvatar?.emoji || '≡ƒæñ'}</div>
+          {user?.role === 'admin' && (
+            <button className="icon-btn" title="Admin Panel" onClick={() => setIsAdminOpen(true)}><Users size={20} /></button>
+          )}
+          <div className="profile-chip">
+            <div className="user-avatar">{userAvatar?.emoji || '≡ƒæñ'}</div>
+            <div className="profile-chip-info">
+              <span className="profile-chip-name">{user?.displayName}</span>
+              <span className="profile-chip-role">{user?.role}</span>
+            </div>
+          </div>
+          <button className="icon-btn" title="Log out" onClick={logout}><LogOut size={20} /></button>
         </div>
       </header>
 
@@ -1226,6 +1241,21 @@ export default function NexusAI() {
         </div>
       )}
 
+      {/* Admin Panel Modal */}
+      {isAdminOpen && (
+        <div className="modal-overlay" onClick={() => setIsAdminOpen(false)}>
+          <div className="modal large" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3><Users size={18} /> Admin Panel</h3>
+              <button onClick={() => setIsAdminOpen(false)}><X size={20} /></button>
+            </div>
+            <div className="modal-body">
+              <AdminUserTable />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Voice Call Modal */}
       {isCallActive && (
         <div className="call-overlay">
@@ -1383,7 +1413,23 @@ export default function NexusAI() {
           display: flex; align-items: center; justify-content: center;
           font-size: 1.1rem;
         }
-        
+
+        .profile-chip {
+          display: flex; align-items: center; gap: 8px;
+          padding: 4px 10px 4px 4px;
+          background: var(--bg-3);
+          border-radius: 12px;
+        }
+        .profile-chip-info {
+          display: flex; flex-direction: column; line-height: 1.2;
+        }
+        .profile-chip-name {
+          font-size: 0.82rem; font-weight: 500; color: var(--text-1);
+        }
+        .profile-chip-role {
+          font-size: 0.7rem; color: var(--text-3); text-transform: capitalize;
+        }
+
         /* Model Selector */
         .header-center { position: relative; }
         

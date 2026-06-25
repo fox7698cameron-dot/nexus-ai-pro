@@ -1,6 +1,8 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import NexusAI from './app.jsx';
+import { AuthProvider, useAuth } from './src/auth/AuthContext.jsx';
+import { LoginScreen } from './src/auth/LoginScreen.jsx';
 
 // Security: Disable React DevTools in production
 if (typeof window.__REACT_DEVTOOLS_GLOBAL_HOOK__ === 'object') {
@@ -79,12 +81,37 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+function AuthGate() {
+  const { status } = useAuth();
+
+  if (status === 'loading') {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: '#0a0a0c'
+      }}
+      />
+    );
+  }
+
+  if (status === 'unauthenticated') {
+    return <LoginScreen />;
+  }
+
+  return <NexusAI />;
+}
+
 // Mount application
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
     <ErrorBoundary>
-      <NexusAI />
+      <AuthProvider>
+        <AuthGate />
+      </AuthProvider>
     </ErrorBoundary>
   </React.StrictMode>
 );

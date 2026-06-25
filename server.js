@@ -15,6 +15,8 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 
 dotenv.config();
 
@@ -637,6 +639,160 @@ class SecureDataService {
 const dataService = new SecureDataService();
 
 // ================================================
+// AUTHENTICATION & RBAC
+// ================================================
+
+const ROLES = ['admin', 'developer', 'moderator', 'user'];
+
+if (!process.env.JWT_SECRET) {
+  console.warn('[auth] JWT_SECRET is not set; using a random in-memory secret. All sessions will be invalidated on restart.');
+}
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(48).toString('hex');
+const JWT_EXPIRY = '12h';
+
+// Minimum 13 characters (counted by Unicode code point, not UTF-16 unit, so
+// passwords containing emoji aren't penalized) plus at least one special
+// character. Unicode letters/symbols are never rejected.
+function validatePassword(password) {
+  if (typeof password !== 'string') {
+    return 'Password is required.';
+  }
+  const length = Array.from(password).length;
+  if (length < 13) {
+    return 'Password must be at least 13 characters long.';
+  }
+  if (!/[^a-zA-Z0-9]/u.test(password)) {
+    return 'Password must contain at least one special character.';
+  }
+  return null;
+}
+
+// Display names / usernames allow full Unicode (including emoji) by
+// denylisting control characters rather than allowlisting ASCII, so users
+// are never blocked from using non-Latin scripts or emoji.
+function validateDisplayName(displayName) {
+  if (typeof displayName !== 'string' || displayName.trim().length === 0) {
+    return 'Display name is required.';
+  }
+  const trimmed = displayName.trim();
+  if (Array.from(trimmed).length > 64) {
+    return 'Display name must be 64 characters or fewer.';
+  }
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x1F\x7F]/.test(trimmed)) {
+    return 'Display name contains invalid control characters.';
+  }
+  return null;
+}
+
+function validateEmail(email) {
+  if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return 'A valid email address is required.';
+  }
+  return null;
+}
+
+class AuthService {
+  findByEmail(email) {
+    const normalized = email.toLowerCase().trim();
+    return dataService.list('users', {}).find(u => u.email === normalized) || null;
+  }
+
+  async register({ email, password, displayName }) {
+    const normalizedEmail = email.toLowerCase().trim();
+    if (this.findByEmail(normalizedEmail)) {
+      throw Object.assign(new Error('An account with that email already exists.'), { status: 409 });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const isFirstUser = dataService.list('users', {}).length === 0;
+    const id = uuidv4();
+    const user = {
+      id,
+      email: normalizedEmail,
+      passwordHash,
+      displayName: displayName.trim(),
+      role: isFirstUser ? 'admin' : 'user',
+      mfaEnabled: false,
+      createdAt: Date.now(),
+      lastLogin: null
+    };
+    dataService.store('users', id, user);
+    security.logAudit('USER_REGISTERED', { userId: id, role: user.role });
+    return this.toPublicUser(user);
+  }
+
+  async login({ email, password }) {
+    const user = this.findByEmail(email);
+    if (!user) {
+      throw Object.assign(new Error('Invalid email or password.'), { status: 401 });
+    }
+    const valid = await bcrypt.compare(password, user.passwordHash);
+    if (!valid) {
+      security.logAudit('LOGIN_FAILED', { email: user.email });
+      throw Object.assign(new Error('Invalid email or password.'), { status: 401 });
+    }
+    user.lastLogin = Date.now();
+    dataService.store('users', user.id, user);
+    security.logAudit('LOGIN_SUCCESS', { userId: user.id });
+    return this.toPublicUser(user);
+  }
+
+  issueToken(publicUser) {
+    return jwt.sign(
+      { sub: publicUser.id, role: publicUser.role, email: publicUser.email },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRY }
+    );
+  }
+
+  toPublicUser(user) {
+    return {
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      role: user.role,
+      mfaEnabled: !!user.mfaEnabled,
+      createdAt: user.createdAt,
+      lastLogin: user.lastLogin
+    };
+  }
+}
+
+const authService = new AuthService();
+
+// Verifies a Bearer JWT and attaches { id, role, email } to req.user.
+function authenticateToken(req, res, next) {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  if (!token) {
+    return res.status(401).json({ error: 'Authentication required.' });
+  }
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    req.user = { id: payload.sub, role: payload.role, email: payload.email };
+    next();
+  } catch (error) {
+    return res.status(401).json({ error: 'Invalid or expired token.' });
+  }
+}
+
+function requireRole(...allowedRoles) {
+  return (req, res, next) => {
+    if (!req.user || !allowedRoles.includes(req.user.role)) {
+      security.logAudit('AUTHORIZATION_DENIED', {
+        userId: req.user?.id,
+        role: req.user?.role,
+        path: req.path,
+        requiredRoles: allowedRoles
+      });
+      return res.status(403).json({ error: 'Insufficient permissions.' });
+    }
+    next();
+  };
+}
+
+// ================================================
 // WORKFLOW ENGINE
 // ================================================
 
@@ -843,34 +999,101 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// ================================================
+// AUTHENTICATION ENDPOINTS
+// ================================================
+
+app.post('/api/auth/register', authLimiter, async (req, res) => {
+  try {
+    const { email, password, displayName } = req.body || {};
+    const errors = [
+      validateEmail(email),
+      validatePassword(password),
+      validateDisplayName(displayName)
+    ].filter(Boolean);
+    if (errors.length > 0) {
+      return res.status(400).json({ error: errors[0], errors });
+    }
+
+    const user = await authService.register({ email, password, displayName });
+    const token = authService.issueToken(user);
+    res.status(201).json({ user, token });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+app.post('/api/auth/login', authLimiter, async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (validateEmail(email) || typeof password !== 'string' || !password) {
+      return res.status(400).json({ error: 'Email and password are required.' });
+    }
+    const user = await authService.login({ email, password });
+    const token = authService.issueToken(user);
+    res.json({ user, token });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+app.get('/api/auth/me', authenticateToken, (req, res) => {
+  const user = dataService.list('users', {}).find(u => u.id === req.user.id);
+  if (!user) {
+    return res.status(404).json({ error: 'User not found.' });
+  }
+  res.json({ user: authService.toPublicUser(user) });
+});
+
+// Admin-only: list and manage user accounts (powers the admin dashboard)
+app.get('/api/admin/users', authenticateToken, requireRole('admin'), (req, res) => {
+  const users = dataService.list('users', {}).map(u => authService.toPublicUser(u));
+  res.json({ users, total: users.length });
+});
+
+app.put('/api/admin/users/:userId/role', authenticateToken, requireRole('admin'), (req, res) => {
+  const { role } = req.body || {};
+  if (!ROLES.includes(role)) {
+    return res.status(400).json({ error: `Role must be one of: ${ROLES.join(', ')}` });
+  }
+  const user = dataService.list('users', {}).find(u => u.id === req.params.userId);
+  if (!user) {
+    return res.status(404).json({ error: 'User not found.' });
+  }
+  user.role = role;
+  dataService.store('users', user.id, user);
+  security.logAudit('ROLE_CHANGED', { actorId: req.user.id, targetUserId: user.id, newRole: role });
+  res.json({ user: authService.toPublicUser(user) });
+});
+
 // Security endpoints
-app.get('/api/security/status', (req, res) => {
+app.get('/api/security/status', authenticateToken, (req, res) => {
   res.json(security.getSecurityStatus());
 });
 
-app.post('/api/security/scan', async (req, res) => {
+app.post('/api/security/scan', authenticateToken, requireRole('admin', 'developer'), async (req, res) => {
   const results = await security.scanVulnerabilities();
   res.json(results);
 });
 
-app.post('/api/security/patch', async (req, res) => {
+app.post('/api/security/patch', authenticateToken, requireRole('admin', 'developer'), async (req, res) => {
   const patches = await security.autoPatch();
   res.json({ patches });
 });
 
-app.post('/api/security/rotate-keys', (req, res) => {
+app.post('/api/security/rotate-keys', authenticateToken, requireRole('admin'), (req, res) => {
   const success = security.rotateKeys();
   res.json({ success });
 });
 
-app.get('/api/security/audit', (req, res) => {
+app.get('/api/security/audit', authenticateToken, requireRole('admin', 'developer', 'moderator'), (req, res) => {
   const { limit = 100, offset = 0 } = req.query;
   const logs = security.auditLog.slice(-limit - offset, -offset || undefined);
   res.json({ logs, total: security.auditLog.length });
 });
 
 // Comprehensive security dashboard endpoint (for all platforms)
-app.get('/api/security/dashboard', async (req, res) => {
+app.get('/api/security/dashboard', authenticateToken, async (req, res) => {
   try {
     const status = security.getSecurityStatus();
     const recentLogs = security.auditLog.slice(-10);
@@ -899,7 +1122,7 @@ app.get('/api/security/dashboard', async (req, res) => {
 });
 
 // Security alerts endpoint
-app.get('/api/security/alerts', (req, res) => {
+app.get('/api/security/alerts', authenticateToken, requireRole('admin', 'developer', 'moderator'), (req, res) => {
   const alerts = security.auditLog
     .filter(l => l.type.includes('ERROR') || l.type.includes('THREAT') || l.type.includes('ATTACK'))
     .slice(-20);
@@ -912,7 +1135,7 @@ app.get('/api/security/alerts', (req, res) => {
 });
 
 // Encryption health endpoint
-app.get('/api/security/encryption-health', (req, res) => {
+app.get('/api/security/encryption-health', authenticateToken, (req, res) => {
   res.json({
     algorithm: 'AES-256-GCM',
     keyRotationInterval: '24h',
@@ -1103,15 +1326,21 @@ app.get('/api/templates/app', (req, res) => {
 // ================================================
 
 io.use((socket, next) => {
-  // Authenticate socket connection
-  const token = socket.handshake.auth.token;
-  if (token) {
-    // Verify token
-    socket.userId = security.hash(token);
-    next();
-  } else {
+  // Authenticate socket connection with the same JWTs issued by /api/auth/login.
+  const token = socket.handshake.auth?.token;
+  if (!token) {
     socket.userId = uuidv4();
+    socket.user = null;
+    return next();
+  }
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    socket.userId = payload.sub;
+    socket.user = { id: payload.sub, role: payload.role, email: payload.email };
     next();
+  } catch (error) {
+    security.logAudit('SOCKET_AUTH_REJECTED', { socketId: socket.id });
+    next(new Error('Invalid or expired token'));
   }
 });
 

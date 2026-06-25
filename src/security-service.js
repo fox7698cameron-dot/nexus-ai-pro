@@ -17,11 +17,19 @@ export class SecurityService {
   }
 
   /**
+   * Auth header for requests; all /api/security/* routes require a logged-in user.
+   */
+  authHeaders() {
+    const token = typeof window !== 'undefined' ? window.localStorage.getItem('nexus:authToken') : null;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
+  /**
    * Get security dashboard data
    */
   async getDashboard() {
     try {
-      const response = await fetch(`${this.apiBaseUrl}/security/dashboard`);
+      const response = await fetch(`${this.apiBaseUrl}/security/dashboard`, { headers: this.authHeaders() });
       if (!response.ok) throw new Error('Failed to fetch dashboard');
       const data = await response.json();
       
@@ -58,7 +66,7 @@ export class SecurityService {
     try {
       const response = await fetch(`${this.apiBaseUrl}/security/scan`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', ...this.authHeaders() }
       });
       
       if (!response.ok) throw new Error('Scan failed');

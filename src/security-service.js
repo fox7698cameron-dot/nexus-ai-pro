@@ -89,7 +89,7 @@ export class SecurityService {
     try {
       const response = await fetch(`${this.apiBaseUrl}/security/patch`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
         body: JSON.stringify({ vulnerabilityId: vulnId })
       });
       
@@ -106,7 +106,7 @@ export class SecurityService {
    */
   async getAlerts() {
     try {
-      const response = await fetch(`${this.apiBaseUrl}/security/alerts`);
+      const response = await fetch(`${this.apiBaseUrl}/security/alerts`, { headers: this.authHeaders() });
       if (!response.ok) throw new Error('Failed to fetch alerts');
       return await response.json();
     } catch (error) {
@@ -120,7 +120,7 @@ export class SecurityService {
    */
   async getEncryptionHealth() {
     try {
-      const response = await fetch(`${this.apiBaseUrl}/security/encryption-health`);
+      const response = await fetch(`${this.apiBaseUrl}/security/encryption-health`, { headers: this.authHeaders() });
       if (!response.ok) throw new Error('Failed to fetch encryption health');
       return await response.json();
     } catch (error) {
@@ -138,7 +138,7 @@ export class SecurityService {
    */
   async getAuditLogs(limit = 50) {
     try {
-      const response = await fetch(`${this.apiBaseUrl}/security/audit?limit=${limit}`);
+      const response = await fetch(`${this.apiBaseUrl}/security/audit?limit=${limit}`, { headers: this.authHeaders() });
       if (!response.ok) throw new Error('Failed to fetch audit logs');
       return await response.json();
     } catch (error) {
@@ -154,9 +154,9 @@ export class SecurityService {
     try {
       const response = await fetch(`${this.apiBaseUrl}/security/rotate-keys`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json', ...this.authHeaders() }
       });
-      
+
       if (!response.ok) throw new Error('Key rotation failed');
       return await response.json();
     } catch (error) {
@@ -170,7 +170,7 @@ export class SecurityService {
    */
   async getStatus() {
     try {
-      const response = await fetch(`${this.apiBaseUrl}/security/status`);
+      const response = await fetch(`${this.apiBaseUrl}/security/status`, { headers: this.authHeaders() });
       if (!response.ok) throw new Error('Failed to fetch status');
       return await response.json();
     } catch (error) {

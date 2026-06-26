@@ -674,6 +674,7 @@ class SecureDataService {
     this.chats = new Map();
     this.workflows = new Map();
     this.users = new Map();
+    this.projects = new Map();
   }
 
   // Encrypt and store data
@@ -1233,6 +1234,143 @@ class WorkflowEngine {
 const workflowEngine = new WorkflowEngine();
 
 // ================================================
+// PROJECT TRACKING MODULE
+// ================================================
+
+const PROJECT_STATUSES = ['planning', 'active', 'on_hold', 'completed', 'archived'];
+const TASK_STATUSES = ['todo', 'in_progress', 'done'];
+
+class ProjectModule {
+  createProject(ownerId, { name, description = '', status = 'planning' } = {}) {
+    if (typeof name !== 'string' || !name.trim()) {
+      throw Object.assign(new Error('Project name is required.'), { status: 400 });
+    }
+    if (!PROJECT_STATUSES.includes(status)) {
+      throw Object.assign(new Error(`Status must be one of: ${PROJECT_STATUSES.join(', ')}`), { status: 400 });
+    }
+    const id = uuidv4();
+    const project = {
+      id,
+      ownerId,
+      name: name.trim(),
+      description: String(description || ''),
+      status,
+      tasks: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    };
+    dataService.store('projects', id, project);
+    security.logAudit('PROJECT_CREATED', { ownerId, projectId: id });
+    return project;
+  }
+
+  listProjects(ownerId) {
+    return dataService.list('projects', { ownerId });
+  }
+
+  // Throws a uniform 404 for both "doesn't exist" and "exists but isn't yours",
+  // so this can't be used to probe for other users' project IDs.
+  getOwnedProject(ownerId, projectId) {
+    const project = dataService.retrieve('projects', projectId);
+    if (!project || project.ownerId !== ownerId) {
+      throw Object.assign(new Error('Project not found.'), { status: 404 });
+    }
+    return project;
+  }
+
+  updateProject(ownerId, projectId, updates = {}) {
+    const project = this.getOwnedProject(ownerId, projectId);
+    if (updates.name !== undefined) {
+      if (typeof updates.name !== 'string' || !updates.name.trim()) {
+        throw Object.assign(new Error('Project name is required.'), { status: 400 });
+      }
+      project.name = updates.name.trim();
+    }
+    if (updates.description !== undefined) {
+      project.description = String(updates.description);
+    }
+    if (updates.status !== undefined) {
+      if (!PROJECT_STATUSES.includes(updates.status)) {
+        throw Object.assign(new Error(`Status must be one of: ${PROJECT_STATUSES.join(', ')}`), { status: 400 });
+      }
+      project.status = updates.status;
+    }
+    project.updatedAt = Date.now();
+    dataService.store('projects', projectId, project);
+    security.logAudit('PROJECT_UPDATED', { ownerId, projectId });
+    return project;
+  }
+
+  deleteProject(ownerId, projectId) {
+    this.getOwnedProject(ownerId, projectId);
+    dataService.delete('projects', projectId);
+    security.logAudit('PROJECT_DELETED', { ownerId, projectId });
+  }
+
+  addTask(ownerId, projectId, { title, status = 'todo' } = {}) {
+    const project = this.getOwnedProject(ownerId, projectId);
+    if (typeof title !== 'string' || !title.trim()) {
+      throw Object.assign(new Error('Task title is required.'), { status: 400 });
+    }
+    if (!TASK_STATUSES.includes(status)) {
+      throw Object.assign(new Error(`Task status must be one of: ${TASK_STATUSES.join(', ')}`), { status: 400 });
+    }
+    const task = {
+      id: uuidv4(),
+      title: title.trim(),
+      status,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    };
+    project.tasks.push(task);
+    project.updatedAt = Date.now();
+    dataService.store('projects', projectId, project);
+    security.logAudit('PROJECT_TASK_ADDED', { ownerId, projectId, taskId: task.id });
+    return project;
+  }
+
+  updateTask(ownerId, projectId, taskId, updates = {}) {
+    const project = this.getOwnedProject(ownerId, projectId);
+    const task = project.tasks.find(t => t.id === taskId);
+    if (!task) {
+      throw Object.assign(new Error('Task not found.'), { status: 404 });
+    }
+    if (updates.title !== undefined) {
+      if (typeof updates.title !== 'string' || !updates.title.trim()) {
+        throw Object.assign(new Error('Task title is required.'), { status: 400 });
+      }
+      task.title = updates.title.trim();
+    }
+    if (updates.status !== undefined) {
+      if (!TASK_STATUSES.includes(updates.status)) {
+        throw Object.assign(new Error(`Task status must be one of: ${TASK_STATUSES.join(', ')}`), { status: 400 });
+      }
+      task.status = updates.status;
+    }
+    task.updatedAt = Date.now();
+    project.updatedAt = Date.now();
+    dataService.store('projects', projectId, project);
+    security.logAudit('PROJECT_TASK_UPDATED', { ownerId, projectId, taskId });
+    return project;
+  }
+
+  deleteTask(ownerId, projectId, taskId) {
+    const project = this.getOwnedProject(ownerId, projectId);
+    const index = project.tasks.findIndex(t => t.id === taskId);
+    if (index === -1) {
+      throw Object.assign(new Error('Task not found.'), { status: 404 });
+    }
+    project.tasks.splice(index, 1);
+    project.updatedAt = Date.now();
+    dataService.store('projects', projectId, project);
+    security.logAudit('PROJECT_TASK_DELETED', { ownerId, projectId, taskId });
+    return project;
+  }
+}
+
+const projectModule = new ProjectModule();
+
+// ================================================
 // API ROUTES
 // ================================================
 
@@ -1353,6 +1491,84 @@ app.put('/api/admin/users/:userId/role', authenticateToken, requireRole('admin')
   dataService.store('users', user.id, user);
   security.logAudit('ROLE_CHANGED', { actorId: req.user.id, targetUserId: user.id, newRole: role });
   res.json({ user: authService.toPublicUser(user) });
+});
+
+// ================================================
+// PROJECT TRACKING ENDPOINTS
+// ================================================
+// Ownership is always derived from the verified JWT (req.user.id), never from a
+// client-supplied userId — unlike the WorkflowEngine routes above.
+
+app.post('/api/projects', authenticateToken, (req, res) => {
+  try {
+    const project = projectModule.createProject(req.user.id, req.body || {});
+    io.to(`user:${req.user.id}`).emit('project:event', { type: 'PROJECT_CREATED', project });
+    res.status(201).json({ project });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+app.get('/api/projects', authenticateToken, (req, res) => {
+  res.json({ projects: projectModule.listProjects(req.user.id) });
+});
+
+app.get('/api/projects/:projectId', authenticateToken, (req, res) => {
+  try {
+    res.json({ project: projectModule.getOwnedProject(req.user.id, req.params.projectId) });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+app.put('/api/projects/:projectId', authenticateToken, (req, res) => {
+  try {
+    const project = projectModule.updateProject(req.user.id, req.params.projectId, req.body || {});
+    io.to(`user:${req.user.id}`).emit('project:event', { type: 'PROJECT_UPDATED', project });
+    res.json({ project });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/projects/:projectId', authenticateToken, (req, res) => {
+  try {
+    projectModule.deleteProject(req.user.id, req.params.projectId);
+    io.to(`user:${req.user.id}`).emit('project:event', { type: 'PROJECT_DELETED', projectId: req.params.projectId });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+app.post('/api/projects/:projectId/tasks', authenticateToken, (req, res) => {
+  try {
+    const project = projectModule.addTask(req.user.id, req.params.projectId, req.body || {});
+    io.to(`user:${req.user.id}`).emit('project:event', { type: 'PROJECT_TASK_ADDED', project });
+    res.status(201).json({ project });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+app.put('/api/projects/:projectId/tasks/:taskId', authenticateToken, (req, res) => {
+  try {
+    const project = projectModule.updateTask(req.user.id, req.params.projectId, req.params.taskId, req.body || {});
+    io.to(`user:${req.user.id}`).emit('project:event', { type: 'PROJECT_TASK_UPDATED', project });
+    res.json({ project });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/projects/:projectId/tasks/:taskId', authenticateToken, (req, res) => {
+  try {
+    const project = projectModule.deleteTask(req.user.id, req.params.projectId, req.params.taskId);
+    io.to(`user:${req.user.id}`).emit('project:event', { type: 'PROJECT_TASK_DELETED', project });
+    res.json({ project });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
 });
 
 // Security endpoints
@@ -1638,6 +1854,12 @@ io.use((socket, next) => {
 io.on('connection', (socket) => {
   console.log(`Client connected: ${socket.id}`);
   security.logAudit('SOCKET_CONNECT', { socketId: socket.id, userId: socket.userId });
+
+  if (socket.user) {
+    // Scopes project:event emits to this user only, unlike the unscoped
+    // broadcast.emit calls used elsewhere in this handler.
+    socket.join(`user:${socket.userId}`);
+  }
 
   // Voice call handling
   socket.on('voice:start', (data) => {

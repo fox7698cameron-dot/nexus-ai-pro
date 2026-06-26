@@ -22,6 +22,7 @@ import jwt from 'jsonwebtoken';
 import { generateSecret as generateTotpSecret, verify as verifyTotp, generateURI as generateTotpURI } from 'otplib';
 import QRCode from 'qrcode';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
+import Stripe from 'stripe';
 
 dotenv.config();
 
@@ -426,6 +427,37 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID']
 }));
 
+// Stripe webhook needs the raw, unparsed body to verify its signature, so this
+// route is registered ahead of the global JSON body parser below — once a
+// request matches this exact path/method, the response is sent here and the
+// global parsers further down never run for it.
+app.post('/api/payments/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  const signature = req.headers['stripe-signature'];
+  let event;
+  try {
+    event = paymentModule.verifyWebhookSignature(req.body, signature);
+  } catch (err) {
+    security.logAudit('PAYMENT_WEBHOOK_REJECTED', { reason: err.message });
+    return res.status(400).json({ error: `Webhook signature verification failed: ${err.message}` });
+  }
+
+  try {
+    let updated = null;
+    if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
+      updated = await paymentModule.applyCheckoutCompleted(event.data.object);
+    } else if (event.type === 'checkout.session.async_payment_failed' || event.type === 'payment_intent.payment_failed') {
+      updated = await paymentModule.applyPaymentFailed(event.data.object);
+    }
+    if (updated) {
+      io.to(`user:${updated.userId}`).emit('payment:event', { type: 'PAYMENT_UPDATED', payment: updated });
+    }
+    res.json({ received: true });
+  } catch (err) {
+    security.logAudit('PAYMENT_WEBHOOK_ERROR', { error: err.message });
+    res.status(500).json({ error: 'Webhook handling failed.' });
+  }
+});
+
 // Body parsing with size limits
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -676,6 +708,7 @@ class SecureDataService {
     this.users = new Map();
     this.projects = new Map();
     this.socialConnections = new Map();
+    this.payments = new Map();
   }
 
   // Encrypt and store data
@@ -1587,6 +1620,118 @@ class SocialConnectorService {
 const socialConnector = new SocialConnectorService();
 
 // ================================================
+// PAYMENT MODULE (real Stripe Checkout integration)
+// ================================================
+// Card numbers are never collected by this server — Checkout Session is a
+// Stripe-hosted page, and a payment is only ever marked "paid" once Stripe's
+// signed webhook confirms it, never from the client-side success redirect.
+
+class PaymentModule {
+  constructor() {
+    this.stripe = process.env.STRIPE_SECRET_KEY ? new Stripe(process.env.STRIPE_SECRET_KEY) : null;
+  }
+
+  isConfigured() {
+    return !!this.stripe;
+  }
+
+  requireConfigured() {
+    if (!this.stripe) {
+      const error = new Error('Payments are not configured on this server. Set STRIPE_SECRET_KEY.');
+      error.status = 412;
+      throw error;
+    }
+  }
+
+  async createCheckoutSession(userId, { amount, currency = 'usd', description = '' } = {}, baseUrl) {
+    this.requireConfigured();
+
+    const cents = Math.round(Number(amount) * 100);
+    if (!Number.isFinite(cents) || cents <= 0) {
+      const error = new Error('Amount must be a positive number.');
+      error.status = 400;
+      throw error;
+    }
+    const trimmedDescription = String(description || '').slice(0, 200);
+
+    const session = await this.stripe.checkout.sessions.create({
+      mode: 'payment',
+      payment_method_types: ['card'],
+      line_items: [{
+        price_data: {
+          currency,
+          product_data: { name: trimmedDescription || 'Nexus AI Pro payment' },
+          unit_amount: cents
+        },
+        quantity: 1
+      }],
+      success_url: `${baseUrl}/?payment=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${baseUrl}/?payment=canceled`,
+      client_reference_id: userId,
+      metadata: { userId }
+    });
+
+    const record = {
+      userId,
+      sessionId: session.id,
+      amount: cents,
+      currency,
+      description: trimmedDescription,
+      status: 'pending',
+      createdAt: Date.now()
+    };
+    dataService.store('payments', session.id, record);
+    security.logAudit('PAYMENT_CHECKOUT_CREATED', { userId, sessionId: session.id, amount: cents, currency });
+    return { url: session.url, sessionId: session.id };
+  }
+
+  listPayments(userId) {
+    return dataService.list('payments', { userId }).sort((a, b) => b.createdAt - a.createdAt);
+  }
+
+  getOwnedPayment(userId, sessionId) {
+    const record = dataService.retrieve('payments', sessionId);
+    if (!record || record.userId !== userId) {
+      const error = new Error('Payment not found.');
+      error.status = 404;
+      throw error;
+    }
+    return record;
+  }
+
+  verifyWebhookSignature(rawBody, signature) {
+    this.requireConfigured();
+    if (!process.env.STRIPE_WEBHOOK_SECRET) {
+      const error = new Error('STRIPE_WEBHOOK_SECRET is not set.');
+      error.status = 412;
+      throw error;
+    }
+    return this.stripe.webhooks.constructEvent(rawBody, signature, process.env.STRIPE_WEBHOOK_SECRET);
+  }
+
+  applyCheckoutCompleted(session) {
+    const existing = dataService.retrieve('payments', session.id);
+    if (!existing) return null;
+    const paid = session.payment_status === 'paid';
+    const updated = { ...existing, status: paid ? 'paid' : existing.status, paidAt: paid ? Date.now() : existing.paidAt };
+    dataService.store('payments', session.id, updated);
+    security.logAudit('PAYMENT_COMPLETED', { userId: existing.userId, sessionId: session.id, status: updated.status });
+    return updated;
+  }
+
+  applyPaymentFailed(session) {
+    const existing = dataService.retrieve('payments', session.id);
+    if (!existing) return null;
+    const updated = { ...existing, status: 'failed', failedAt: Date.now() };
+    dataService.store('payments', session.id, updated);
+    security.logAudit('PAYMENT_FAILED', { userId: existing.userId, sessionId: session.id });
+    return updated;
+  }
+}
+
+const paymentModule = new PaymentModule();
+
+// ================================================
 // API ROUTES
 // ================================================
 
@@ -1863,6 +2008,38 @@ app.delete('/api/social/:platform', authenticateToken, (req, res) => {
   }
   socialConnector.disconnect(req.user.id, platform);
   res.json({ success: true });
+});
+
+// Payment endpoints (real Stripe Checkout; status only ever flips to "paid"
+// once Stripe's signed webhook confirms it — see /api/payments/webhook above)
+app.get('/api/payments/status', (req, res) => {
+  res.json({ configured: paymentModule.isConfigured() });
+});
+
+app.post('/api/payments/checkout', authenticateToken, async (req, res) => {
+  try {
+    const { amount, currency, description } = req.body || {};
+    const result = await paymentModule.createCheckoutSession(
+      req.user.id,
+      { amount, currency, description },
+      getPublicBaseUrl(req)
+    );
+    res.json(result);
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+app.get('/api/payments/history', authenticateToken, (req, res) => {
+  res.json({ payments: paymentModule.listPayments(req.user.id) });
+});
+
+app.get('/api/payments/:sessionId', authenticateToken, (req, res) => {
+  try {
+    res.json({ payment: paymentModule.getOwnedPayment(req.user.id, req.params.sessionId) });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
 });
 
 // Security endpoints

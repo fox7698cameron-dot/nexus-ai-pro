@@ -9,6 +9,7 @@ import { AdminUserTable } from './src/components/AdminUserTable.jsx';
 import { MfaSettings } from './src/components/MfaSettings.jsx';
 import { ProjectsPanel } from './src/components/ProjectsPanel.jsx';
 import { SocialConnectorsPanel } from './src/components/SocialConnectorsPanel.jsx';
+import { PaymentDashboard } from './src/components/PaymentDashboard.jsx';
 import { useSecuritySocket } from './src/security/useSecuritySocket.js';
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
@@ -27,7 +28,7 @@ import {
   Bug, Wrench, Hammer, Cog, RotateCcw,
   ShieldCheck, ShieldAlert, Fingerprint, ScanFace,
   Network, Wifi, Radio, Antenna, Signal,
-  ArrowLeft, Film, ImagePlus, Clapperboard, LogOut, ListChecks
+  ArrowLeft, Film, ImagePlus, Clapperboard, LogOut, ListChecks, CreditCard
 } from 'lucide-react';
 
 // Persistence keys
@@ -468,6 +469,7 @@ const TOOLS = {
   automation: { name: 'Automation', icon: Workflow, description: 'N8N-style workflows' },
   projects: { name: 'Projects', icon: ListChecks, description: 'Project & task tracking' },
   social: { name: 'Social', icon: Share2, description: 'Social media connectors' },
+  payments: { name: 'Payments', icon: CreditCard, description: 'Payment dashboard' },
   deploy: { name: 'Deploy', icon: Rocket, description: 'App deployment' },
   security: { name: 'Security', icon: Shield, description: 'Security analysis' },
   schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' }
@@ -981,7 +983,7 @@ export default function NexusAI() {
             {Object.entries(TOOLS).map(([key, tool]) => {
               const Icon = tool.icon;
               return (
-                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security', 'projects', 'social'].includes(key)) setShowToolContent(true); }}>
+                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security', 'projects', 'social', 'payments'].includes(key)) setShowToolContent(true); }}>
                   <Icon size={18} />
                   <span>{tool.name}</span>
                 </button>
@@ -1036,6 +1038,10 @@ export default function NexusAI() {
 
           {showToolContent && activeTool === 'social' && (
             <SocialConnectorsPanel />
+          )}
+
+          {showToolContent && activeTool === 'payments' && (
+            <PaymentDashboard />
           )}
 
           {/* Security Dashboard */}

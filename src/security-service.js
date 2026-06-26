@@ -37,8 +37,9 @@ export class SecurityService {
       this.vulnerabilities = data.vulnerabilities;
       this.threats = data.threats;
       this.encryptionStatus = data.encryptionStatus;
+      this.pqc = data.pqc;
       this.lastScanTime = data.lastScanTime;
-      
+
       return data;
     } catch (error) {
       console.error('Security dashboard fetch error:', error);

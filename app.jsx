@@ -631,6 +631,7 @@ export default function NexusAI() {
     vulnerabilities: [],
     threats: [],
     encryptionStatus: 'secure',
+    pqc: null,
     overallScore: null,
     error: null,
     patchNote: null
@@ -755,6 +756,7 @@ export default function NexusAI() {
       vulnerabilities: dashboard.vulnerabilities || [],
       threats: dashboard.threats || [],
       encryptionStatus: dashboard.encryptionStatus || prev.encryptionStatus,
+      pqc: dashboard.pqc || prev.pqc,
       overallScore: typeof dashboard.overallScore === 'number' ? dashboard.overallScore : prev.overallScore
     }));
   };
@@ -1052,6 +1054,12 @@ export default function NexusAI() {
                       <Lock size={16} style={{ color: '#3b82f6' }} />
                       <span>AES-256-GCM Active</span>
                     </div>
+                    {securityScan.pqc?.active && (
+                      <div className="status-item">
+                        <ShieldCheck size={16} style={{ color: '#8b5cf6' }} />
+                        <span>{securityScan.pqc.algorithm} Hybrid Layer Active</span>
+                      </div>
+                    )}
                   </div>
                 </div>
 

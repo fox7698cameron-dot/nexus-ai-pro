@@ -21,6 +21,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { generateSecret as generateTotpSecret, verify as verifyTotp, generateURI as generateTotpURI } from 'otplib';
 import QRCode from 'qrcode';
+import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 
 dotenv.config();
 
@@ -43,6 +44,8 @@ class SecurityModule {
     this.iterations = 100000;
     this.digest = 'sha512';
     this.masterKey = this.deriveMasterKey();
+    this.pqcAlgorithm = 'ML-KEM-768'; // FIPS 203, NIST-standardized post-quantum KEM
+    this.kemKeyPair = ml_kem768.keygen();
     this.auditLog = [];
     this.vulnerabilityPatches = new Map();
     this.threatDatabase = new Set();
@@ -59,11 +62,24 @@ class SecurityModule {
     return crypto.pbkdf2Sync(secret, salt, this.iterations, this.keyLength, this.digest);
   }
 
-  // AES-256-GCM Encryption (versioned output)
+  // Combines the classical master key with a fresh ML-KEM shared secret via HKDF, so
+  // recovering either secret alone (e.g. a future quantum break of the KEM, or a leak
+  // of the PBKDF2 key) is insufficient to derive the per-record AES key.
+  deriveHybridKey(kemSharedSecret) {
+    const ikm = Buffer.concat([this.masterKey, Buffer.from(kemSharedSecret)]);
+    const derived = crypto.hkdfSync(this.digest, ikm, Buffer.alloc(0), 'nexus-pqc-hybrid-v1', this.keyLength);
+    return Buffer.from(derived);
+  }
+
+  // AES-256-GCM Encryption, hybridized with an ML-KEM-768 encapsulation per record
+  // (versioned output)
   encrypt(plaintext, additionalData = '') {
     try {
+      const { cipherText: kemCipherText, sharedSecret } = ml_kem768.encapsulate(this.kemKeyPair.publicKey);
+      const recordKey = this.deriveHybridKey(sharedSecret);
+
       const iv = crypto.randomBytes(this.ivLength);
-      const cipher = crypto.createCipheriv(this.algorithm, this.masterKey, iv, {
+      const cipher = crypto.createCipheriv(this.algorithm, recordKey, iv, {
         authTagLength: this.tagLength
       });
 
@@ -82,6 +98,8 @@ class SecurityModule {
         iv: iv.toString('hex'),
         encrypted: encrypted.toString('hex'),
         tag: tag.toString('hex'),
+        kem: Buffer.from(kemCipherText).toString('hex'),
+        pqcAlgorithm: this.pqcAlgorithm,
         timestamp: Date.now()
       };
     } catch (error) {
@@ -90,13 +108,18 @@ class SecurityModule {
     }
   }
 
-  // AES-256-GCM Decryption
+  // AES-256-GCM Decryption; decapsulates the per-record ML-KEM ciphertext (when present)
+  // to rebuild the same hybrid key used at encryption time.
   decrypt(encryptedData, additionalData = '') {
     try {
-      const { iv, encrypted, tag } = encryptedData;
+      const { iv, encrypted, tag, kem } = encryptedData;
+      const recordKey = kem
+        ? this.deriveHybridKey(ml_kem768.decapsulate(Buffer.from(kem, 'hex'), this.kemKeyPair.secretKey))
+        : this.masterKey;
+
       const decipher = crypto.createDecipheriv(
         this.algorithm,
-        this.masterKey,
+        recordKey,
         Buffer.from(iv, 'hex'),
         { authTagLength: this.tagLength }
       );
@@ -310,6 +333,7 @@ class SecurityModule {
     return {
       encryptionActive: true,
       algorithm: this.algorithm,
+      pqcAlgorithm: this.pqcAlgorithm,
       lastScan: this.lastScan,
       auditLogSize: this.auditLog.length,
       threatsBlocked: this.threatDatabase.size,
@@ -319,9 +343,10 @@ class SecurityModule {
     };
   }
 
-  // Key rotation
+  // Key rotation (both the classical AES master key and the ML-KEM keypair)
   rotateKeys() {
     this.masterKey = this.deriveMasterKey();
+    this.kemKeyPair = ml_kem768.keygen();
     this.lastKeyRotation = Date.now();
     this.logAudit('KEY_ROTATION', { timestamp: this.lastKeyRotation });
     io.emit('security:event', { type: 'KEY_ROTATION', timestamp: this.lastKeyRotation });
@@ -1366,6 +1391,7 @@ app.get('/api/security/dashboard', authenticateToken, async (req, res) => {
       overallScore: security.computeSecurityScore(audit.counts),
       encryptionStatus: 'AES-256-GCM',
       encryptionActive: true,
+      pqc: { algorithm: security.pqcAlgorithm, active: true },
       lastScanTime: security.lastScan,
       vulnerabilities: audit.vulnerabilities,
       vulnerabilityCounts: audit.counts,
@@ -1403,6 +1429,7 @@ app.get('/api/security/alerts', authenticateToken, requireRole('admin', 'develop
 app.get('/api/security/encryption-health', authenticateToken, (req, res) => {
   res.json({
     algorithm: 'AES-256-GCM',
+    pqc: { algorithm: security.pqcAlgorithm, active: true },
     keyRotationInterval: '24h',
     lastKeyRotation: security.lastKeyRotation,
     nextKeyRotation: security.lastKeyRotation + 86400000,

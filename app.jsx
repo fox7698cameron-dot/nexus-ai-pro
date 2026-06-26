@@ -6,6 +6,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { securityService } from './src/security-service.js';
 import { useAuth } from './src/auth/AuthContext.jsx';
 import { AdminUserTable } from './src/components/AdminUserTable.jsx';
+import { MfaSettings } from './src/components/MfaSettings.jsx';
 import { useSecuritySocket } from './src/security/useSecuritySocket.js';
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
@@ -613,7 +614,6 @@ export default function NexusAI() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMemoryOpen, setIsMemoryOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isSecurityOpen, setIsSecurityOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -1238,23 +1238,7 @@ export default function NexusAI() {
                   </div>
                 ))}
               </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Security Modal */}
-      {isSecurityOpen && (
-        <div className="modal-overlay" onClick={() => setIsSecurityOpen(false)}>
-          <div className="modal large" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3><Shield size={18} /> Security Center</h3>
-              <button onClick={() => setIsSecurityOpen(false)}><X size={20} /></button>
-            </div>
-            <div className="security-grid">
-              <div className="security-card"><Lock size={24} /><h4>Encryption</h4><p>AES-256-GCM Active</p></div>
-              <div className="security-card"><ShieldCheck size={24} /><h4>Status</h4><p>Secure</p></div>
-              <div className="security-card"><Fingerprint size={24} /><h4>Auth</h4><p>Multi-Factor</p></div>
+              <MfaSettings />
             </div>
           </div>
         </div>
@@ -1840,6 +1824,20 @@ export default function NexusAI() {
           color: var(--text-1);
           width: 200px;
         }
+        .mfa-btn {
+          background: var(--accent);
+          border: none;
+          border-radius: 6px;
+          padding: 8px 14px;
+          color: var(--text-1);
+          cursor: pointer;
+          font-size: 0.85rem;
+        }
+        .mfa-btn.secondary {
+          background: transparent;
+          border: 1px solid var(--border);
+        }
+        .mfa-btn:disabled { opacity: 0.6; cursor: not-allowed; }
         
         .security-grid {
           display: grid;

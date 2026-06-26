@@ -102,13 +102,15 @@ const styles = {
 };
 
 export function LoginScreen() {
-  const { login, register, error } = useAuth();
+  const { login, register, completeMfaChallenge, error } = useAuth();
   const [mode, setMode] = useState('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [fieldErrors, setFieldErrors] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [mfaChallenge, setMfaChallenge] = useState(null);
+  const [mfaCode, setMfaCode] = useState('');
 
   const isRegister = mode === 'register';
 
@@ -122,8 +124,65 @@ export function LoginScreen() {
     setSubmitting(false);
     if (!result.ok && result.errors) {
       setFieldErrors(result.errors);
+      return;
+    }
+    if (result.ok && result.mfaRequired) {
+      setMfaChallenge(result.challengeToken);
     }
   };
+
+  const handleMfaSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitting(true);
+    const result = await completeMfaChallenge(mfaChallenge, mfaCode);
+    setSubmitting(false);
+    if (!result.ok) {
+      setMfaCode('');
+    }
+  };
+
+  if (mfaChallenge) {
+    return (
+      <div style={styles.page}>
+        <div style={styles.card}>
+          <div style={styles.logo} />
+          <h1 style={styles.title}>Two-factor verification</h1>
+          <p style={styles.subtitle}>Enter the 6-digit code from your authenticator app, or a backup code.</p>
+
+          {error && (
+            <div style={styles.errorBox}>
+              <p style={styles.errorText}>{error}</p>
+            </div>
+          )}
+
+          <form onSubmit={handleMfaSubmit}>
+            <div style={styles.field}>
+              <label style={styles.label}>Authentication code</label>
+              <input
+                style={styles.input}
+                type="text"
+                inputMode="text"
+                autoFocus
+                autoComplete="one-time-code"
+                value={mfaCode}
+                onChange={(e) => setMfaCode(e.target.value)}
+                required
+              />
+            </div>
+            <button type="submit" style={styles.submit} disabled={submitting || !mfaCode.trim()}>
+              {submitting ? 'Verifying…' : 'Verify'}
+            </button>
+          </form>
+
+          <p style={styles.toggle}>
+            <span style={styles.toggleLink} onClick={() => { setMfaChallenge(null); setMfaCode(''); }}>
+              Back to sign in
+            </span>
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={styles.page}>

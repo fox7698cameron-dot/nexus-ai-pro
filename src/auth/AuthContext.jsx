@@ -39,13 +39,9 @@ export function AuthProvider({ children }) {
     })();
   }, []);
 
-  const handleAuthResponse = useCallback(async (response) => {
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const message = data.error || 'Something went wrong. Please try again.';
-      setError(message);
-      return { ok: false, error: message, errors: data.errors };
-    }
+  // Stores the issued session token/user. Only ever called with a response
+  // that actually contains a token — never with an MFA-pending response.
+  const finalizeAuth = useCallback((data) => {
     window.localStorage.setItem(TOKEN_KEY, data.token);
     setUser(data.user);
     setToken(data.token);
@@ -53,6 +49,20 @@ export function AuthProvider({ children }) {
     setError(null);
     return { ok: true };
   }, []);
+
+  const handleAuthResponse = useCallback(async (response) => {
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = data.error || 'Something went wrong. Please try again.';
+      setError(message);
+      return { ok: false, error: message, errors: data.errors };
+    }
+    if (data.mfaRequired) {
+      setError(null);
+      return { ok: true, mfaRequired: true, challengeToken: data.challengeToken };
+    }
+    return finalizeAuth(data);
+  }, [finalizeAuth]);
 
   const login = useCallback(async (email, password) => {
     const response = await fetch('/api/auth/login', {
@@ -72,6 +82,56 @@ export function AuthProvider({ children }) {
     return handleAuthResponse(response);
   }, [handleAuthResponse]);
 
+  const completeMfaChallenge = useCallback(async (challengeToken, code) => {
+    const response = await fetch('/api/auth/mfa/challenge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ challengeToken, code })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = data.error || 'Invalid authentication code.';
+      setError(message);
+      return { ok: false, error: message };
+    }
+    return finalizeAuth(data);
+  }, [finalizeAuth]);
+
+  const authHeaders = useCallback(() => (
+    token ? { Authorization: `Bearer ${token}` } : {}
+  ), [token]);
+
+  const startMfaSetup = useCallback(async () => {
+    const response = await fetch('/api/auth/mfa/setup', { method: 'POST', headers: authHeaders() });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) return { ok: false, error: data.error || 'Could not start MFA setup.' };
+    return { ok: true, ...data };
+  }, [authHeaders]);
+
+  const confirmMfaSetup = useCallback(async (code) => {
+    const response = await fetch('/api/auth/mfa/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ code })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) return { ok: false, error: data.error || 'Invalid authentication code.' };
+    setUser((prev) => (prev ? { ...prev, mfaEnabled: true } : prev));
+    return { ok: true, backupCodes: data.backupCodes };
+  }, [authHeaders]);
+
+  const disableMfa = useCallback(async (password, code) => {
+    const response = await fetch('/api/auth/mfa/disable', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ password, code })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) return { ok: false, error: data.error || 'Could not disable MFA.' };
+    setUser((prev) => (prev ? { ...prev, mfaEnabled: false } : prev));
+    return { ok: true };
+  }, [authHeaders]);
+
   const logout = useCallback(() => {
     window.localStorage.removeItem(TOKEN_KEY);
     setUser(null);
@@ -80,7 +140,10 @@ export function AuthProvider({ children }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, token, status, error, login, register, logout }}>
+    <AuthContext.Provider value={{
+      user, token, status, error, login, register, logout,
+      completeMfaChallenge, startMfaSetup, confirmMfaSetup, disableMfa
+    }}>
       {children}
     </AuthContext.Provider>
   );

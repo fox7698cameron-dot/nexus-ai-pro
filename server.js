@@ -19,6 +19,8 @@ import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { generateSecret as generateTotpSecret, verify as verifyTotp, generateURI as generateTotpURI } from 'otplib';
+import QRCode from 'qrcode';
 
 dotenv.config();
 
@@ -763,6 +765,25 @@ function validateEmail(email) {
   return null;
 }
 
+// 10 hex characters split for readability, e.g. "A1B2C-D3E4F". One-time use.
+function generateMfaBackupCode() {
+  const hex = crypto.randomBytes(5).toString('hex').toUpperCase();
+  return `${hex.slice(0, 5)}-${hex.slice(5, 10)}`;
+}
+
+// otplib throws (rather than returning invalid) for malformed tokens, so guard
+// the shape first — backup codes are routed past this entirely, never into otplib.
+async function safeTotpVerify(secret, token) {
+  if (!/^\d{6,8}$/.test(token)) {
+    return false;
+  }
+  try {
+    return (await verifyTotp({ secret, token })).valid;
+  } catch (error) {
+    return false;
+  }
+}
+
 class AuthService {
   findByEmail(email) {
     const normalized = email.toLowerCase().trim();
@@ -785,6 +806,9 @@ class AuthService {
       displayName: displayName.trim(),
       role: isFirstUser ? 'admin' : 'user',
       mfaEnabled: false,
+      mfaSecret: null,
+      mfaPendingSecret: null,
+      mfaBackupCodes: [],
       createdAt: Date.now(),
       lastLogin: null
     };
@@ -803,10 +827,14 @@ class AuthService {
       security.logAudit('LOGIN_FAILED', { email: user.email });
       throw Object.assign(new Error('Invalid email or password.'), { status: 401 });
     }
+    if (user.mfaEnabled) {
+      security.logAudit('LOGIN_MFA_REQUIRED', { userId: user.id });
+      return { user: this.toPublicUser(user), mfaRequired: true };
+    }
     user.lastLogin = Date.now();
     dataService.store('users', user.id, user);
     security.logAudit('LOGIN_SUCCESS', { userId: user.id });
-    return this.toPublicUser(user);
+    return { user: this.toPublicUser(user), mfaRequired: false };
   }
 
   issueToken(publicUser) {
@@ -815,6 +843,125 @@ class AuthService {
       JWT_SECRET,
       { expiresIn: JWT_EXPIRY }
     );
+  }
+
+  // Short-lived, narrowly-scoped token: only usable against /api/auth/mfa/challenge,
+  // rejected by authenticateToken so it can never stand in for a real session.
+  issueMfaChallenge(publicUser) {
+    return jwt.sign({ sub: publicUser.id, mfa: 'pending' }, JWT_SECRET, { expiresIn: '5m' });
+  }
+
+  async startMfaSetup(userId) {
+    const user = dataService.list('users', {}).find(u => u.id === userId);
+    if (!user) {
+      throw Object.assign(new Error('User not found.'), { status: 404 });
+    }
+    if (user.mfaEnabled) {
+      throw Object.assign(new Error('MFA is already enabled on this account.'), { status: 400 });
+    }
+    const secret = generateTotpSecret();
+    user.mfaPendingSecret = secret;
+    dataService.store('users', user.id, user);
+    const otpauthUrl = generateTotpURI({ issuer: 'Nexus AI Pro', label: user.email, secret });
+    const qrCodeDataUrl = await QRCode.toDataURL(otpauthUrl);
+    return { secret, otpauthUrl, qrCodeDataUrl };
+  }
+
+  async confirmMfaSetup(userId, code) {
+    const user = dataService.list('users', {}).find(u => u.id === userId);
+    if (!user) {
+      throw Object.assign(new Error('User not found.'), { status: 404 });
+    }
+    if (!user.mfaPendingSecret) {
+      throw Object.assign(new Error('No MFA setup in progress. Start setup first.'), { status: 400 });
+    }
+    const setupOk = typeof code === 'string' &&
+      await safeTotpVerify(user.mfaPendingSecret, code.trim().replace(/\s+/g, ''));
+    if (!setupOk) {
+      security.logAudit('MFA_SETUP_FAILED', { userId: user.id });
+      throw Object.assign(new Error('Invalid authentication code.'), { status: 400 });
+    }
+    const backupCodes = Array.from({ length: 8 }, generateMfaBackupCode);
+    user.mfaSecret = user.mfaPendingSecret;
+    user.mfaPendingSecret = null;
+    user.mfaEnabled = true;
+    user.mfaBackupCodes = await Promise.all(backupCodes.map(c => bcrypt.hash(c, 10)));
+    dataService.store('users', user.id, user);
+    security.logAudit('MFA_ENABLED', { userId: user.id });
+    return { backupCodes };
+  }
+
+  async disableMfa(userId, { password, code }) {
+    const user = dataService.list('users', {}).find(u => u.id === userId);
+    if (!user) {
+      throw Object.assign(new Error('User not found.'), { status: 404 });
+    }
+    if (!user.mfaEnabled) {
+      throw Object.assign(new Error('MFA is not enabled on this account.'), { status: 400 });
+    }
+    const passwordOk = typeof password === 'string' && await bcrypt.compare(password, user.passwordHash);
+    if (!passwordOk) {
+      throw Object.assign(new Error('Your current password is required to disable MFA.'), { status: 401 });
+    }
+    const codeOk = await this.verifyMfaCode(user, code);
+    if (!codeOk) {
+      security.logAudit('MFA_DISABLE_FAILED', { userId: user.id });
+      throw Object.assign(new Error('Invalid authentication code.'), { status: 401 });
+    }
+    user.mfaEnabled = false;
+    user.mfaSecret = null;
+    user.mfaPendingSecret = null;
+    user.mfaBackupCodes = [];
+    dataService.store('users', user.id, user);
+    security.logAudit('MFA_DISABLED', { userId: user.id });
+  }
+
+  // Accepts either a current TOTP code or a single-use backup code (consumed on success).
+  async verifyMfaCode(user, code) {
+    if (typeof code !== 'string' || !code.trim()) {
+      return false;
+    }
+    const normalized = code.trim();
+    if (user.mfaSecret && await safeTotpVerify(user.mfaSecret, normalized.replace(/\s+/g, ''))) {
+      return true;
+    }
+    if (Array.isArray(user.mfaBackupCodes)) {
+      for (let i = 0; i < user.mfaBackupCodes.length; i++) {
+        if (await bcrypt.compare(normalized.toUpperCase(), user.mfaBackupCodes[i])) {
+          user.mfaBackupCodes.splice(i, 1);
+          dataService.store('users', user.id, user);
+          security.logAudit('MFA_BACKUP_CODE_USED', { userId: user.id, remaining: user.mfaBackupCodes.length });
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  async completeMfaChallenge({ challengeToken, code }) {
+    let payload;
+    try {
+      payload = jwt.verify(challengeToken, JWT_SECRET);
+    } catch (error) {
+      throw Object.assign(new Error('MFA challenge expired or invalid. Please log in again.'), { status: 401 });
+    }
+    if (payload.mfa !== 'pending') {
+      throw Object.assign(new Error('Invalid challenge token.'), { status: 401 });
+    }
+    const user = dataService.list('users', {}).find(u => u.id === payload.sub);
+    if (!user || !user.mfaEnabled) {
+      throw Object.assign(new Error('MFA is not enabled for this account.'), { status: 400 });
+    }
+    const ok = await this.verifyMfaCode(user, code);
+    if (!ok) {
+      security.logAudit('MFA_CHALLENGE_FAILED', { userId: user.id });
+      throw Object.assign(new Error('Invalid authentication code.'), { status: 401 });
+    }
+    user.lastLogin = Date.now();
+    dataService.store('users', user.id, user);
+    security.logAudit('LOGIN_SUCCESS', { userId: user.id, mfa: true });
+    const publicUser = this.toPublicUser(user);
+    return { user: publicUser, token: this.issueToken(publicUser) };
   }
 
   toPublicUser(user) {
@@ -841,6 +988,9 @@ function authenticateToken(req, res, next) {
   }
   try {
     const payload = jwt.verify(token, JWT_SECRET);
+    if (payload.mfa === 'pending') {
+      return res.status(401).json({ error: 'MFA verification required.' });
+    }
     req.user = { id: payload.sub, role: payload.role, email: payload.email };
     next();
   } catch (error) {
@@ -1100,8 +1250,24 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
     if (validateEmail(email) || typeof password !== 'string' || !password) {
       return res.status(400).json({ error: 'Email and password are required.' });
     }
-    const user = await authService.login({ email, password });
+    const { user, mfaRequired } = await authService.login({ email, password });
+    if (mfaRequired) {
+      return res.json({ mfaRequired: true, challengeToken: authService.issueMfaChallenge(user) });
+    }
     const token = authService.issueToken(user);
+    res.json({ user, token });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+app.post('/api/auth/mfa/challenge', authLimiter, async (req, res) => {
+  try {
+    const { challengeToken, code } = req.body || {};
+    if (typeof challengeToken !== 'string' || typeof code !== 'string') {
+      return res.status(400).json({ error: 'challengeToken and code are required.' });
+    }
+    const { user, token } = await authService.completeMfaChallenge({ challengeToken, code });
     res.json({ user, token });
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });
@@ -1114,6 +1280,33 @@ app.get('/api/auth/me', authenticateToken, (req, res) => {
     return res.status(404).json({ error: 'User not found.' });
   }
   res.json({ user: authService.toPublicUser(user) });
+});
+
+app.post('/api/auth/mfa/setup', authenticateToken, async (req, res) => {
+  try {
+    res.json(await authService.startMfaSetup(req.user.id));
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+app.post('/api/auth/mfa/verify', authenticateToken, async (req, res) => {
+  try {
+    const { code } = req.body || {};
+    res.json(await authService.confirmMfaSetup(req.user.id, code));
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
+});
+
+app.post('/api/auth/mfa/disable', authenticateToken, async (req, res) => {
+  try {
+    const { password, code } = req.body || {};
+    await authService.disableMfa(req.user.id, { password, code });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: error.message });
+  }
 });
 
 // Admin-only: list and manage user accounts (powers the admin dashboard)

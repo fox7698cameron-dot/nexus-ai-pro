@@ -8,7 +8,7 @@ import globals from 'globals';
 
 export default [
   {
-    ignores: ['dist/**', 'node_modules/**', 'build/**', '.git/**', 'nexus-ai-pro/**', 'capacitor/**', 'desktop/**', 'multiplatform/**']
+    ignores: ['dist/**', 'dev-dist/**', 'node_modules/**', 'build/**', '.git/**', 'nexus-ai-pro/**', 'capacitor/**', 'desktop/**', 'multiplatform/**']
   },
   {
     files: ['**/*.js', '**/*.jsx'],

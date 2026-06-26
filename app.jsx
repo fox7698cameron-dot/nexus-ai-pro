@@ -8,6 +8,7 @@ import { useAuth } from './src/auth/AuthContext.jsx';
 import { AdminUserTable } from './src/components/AdminUserTable.jsx';
 import { MfaSettings } from './src/components/MfaSettings.jsx';
 import { ProjectsPanel } from './src/components/ProjectsPanel.jsx';
+import { SocialConnectorsPanel } from './src/components/SocialConnectorsPanel.jsx';
 import { useSecuritySocket } from './src/security/useSecuritySocket.js';
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
@@ -466,6 +467,7 @@ const TOOLS = {
   appdev: { name: 'App Dev', icon: Smartphone, description: 'Application development' },
   automation: { name: 'Automation', icon: Workflow, description: 'N8N-style workflows' },
   projects: { name: 'Projects', icon: ListChecks, description: 'Project & task tracking' },
+  social: { name: 'Social', icon: Share2, description: 'Social media connectors' },
   deploy: { name: 'Deploy', icon: Rocket, description: 'App deployment' },
   security: { name: 'Security', icon: Shield, description: 'Security analysis' },
   schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' }
@@ -979,7 +981,7 @@ export default function NexusAI() {
             {Object.entries(TOOLS).map(([key, tool]) => {
               const Icon = tool.icon;
               return (
-                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security', 'projects'].includes(key)) setShowToolContent(true); }}>
+                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security', 'projects', 'social'].includes(key)) setShowToolContent(true); }}>
                   <Icon size={18} />
                   <span>{tool.name}</span>
                 </button>
@@ -1030,6 +1032,10 @@ export default function NexusAI() {
 
           {showToolContent && activeTool === 'projects' && (
             <ProjectsPanel />
+          )}
+
+          {showToolContent && activeTool === 'social' && (
+            <SocialConnectorsPanel />
           )}
 
           {/* Security Dashboard */}

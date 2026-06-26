@@ -675,6 +675,7 @@ class SecureDataService {
     this.workflows = new Map();
     this.users = new Map();
     this.projects = new Map();
+    this.socialConnections = new Map();
   }
 
   // Encrypt and store data
@@ -1371,6 +1372,221 @@ class ProjectModule {
 const projectModule = new ProjectModule();
 
 // ================================================
+// SOCIAL MEDIA CONNECTOR FRAMEWORK
+// ================================================
+// Real OAuth2 Authorization Code flow (+ PKCE where the provider requires it) against
+// each platform's actual API. A connector stays "not configured" until the operator
+// sets its CLIENT_ID/CLIENT_SECRET env vars (see .env.example) — never a fabricated
+// "connected" state. Lemon8 and Redgifs are intentionally absent from this registry:
+// neither publishes a public OAuth developer platform, so rather than guess at
+// endpoints that don't exist, they're surfaced to the UI as explicitly unsupported.
+const SOCIAL_PLATFORMS = {
+  meta: {
+    label: 'Meta (Facebook)',
+    authorizeUrl: 'https://www.facebook.com/v19.0/dialog/oauth',
+    tokenUrl: 'https://graph.facebook.com/v19.0/oauth/access_token',
+    profileUrl: 'https://graph.facebook.com/me?fields=id,name',
+    scope: 'public_profile,email',
+    clientIdEnv: 'META_CLIENT_ID',
+    clientSecretEnv: 'META_CLIENT_SECRET'
+  },
+  instagram: {
+    label: 'Instagram',
+    authorizeUrl: 'https://api.instagram.com/oauth/authorize',
+    tokenUrl: 'https://api.instagram.com/oauth/access_token',
+    profileUrl: 'https://graph.instagram.com/me?fields=id,username',
+    scope: 'user_profile',
+    clientIdEnv: 'INSTAGRAM_CLIENT_ID',
+    clientSecretEnv: 'INSTAGRAM_CLIENT_SECRET'
+  },
+  tiktok: {
+    label: 'TikTok',
+    authorizeUrl: 'https://www.tiktok.com/v2/auth/authorize',
+    tokenUrl: 'https://open.tiktokapis.com/v2/oauth/token',
+    profileUrl: 'https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name',
+    scope: 'user.info.basic',
+    clientIdEnv: 'TIKTOK_CLIENT_KEY',
+    clientSecretEnv: 'TIKTOK_CLIENT_SECRET',
+    pkce: true
+  },
+  discord: {
+    label: 'Discord',
+    authorizeUrl: 'https://discord.com/api/oauth2/authorize',
+    tokenUrl: 'https://discord.com/api/oauth2/token',
+    profileUrl: 'https://discord.com/api/users/@me',
+    scope: 'identify',
+    clientIdEnv: 'DISCORD_CLIENT_ID',
+    clientSecretEnv: 'DISCORD_CLIENT_SECRET'
+  },
+  twitch: {
+    label: 'Twitch',
+    authorizeUrl: 'https://id.twitch.tv/oauth2/authorize',
+    tokenUrl: 'https://id.twitch.tv/oauth2/token',
+    profileUrl: 'https://api.twitch.tv/helix/users',
+    scope: 'user:read:email',
+    clientIdEnv: 'TWITCH_CLIENT_ID',
+    clientSecretEnv: 'TWITCH_CLIENT_SECRET'
+  },
+  x: {
+    label: 'X (Twitter)',
+    authorizeUrl: 'https://twitter.com/i/oauth2/authorize',
+    tokenUrl: 'https://api.twitter.com/2/oauth2/token',
+    profileUrl: 'https://api.twitter.com/2/users/me',
+    scope: 'tweet.read users.read offline.access',
+    clientIdEnv: 'X_CLIENT_ID',
+    clientSecretEnv: 'X_CLIENT_SECRET',
+    pkce: true
+  },
+  reddit: {
+    label: 'Reddit',
+    authorizeUrl: 'https://www.reddit.com/api/v1/authorize',
+    tokenUrl: 'https://www.reddit.com/api/v1/access_token',
+    profileUrl: 'https://oauth.reddit.com/api/v1/me',
+    scope: 'identity',
+    clientIdEnv: 'REDDIT_CLIENT_ID',
+    clientSecretEnv: 'REDDIT_CLIENT_SECRET',
+    basicAuth: true
+  }
+};
+
+const UNSUPPORTED_SOCIAL_PLATFORMS = [
+  { platform: 'lemon8', label: 'Lemon8', reason: 'Lemon8 publishes no public OAuth developer API.' },
+  { platform: 'redgifs', label: 'Redgifs', reason: 'Redgifs publishes no public user-OAuth developer API.' }
+];
+
+// Short-lived, single-use, server-side-only binding of {userId, platform, PKCE verifier}
+// to the OAuth `state` value — recovers identity at the callback without ever trusting
+// a client-supplied userId there (unlike the WorkflowEngine routes earlier in this file).
+const oauthStates = new Map();
+const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
+
+function pruneOauthStates() {
+  const now = Date.now();
+  for (const [state, entry] of oauthStates.entries()) {
+    if (entry.expiresAt < now) oauthStates.delete(state);
+  }
+}
+
+function generatePkcePair() {
+  const verifier = crypto.randomBytes(32).toString('base64url');
+  const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+  return { verifier, challenge };
+}
+
+function getPublicBaseUrl(req) {
+  return process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
+}
+
+class SocialConnectorService {
+  isConfigured(platform) {
+    const cfg = SOCIAL_PLATFORMS[platform];
+    return !!(cfg && process.env[cfg.clientIdEnv] && process.env[cfg.clientSecretEnv]);
+  }
+
+  listPlatforms() {
+    const supported = Object.entries(SOCIAL_PLATFORMS).map(([key, cfg]) => ({
+      platform: key,
+      label: cfg.label,
+      supported: true,
+      configured: this.isConfigured(key)
+    }));
+    const unsupported = UNSUPPORTED_SOCIAL_PLATFORMS.map((p) => ({ ...p, supported: false, configured: false }));
+    return [...supported, ...unsupported];
+  }
+
+  listConnections(userId) {
+    return dataService.list('socialConnections', { userId }).map((c) => ({
+      platform: c.platform,
+      connectedAccount: c.profile,
+      connectedAt: c.connectedAt
+    }));
+  }
+
+  buildAuthorizeUrl(platform, { redirectUri, state, codeChallenge }) {
+    const cfg = SOCIAL_PLATFORMS[platform];
+    const params = new URLSearchParams({
+      client_id: process.env[cfg.clientIdEnv],
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: cfg.scope,
+      state
+    });
+    if (cfg.pkce) {
+      params.set('code_challenge', codeChallenge);
+      params.set('code_challenge_method', 'S256');
+    }
+    return `${cfg.authorizeUrl}?${params.toString()}`;
+  }
+
+  async exchangeCodeForToken(platform, { code, redirectUri, codeVerifier }) {
+    const cfg = SOCIAL_PLATFORMS[platform];
+    const body = new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: redirectUri,
+      client_id: process.env[cfg.clientIdEnv]
+    });
+    const headers = { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' };
+
+    if (cfg.pkce) {
+      body.set('code_verifier', codeVerifier);
+    }
+    if (cfg.basicAuth) {
+      const basic = Buffer.from(`${process.env[cfg.clientIdEnv]}:${process.env[cfg.clientSecretEnv]}`).toString('base64');
+      headers.Authorization = `Basic ${basic}`;
+    } else {
+      body.set('client_secret', process.env[cfg.clientSecretEnv]);
+    }
+
+    const response = await fetch(cfg.tokenUrl, { method: 'POST', headers, body });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.error) {
+      throw Object.assign(new Error(data.error_description || data.error || 'Token exchange failed.'), { status: 400 });
+    }
+    return data;
+  }
+
+  async fetchProfile(platform, accessToken) {
+    const cfg = SOCIAL_PLATFORMS[platform];
+    const headers = { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' };
+    if (platform === 'twitch') headers['Client-Id'] = process.env[cfg.clientIdEnv];
+    if (platform === 'reddit') headers['User-Agent'] = 'NexusAIPro/1.0 (security-conscious social connector)';
+
+    const response = await fetch(cfg.profileUrl, { headers });
+    if (!response.ok) {
+      throw Object.assign(new Error('Failed to fetch profile from provider.'), { status: 502 });
+    }
+    return response.json();
+  }
+
+  async connectCallback(platform, userId, { code, redirectUri, codeVerifier }) {
+    const tokenData = await this.exchangeCodeForToken(platform, { code, redirectUri, codeVerifier });
+    const profile = await this.fetchProfile(platform, tokenData.access_token).catch(() => null);
+
+    const record = {
+      userId,
+      platform,
+      accessToken: tokenData.access_token,
+      refreshToken: tokenData.refresh_token || null,
+      expiresAt: tokenData.expires_in ? Date.now() + tokenData.expires_in * 1000 : null,
+      profile,
+      connectedAt: Date.now()
+    };
+    dataService.store('socialConnections', `${userId}:${platform}`, record);
+    security.logAudit('SOCIAL_CONNECTED', { userId, platform });
+    return record;
+  }
+
+  disconnect(userId, platform) {
+    const existed = dataService.delete('socialConnections', `${userId}:${platform}`);
+    security.logAudit('SOCIAL_DISCONNECTED', { userId, platform });
+    return existed;
+  }
+}
+
+const socialConnector = new SocialConnectorService();
+
+// ================================================
 // API ROUTES
 // ================================================
 
@@ -1569,6 +1785,84 @@ app.delete('/api/projects/:projectId/tasks/:taskId', authenticateToken, (req, re
   } catch (error) {
     res.status(error.status || 500).json({ error: error.message });
   }
+});
+
+// ================================================
+// SOCIAL MEDIA CONNECTOR ENDPOINTS
+// ================================================
+
+app.get('/api/social/platforms', (req, res) => {
+  res.json({ platforms: socialConnector.listPlatforms() });
+});
+
+app.get('/api/social/connections', authenticateToken, (req, res) => {
+  res.json({ connections: socialConnector.listConnections(req.user.id) });
+});
+
+app.get('/api/social/:platform/connect', authenticateToken, (req, res) => {
+  const { platform } = req.params;
+  const cfg = SOCIAL_PLATFORMS[platform];
+  if (!cfg) {
+    return res.status(404).json({ error: 'Unknown or unsupported platform.' });
+  }
+  if (!socialConnector.isConfigured(platform)) {
+    return res.status(412).json({
+      error: `${cfg.label} is not configured on this server. Set ${cfg.clientIdEnv} and ${cfg.clientSecretEnv}.`
+    });
+  }
+
+  pruneOauthStates();
+  const state = crypto.randomBytes(24).toString('hex');
+  const { verifier, challenge } = cfg.pkce ? generatePkcePair() : {};
+  oauthStates.set(state, {
+    userId: req.user.id,
+    platform,
+    codeVerifier: verifier,
+    expiresAt: Date.now() + OAUTH_STATE_TTL_MS
+  });
+
+  const redirectUri = `${getPublicBaseUrl(req)}/api/social/callback/${platform}`;
+  const url = socialConnector.buildAuthorizeUrl(platform, { redirectUri, state, codeChallenge: challenge });
+  res.json({ url });
+});
+
+app.get('/api/social/callback/:platform', async (req, res) => {
+  const { platform } = req.params;
+  const { code, state, error: providerError } = req.query;
+  const cfg = SOCIAL_PLATFORMS[platform];
+  if (!cfg) {
+    return res.status(404).send('Unknown platform.');
+  }
+
+  const stateEntry = typeof state === 'string' ? oauthStates.get(state) : null;
+  if (stateEntry) oauthStates.delete(state);
+
+  if (providerError || !code || !stateEntry || stateEntry.platform !== platform || stateEntry.expiresAt < Date.now()) {
+    security.logAudit('SOCIAL_CONNECT_FAILED', { platform, reason: providerError || 'invalid_or_expired_state' });
+    return res.redirect(`/?social=error&platform=${platform}`);
+  }
+
+  try {
+    const redirectUri = `${getPublicBaseUrl(req)}/api/social/callback/${platform}`;
+    await socialConnector.connectCallback(platform, stateEntry.userId, {
+      code,
+      redirectUri,
+      codeVerifier: stateEntry.codeVerifier
+    });
+    res.redirect(`/?social=connected&platform=${platform}`);
+  } catch (error) {
+    security.logAudit('SOCIAL_CONNECT_FAILED', { platform, reason: error.message });
+    res.redirect(`/?social=error&platform=${platform}`);
+  }
+});
+
+app.delete('/api/social/:platform', authenticateToken, (req, res) => {
+  const { platform } = req.params;
+  if (!SOCIAL_PLATFORMS[platform]) {
+    return res.status(404).json({ error: 'Unknown or unsupported platform.' });
+  }
+  socialConnector.disconnect(req.user.id, platform);
+  res.json({ success: true });
 });
 
 // Security endpoints

@@ -99,6 +99,11 @@
     "vitest": "^4.0.16",
     "workbox-window": "^7.3.0"
   },
+  "overrides": {
+    "@capacitor/cli": {
+      "tar": "^7.5.16"
+    }
+  },
   "capacitor": {
     "appId": "com.cameronfox.nexusaipro",
     "appName": "Nexus AI Pro",

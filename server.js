@@ -1,6 +1,8 @@
 // ================================================
 // NEXUS AI PRO - Enhanced Backend Server
 // Military-Grade Security & Multi-Model AI Platform
+// Created: 2026-07-05
+// Copyright © 2025-2026 Cameron Fox. All rights reserved.
 // ================================================
 
 import express from 'express';
@@ -15,6 +17,13 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+
+// ── New modules ──
+import authRouter         from './src/auth/routes.js';
+import paymentsRouter     from './src/payments/routes.js';
+import gamingRouter       from './src/gaming/routes.js';
+import connectorsRouter   from './src/connectors/routes.js';
+import { i18nRouter }     from './src/i18n/index.js';
 
 dotenv.config();
 
@@ -327,6 +336,9 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID']
 }));
 
+// Stripe webhook requires raw body — must come before the JSON parser
+app.use('/api/payments/stripe/webhook', express.raw({ type: 'application/json' }));
+
 // Body parsing with size limits
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -441,8 +453,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-pro-latest';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -833,6 +844,13 @@ const workflowEngine = new WorkflowEngine();
 // ================================================
 // API ROUTES
 // ================================================
+
+// ── New feature routers ──────────────────────────────────────────────────────
+app.use('/api/auth',        authRouter);
+app.use('/api/payments',    paymentsRouter);
+app.use('/api/gaming',      gamingRouter);
+app.use('/api/connectors',  connectorsRouter);
+app.use('/api/i18n',        i18nRouter(express.Router));
 
 // Health check
 app.get('/api/health', (req, res) => {

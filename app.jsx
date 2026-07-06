@@ -1,8 +1,7 @@
-/* app.jsx
-   Updated: make UI more responsive for mobile/desktop, persist model selection, chats, memories, settings,
-   ensure AES-256 label present, and small responsive CSS tweaks.
-*/
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+// app.jsx — Nexus AI Pro Frontend
+// 2026-07-06
+
+import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense, lazy } from 'react';
 import { securityService } from './src/security-service.js';
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
@@ -21,8 +20,15 @@ import {
   Bug, Wrench, Hammer, Cog, RotateCcw,
   ShieldCheck, ShieldAlert, Fingerprint, ScanFace,
   Network, Wifi, Radio, Antenna, Signal,
-  ArrowLeft, Film, ImagePlus, Clapperboard
+  ArrowLeft, Film, ImagePlus, Clapperboard,
+  CreditCard, Gift, Gamepad, BarChart2, FolderKanban,
+  Languages, LogIn, LogOut, UserPlus, AtSign, QrCode
 } from 'lucide-react';
+
+// Lazy-loaded dashboard modules (loaded on demand)
+const AnalyticsDashboard = lazy(() => import('./src/analytics/AnalyticsDashboard.jsx').catch(() => ({ default: () => <div style={{padding:'2rem',color:'#888'}}>Analytics dashboard loading...</div> })));
+const ProjectDashboard = lazy(() => import('./src/tracking/ProjectDashboard.jsx').catch(() => ({ default: () => <div style={{padding:'2rem',color:'#888'}}>Project tracking loading...</div> })));
+const CheckoutUI = lazy(() => import('./src/payments/CheckoutUI.jsx').catch(() => ({ default: () => <div style={{padding:'2rem',color:'#888'}}>Payment UI loading...</div> })));
 
 // Persistence keys
 const STORAGE_KEYS = {
@@ -85,7 +91,7 @@ const SUBSCRIPTION_TIERS = {
     color: 'from-purple-400 to-pink-600',
     textColor: 'text-purple-700',
     bgColor: 'bg-purple-50',
-    models: Object.keys(AI_MODELS),
+    get models() { return Object.keys(AI_MODELS); },
     features: ['Everything in Pro', 'Custom models', 'API access', 'Dedicated support', 'SLA guarantee'],
     badge: '👑',
     reasoningTime: '🔬 Expert',
@@ -459,10 +465,13 @@ const TOOLS = {
   video: { name: 'Video Gen', icon: Clapperboard, description: 'AI video creation' },
   gamedev: { name: 'Game Dev', icon: Gamepad2, description: 'Game development suite' },
   appdev: { name: 'App Dev', icon: Smartphone, description: 'Application development' },
+  analytics: { name: 'Analytics', icon: BarChart2, description: 'Social media analytics' },
+  tracking: { name: 'Projects', icon: FolderKanban, description: 'Real-time project tracking' },
   automation: { name: 'Automation', icon: Workflow, description: 'N8N-style workflows' },
   deploy: { name: 'Deploy', icon: Rocket, description: 'App deployment' },
   security: { name: 'Security', icon: Shield, description: 'Security analysis' },
-  schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' }
+  schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' },
+  subscription: { name: 'Upgrade', icon: CreditCard, description: 'Subscription & billing' }
 };
 
 // ============================================
@@ -598,14 +607,31 @@ const WORKFLOW_NODES = {
 // MAIN APP COMPONENT
 // ============================================
 export default function NexusAI() {
+  // Helpers for persisted state
+  const loadLS = (key, fallback) => {
+    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
+  };
+  const saveLS = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} };
+
+  // Auth state
+  const [authUser, setAuthUser] = useState(() => loadLS('nexus:user', null));
+  const [authToken, setAuthToken] = useState(() => localStorage.getItem('nexus:accessToken') || null);
+  const [showAuth, setShowAuth] = useState(false);
+  const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
+  const [authForm, setAuthForm] = useState({ email: '', username: '', password: '', confirmPassword: '', totpCode: '' });
+  const [authError, setAuthError] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+  const [requiresTOTP, setRequiresTOTP] = useState(false);
+  const [currentLang, setCurrentLang] = useState(() => loadLS('nexus:lang', 'en'));
+
   // State
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
-  const [selectedModel, setSelectedModel] = useState('claude4');
+  const [selectedModel, setSelectedModel] = useState(() => loadLS(STORAGE_KEYS.selectedModel, 'claude4'));
   const [activeTool, setActiveTool] = useState('chat');
   const [isModelSelectorOpen, setIsModelSelectorOpen] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [isMemoryOpen, setIsMemoryOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => loadLS(STORAGE_KEYS.sidebarOpen, true));
+  const [isMemoryOpen, setIsMemoryOpen] = useState(() => loadLS(STORAGE_KEYS.memoryOpen, false));
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSecurityOpen, setIsSecurityOpen] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -615,6 +641,7 @@ export default function NexusAI() {
   const [gameTemplate, setGameTemplate] = useState(null);
   const [appTemplate, setAppTemplate] = useState(null);
   const [showToolContent, setShowToolContent] = useState(false);
+  const [activeDashboard, setActiveDashboard] = useState(null); // 'analytics' | 'tracking' | 'checkout'
 
   // Security Dashboard State
   const [securityScan, setSecurityScan] = useState({
@@ -627,30 +654,51 @@ export default function NexusAI() {
   });
 
   // User customization
-  const [userAvatar, setUserAvatar] = useState(AVATAR_STYLES.user[0]);
+  const [userAvatar, setUserAvatar] = useState(() => loadLS(STORAGE_KEYS.userAvatar, AVATAR_STYLES.user[0]));
 
   // Chat management
-  const [chats, setChats] = useState([
+  const [chats, setChats] = useState(() => loadLS(STORAGE_KEYS.chats, [
     { id: '1', title: 'New Chat', preview: 'Start a conversation...', messages: [], createdAt: Date.now(), updatedAt: Date.now() }
-  ]);
-  const [activeChat, setActiveChat] = useState('1');
+  ]));
+  const [activeChat, setActiveChat] = useState(() => loadLS(STORAGE_KEYS.activeChat, '1'));
 
   // Memory
-  const [memories, setMemories] = useState([]);
+  const [memories, setMemories] = useState(() => loadLS(STORAGE_KEYS.memories, []));
 
   // Settings
-  const [settings, setSettings] = useState({
+  const [settings, setSettings] = useState(() => loadLS(STORAGE_KEYS.settings, {
     theme: 'grayscale',
     voiceEnabled: true,
     autoSpeak: false,
     e2eEncryption: true,
     autoPatch: true,
     securityLevel: 'military',
+    language: 'en',
     apiKeys: {}
-  });
+  }));
 
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
+
+  // Persist state to localStorage
+  useEffect(() => { saveLS(STORAGE_KEYS.chats, chats); }, [chats]);
+  useEffect(() => { saveLS(STORAGE_KEYS.activeChat, activeChat); }, [activeChat]);
+  useEffect(() => { saveLS(STORAGE_KEYS.memories, memories); }, [memories]);
+  useEffect(() => { saveLS(STORAGE_KEYS.settings, settings); }, [settings]);
+  useEffect(() => { saveLS(STORAGE_KEYS.selectedModel, selectedModel); }, [selectedModel]);
+  useEffect(() => { saveLS(STORAGE_KEYS.userAvatar, userAvatar); }, [userAvatar]);
+  useEffect(() => { saveLS(STORAGE_KEYS.sidebarOpen, isSidebarOpen); }, [isSidebarOpen]);
+  useEffect(() => { saveLS(STORAGE_KEYS.memoryOpen, isMemoryOpen); }, [isMemoryOpen]);
+
+  // Sync auth token
+  useEffect(() => {
+    if (authToken) localStorage.setItem('nexus:accessToken', authToken);
+    else localStorage.removeItem('nexus:accessToken');
+  }, [authToken]);
+  useEffect(() => {
+    if (authUser) saveLS('nexus:user', authUser);
+    else localStorage.removeItem('nexus:user');
+  }, [authUser]);
 
   // Auto scroll
   useEffect(() => {
@@ -701,14 +749,39 @@ export default function NexusAI() {
     setAttachments([]);
     setIsLoading(true);
 
-    setTimeout(() => {
-      const response = generateResponse(input, selectedModel, activeTool);
+    try {
+      const authToken = localStorage.getItem('nexus:accessToken');
+      const apiMessages = newMessages
+        .filter(m => m.role === 'user' || m.role === 'assistant')
+        .map(m => ({ role: m.role, content: m.content }));
+
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {})
+        },
+        body: JSON.stringify({ model: selectedModel, messages: apiMessages, options: {} })
+      });
+
+      let content = '';
+      if (res.ok) {
+        const data = await res.json();
+        // Normalize response across providers
+        if (data.content?.[0]?.text) content = data.content[0].text;
+        else if (data.choices?.[0]?.message?.content) content = data.choices[0].message.content;
+        else if (data.candidates?.[0]?.content?.parts?.[0]?.text) content = data.candidates[0].content.parts[0].text;
+        else content = data.error || 'Response received';
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        content = errData.error || `API error ${res.status} — check your API key configuration`;
+      }
+
       const aiResponse = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
         model: selectedModel,
-        content: response.content,
-        reasoning: response.reasoning,
+        content,
         timestamp: Date.now(),
         encrypted: true
       };
@@ -716,13 +789,24 @@ export default function NexusAI() {
       const updatedMessages = [...newMessages, aiResponse];
       setMessages(updatedMessages);
       setIsLoading(false);
-
       setChats(prev => prev.map(chat =>
         chat.id === activeChat
           ? { ...chat, messages: updatedMessages, title: chat.messages.length === 0 ? input.slice(0, 30) + '...' : chat.title, preview: input.slice(0, 50), updatedAt: Date.now() }
           : chat
       ));
-    }, 800 + Math.random() * 800);
+    } catch (err) {
+      const errMsg = `Connection error: ${err.message}. Is the server running?`;
+      const aiResponse = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        model: selectedModel,
+        content: errMsg,
+        timestamp: Date.now(),
+        encrypted: false
+      };
+      setMessages(prev => [...prev, aiResponse]);
+      setIsLoading(false);
+    }
   };
 
   // Voice functions
@@ -817,6 +901,59 @@ export default function NexusAI() {
 
   const deleteMemory = (index) => setMemories(memories.filter((_, i) => i !== index));
 
+  // Auth handlers
+  const handleAuthSubmit = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthLoading(true);
+    try {
+      if (requiresTOTP) {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: authForm.email, password: authForm.password, totpCode: authForm.totpCode })
+        });
+        const data = await res.json();
+        if (!res.ok) { setAuthError(data.error || 'Verification failed'); setAuthLoading(false); return; }
+        setAuthToken(data.accessToken); setAuthUser(data.user);
+        setShowAuth(false); setRequiresTOTP(false);
+        setAuthForm({ email: '', username: '', password: '', confirmPassword: '', totpCode: '' });
+      } else if (authMode === 'login') {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: authForm.email, password: authForm.password })
+        });
+        const data = await res.json();
+        if (!res.ok) { setAuthError(data.error || 'Login failed'); setAuthLoading(false); return; }
+        if (data.requiresTOTP) { setRequiresTOTP(true); setAuthLoading(false); return; }
+        setAuthToken(data.accessToken); setAuthUser(data.user);
+        setShowAuth(false);
+        setAuthForm({ email: '', username: '', password: '', confirmPassword: '', totpCode: '' });
+      } else {
+        if (authForm.password !== authForm.confirmPassword) { setAuthError('Passwords do not match'); setAuthLoading(false); return; }
+        const res = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: authForm.email, username: authForm.username, password: authForm.password })
+        });
+        const data = await res.json();
+        if (!res.ok) { setAuthError(data.error || 'Registration failed'); setAuthLoading(false); return; }
+        setAuthToken(data.accessToken); setAuthUser(data.user);
+        setShowAuth(false);
+        setAuthForm({ email: '', username: '', password: '', confirmPassword: '', totpCode: '' });
+      }
+    } catch (err) {
+      setAuthError('Network error — is the server running?');
+    }
+    setAuthLoading(false);
+  };
+
+  const handleLogout = () => {
+    if (authToken) fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${authToken}` } }).catch(() => {});
+    setAuthToken(null); setAuthUser(null);
+  };
+
   // Group models by capability for selector
   const modelGroups = useMemo(() => {
     const groups = {
@@ -864,7 +1001,7 @@ export default function NexusAI() {
 
         <div className="header-center">
           <button className="model-selector-btn" onClick={() => setIsModelSelectorOpen(!isModelSelectorOpen)}>
-            <span className="model-icon">{AI_MODELS[selectedModel]?.icon}</span>
+            <span className="model-icon">{AI_MODELS[selectedModel]?.emoji}</span>
             <span className="model-name">{AI_MODELS[selectedModel]?.name}</span>
             <ChevronDown size={16} className={isModelSelectorOpen ? 'rotated' : ''} />
           </button>
@@ -885,7 +1022,7 @@ export default function NexusAI() {
                         className={`model-option ${selectedModel === model.key ? 'active' : ''}`}
                         onClick={() => { setSelectedModel(model.key); setIsModelSelectorOpen(false); }}
                       >
-                        <span className="model-emoji">{model.icon}</span>
+                        <span className="model-emoji">{model.emoji}</span>
                         <div className="model-info">
                           <span className="model-name">{model.name}</span>
                           <span className="model-provider">{model.provider}</span>
@@ -912,10 +1049,31 @@ export default function NexusAI() {
             <Lock size={10} />
             <span>AES-256</span>
           </div>
+          <select
+            className="lang-select"
+            value={currentLang}
+            onChange={e => { setCurrentLang(e.target.value); saveLS('nexus:lang', e.target.value); }}
+            title="Language"
+          >
+            {[['en','EN'],['es','ES'],['fr','FR'],['de','DE'],['ja','JA'],['ko','KO'],['zh','ZH'],['ar','AR'],['pt','PT'],['ru','RU'],['hi','HI'],['it','IT']].map(([code, label]) => (
+              <option key={code} value={code}>{label}</option>
+            ))}
+          </select>
           <button className="icon-btn" onClick={() => setIsMemoryOpen(!isMemoryOpen)}><Brain size={20} /></button>
           <button className="icon-btn" onClick={() => setIsCallActive(true)}><Phone size={20} /></button>
           <button className="icon-btn" onClick={() => setIsSettingsOpen(true)}><Settings size={20} /></button>
-          <div className="user-avatar">{userAvatar?.emoji || '≡ƒæñ'}</div>
+          {authUser ? (
+            <div className="auth-user-btn" onClick={handleLogout} title="Click to sign out">
+              <div className="user-avatar">{userAvatar?.emoji || '👤'}</div>
+              <span className="auth-username">{authUser.username || authUser.email?.split('@')[0]}</span>
+              <LogOut size={14} />
+            </div>
+          ) : (
+            <button className="auth-login-btn" onClick={() => { setAuthMode('login'); setShowAuth(true); }}>
+              <LogIn size={16} />
+              <span>Sign In</span>
+            </button>
+          )}
         </div>
       </header>
 
@@ -946,7 +1104,7 @@ export default function NexusAI() {
             {Object.entries(TOOLS).map(([key, tool]) => {
               const Icon = tool.icon;
               return (
-                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security'].includes(key)) setShowToolContent(true); }}>
+                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security', 'analytics', 'tracking', 'subscription'].includes(key)) setShowToolContent(true); }}>
                   <Icon size={18} />
                   <span>{tool.name}</span>
                 </button>
@@ -1104,23 +1262,68 @@ export default function NexusAI() {
             </div>
           )}
 
+          {/* Analytics Dashboard */}
+          {showToolContent && activeTool === 'analytics' && (
+            <div className="tool-content full-panel">
+              <Suspense fallback={<div style={{padding:'2rem',textAlign:'center'}}><Loader2 size={24} style={{animation:'spin 1s linear infinite'}}/> Loading Analytics...</div>}>
+                <AnalyticsDashboard
+                  theme={settings.theme === 'light' ? 'light' : 'dark'}
+                  onConnect={(platform) => console.info('Connect platform:', platform)}
+                  onExport={(data) => { const a = document.createElement('a'); a.href = 'data:text/json,' + encodeURIComponent(JSON.stringify(data)); a.download = 'analytics.json'; a.click(); }}
+                />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Project Tracking Dashboard */}
+          {showToolContent && activeTool === 'tracking' && (
+            <div className="tool-content full-panel">
+              <Suspense fallback={<div style={{padding:'2rem',textAlign:'center'}}><Loader2 size={24} style={{animation:'spin 1s linear infinite'}}/> Loading Projects...</div>}>
+                <ProjectDashboard
+                  theme={settings.theme === 'light' ? 'light' : 'dark'}
+                  userId={authUser?.id || 'guest'}
+                  onCreateProject={async (data) => {
+                    const token = authToken;
+                    const res = await fetch('/api/projects', { method:'POST', headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})}, body:JSON.stringify(data) });
+                    return res.ok ? res.json() : Promise.reject(new Error('Failed to create project'));
+                  }}
+                  onProjectSelect={(p) => console.info('Project selected:', p.name)}
+                />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Subscription / Checkout */}
+          {showToolContent && activeTool === 'subscription' && (
+            <div className="tool-content full-panel">
+              <Suspense fallback={<div style={{padding:'2rem',textAlign:'center'}}><Loader2 size={24} style={{animation:'spin 1s linear infinite'}}/> Loading Checkout...</div>}>
+                <CheckoutUI
+                  theme={settings.theme === 'light' ? 'light' : 'dark'}
+                  currentTier={authUser?.tier || 'free'}
+                  onSuccess={(tier, method) => { console.info('Subscribed:', tier, method); setShowToolContent(false); }}
+                  onCancel={() => setShowToolContent(false)}
+                />
+              </Suspense>
+            </div>
+          )}
+
           {/* Messages */}
           <div className="messages-container">
             {messages.length === 0 ? (
               <div className="welcome">
                 <div className="welcome-icon"><Sparkles size={48} /></div>
                 <h2>Nexus AI Pro</h2>
-                <p>Military-grade encrypted AI ΓÇó 40+ Models</p>
+                <p>Military-grade encrypted AI · 40+ Models</p>
                 <div className="model-badges">
                   {Object.entries(AI_MODELS).slice(0, 12).map(([key, m]) => (
-                    <span key={key} className="badge" onClick={() => setSelectedModel(key)}>{m.icon} {m.name}</span>
+                    <span key={key} className="badge" onClick={() => setSelectedModel(key)}>{m.emoji} {m.name}</span>
                   ))}
                 </div>
               </div>
             ) : (
               messages.map(msg => (
                 <div key={msg.id} className={`message ${msg.role}`}>
-                  <div className="message-avatar">{msg.role === 'user' ? userAvatar?.emoji : AI_MODELS[msg.model]?.icon || '≡ƒñû'}</div>
+                  <div className="message-avatar">{msg.role === 'user' ? userAvatar?.emoji : AI_MODELS[msg.model]?.emoji || '🤖'}</div>
                   <div className="message-body">
                     <div className="message-header">
                       <span className="sender">{msg.role === 'user' ? 'You' : AI_MODELS[msg.model]?.name}</span>
@@ -1134,7 +1337,7 @@ export default function NexusAI() {
             )}
             {isLoading && (
               <div className="message assistant">
-                <div className="message-avatar">{AI_MODELS[selectedModel]?.icon}</div>
+                <div className="message-avatar">{AI_MODELS[selectedModel]?.emoji}</div>
                 <div className="message-body">
                   <div className="typing"><span></span><span></span><span></span></div>
                 </div>
@@ -1163,7 +1366,7 @@ export default function NexusAI() {
               </button>
             </div>
             <div className="input-footer">
-              <span className="model-tag">{AI_MODELS[selectedModel]?.icon} {AI_MODELS[selectedModel]?.name}</span>
+              <span className="model-tag">{AI_MODELS[selectedModel]?.emoji} {AI_MODELS[selectedModel]?.name}</span>
               <span className="tool-tag">{TOOLS[activeTool]?.name}</span>
               <span className="secure"><Lock size={12} /> End-to-end encrypted</span>
             </div>
@@ -1226,11 +1429,84 @@ export default function NexusAI() {
         </div>
       )}
 
+      {/* Auth Modal */}
+      {showAuth && (
+        <div className="modal-overlay" onClick={() => { setShowAuth(false); setRequiresTOTP(false); setAuthError(''); }}>
+          <div className="modal auth-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>
+                {requiresTOTP ? <><QrCode size={18} /> Two-Factor Auth</> : authMode === 'login' ? <><LogIn size={18} /> Sign In</> : <><UserPlus size={18} /> Create Account</>}
+              </h3>
+              <button onClick={() => { setShowAuth(false); setRequiresTOTP(false); setAuthError(''); }}><X size={20} /></button>
+            </div>
+            <div className="modal-body">
+              <form onSubmit={handleAuthSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {requiresTOTP ? (
+                  <>
+                    <p style={{ color: 'var(--text-2)', fontSize: '13px', textAlign: 'center', margin: 0 }}>
+                      Enter the 6-digit code from your authenticator app.
+                    </p>
+                    <div className="auth-field">
+                      <label><QrCode size={13} /> Authenticator Code</label>
+                      <input type="text" inputMode="numeric" maxLength={6} placeholder="000 000"
+                        value={authForm.totpCode}
+                        onChange={e => setAuthForm(f => ({ ...f, totpCode: e.target.value.replace(/\D/g,'') }))}
+                        style={{ letterSpacing: '0.4em', textAlign: 'center', fontSize: '20px' }} autoFocus />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="auth-field">
+                      <label><AtSign size={13} /> Email</label>
+                      <input type="email" placeholder="you@example.com" autoComplete="email"
+                        value={authForm.email} onChange={e => setAuthForm(f => ({ ...f, email: e.target.value }))} required />
+                    </div>
+                    {authMode === 'register' && (
+                      <div className="auth-field">
+                        <label><User size={13} /> Username <span style={{color:'var(--text-3)',fontWeight:400}}>(emoji ok 🚀)</span></label>
+                        <input type="text" placeholder="cool_username 🎮" autoComplete="username"
+                          value={authForm.username} onChange={e => setAuthForm(f => ({ ...f, username: e.target.value }))}
+                          required minLength={2} maxLength={30} />
+                      </div>
+                    )}
+                    <div className="auth-field">
+                      <label><Lock size={13} /> Password</label>
+                      <input type="password"
+                        placeholder={authMode === 'register' ? '13+ chars, special chars required' : 'Password'}
+                        autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
+                        value={authForm.password} onChange={e => setAuthForm(f => ({ ...f, password: e.target.value }))} required />
+                    </div>
+                    {authMode === 'register' && (
+                      <div className="auth-field">
+                        <label><Lock size={13} /> Confirm Password</label>
+                        <input type="password" placeholder="Re-enter password" autoComplete="new-password"
+                          value={authForm.confirmPassword} onChange={e => setAuthForm(f => ({ ...f, confirmPassword: e.target.value }))} required />
+                      </div>
+                    )}
+                  </>
+                )}
+                {authError && <p style={{ color: '#ef4444', fontSize: '13px', margin: 0 }}>{authError}</p>}
+                <button type="submit" className="auth-submit-btn" disabled={authLoading}>
+                  {authLoading && <Loader2 size={16} style={{ animation: 'spin 1s linear infinite', flexShrink: 0 }} />}
+                  {authLoading ? 'Please wait…' : requiresTOTP ? 'Verify Code' : authMode === 'login' ? 'Sign In' : 'Create Account'}
+                </button>
+                {!requiresTOTP && (
+                  <button type="button" className="auth-toggle-btn"
+                    onClick={() => { setAuthMode(m => m === 'login' ? 'register' : 'login'); setAuthError(''); }}>
+                    {authMode === 'login' ? 'No account? Register →' : '← Back to Sign In'}
+                  </button>
+                )}
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Voice Call Modal */}
       {isCallActive && (
         <div className="call-overlay">
           <div className="call-panel">
-            <div className="call-avatar">{AI_MODELS[selectedModel]?.icon}</div>
+            <div className="call-avatar">{AI_MODELS[selectedModel]?.emoji}</div>
             <h3>Speaking with {AI_MODELS[selectedModel]?.name}</h3>
             <div className="call-actions">
               <button className="end-call" onClick={() => setIsCallActive(false)}><PhoneOff size={24} /></button>
@@ -2145,6 +2421,72 @@ export default function NexusAI() {
 
         /* Accessibility: larger tap areas */
         .menu-btn, .icon-btn, .attach-btn, .voice-btn, .send-btn { min-width: 44px; min-height: 44px; }
+
+        /* Language selector */
+        .lang-select {
+          background: var(--bg-3);
+          border: 1px solid var(--border);
+          color: var(--text-2);
+          border-radius: 6px;
+          padding: 4px 6px;
+          font-size: 11px;
+          font-weight: 600;
+          cursor: pointer;
+          height: 30px;
+        }
+        .lang-select:focus { outline: none; border-color: var(--accent); }
+
+        /* Auth header buttons */
+        .auth-login-btn {
+          display: flex; align-items: center; gap: 6px;
+          background: var(--gradient-primary);
+          border: none; border-radius: 8px;
+          color: #fff; font-size: 13px; font-weight: 600;
+          padding: 6px 12px; cursor: pointer; white-space: nowrap;
+          transition: opacity 0.2s;
+        }
+        .auth-login-btn:hover { opacity: 0.88; }
+        .auth-user-btn {
+          display: flex; align-items: center; gap: 6px;
+          background: var(--bg-3); border: 1px solid var(--border);
+          border-radius: 8px; padding: 4px 10px;
+          cursor: pointer; transition: border-color 0.2s;
+        }
+        .auth-user-btn:hover { border-color: var(--accent); }
+        .auth-username { font-size: 12px; color: var(--text-2); max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        /* Auth modal */
+        .auth-modal { max-width: 420px; width: 94vw; }
+        .auth-field { display: flex; flex-direction: column; gap: 5px; }
+        .auth-field label {
+          display: flex; align-items: center; gap: 5px;
+          font-size: 12px; font-weight: 600; color: var(--text-2);
+        }
+        .auth-field input {
+          background: var(--bg-3); border: 1px solid var(--border);
+          border-radius: 8px; padding: 10px 12px;
+          color: var(--text-1); font-size: 14px;
+          transition: border-color 0.2s;
+        }
+        .auth-field input:focus { outline: none; border-color: #667eea; }
+        .auth-submit-btn {
+          display: flex; align-items: center; justify-content: center; gap: 8px;
+          width: 100%; padding: 12px;
+          background: var(--gradient-primary);
+          border: none; border-radius: 10px;
+          color: #fff; font-size: 15px; font-weight: 700;
+          cursor: pointer; transition: opacity 0.2s;
+          margin-top: 4px;
+        }
+        .auth-submit-btn:hover:not(:disabled) { opacity: 0.88; }
+        .auth-submit-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .auth-toggle-btn {
+          background: none; border: none;
+          color: var(--text-3); font-size: 13px;
+          cursor: pointer; text-align: center; padding: 4px;
+          transition: color 0.2s;
+        }
+        .auth-toggle-btn:hover { color: var(--text-2); }
 
       `}</style>
     </div>

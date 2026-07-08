@@ -1,6 +1,7 @@
 // ================================================
 // NEXUS AI PRO - Enhanced Backend Server
-// Military-Grade Security & Multi-Model AI Platform
+// Date: 2026-07-08
+// Multi-platform enterprise AI + analytics + game dev + security
 // ================================================
 
 import express from 'express';
@@ -15,6 +16,24 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import Redis from 'ioredis';
+
+// Service imports
+import { AuthService, UserStore } from './src/services/auth-service.js';
+import { AnalyticsService } from './src/services/analytics-service.js';
+import { SubscriptionService } from './src/services/subscription-service.js';
+import { GameTrackingService } from './src/services/game-tracking-service.js';
+import { IntegrationService } from './src/services/integration-service.js';
+import { SecurityScanService } from './src/services/security-scan-service.js';
+import { i18nService } from './src/services/i18n-service.js';
+
+// Route imports
+import { createAuthRouter } from './src/routes/auth-routes.js';
+import { createAnalyticsRouter } from './src/routes/analytics-routes.js';
+import { createSubscriptionRouter } from './src/routes/subscription-routes.js';
+import { createGameRouter } from './src/routes/game-routes.js';
+import { createConnectorRouter } from './src/routes/connector-routes.js';
+import { createSecurityRouter } from './src/routes/security-routes.js';
 
 dotenv.config();
 
@@ -266,6 +285,47 @@ class SecurityModule {
 const security = new SecurityModule();
 
 // ================================================
+// REDIS CLIENT (optional — degrades gracefully)
+// ================================================
+let redisClient = null;
+if (process.env.REDIS_URL) {
+  try {
+    redisClient = new Redis(process.env.REDIS_URL, {
+      lazyConnect: true,
+      connectTimeout: 5000,
+      maxRetriesPerRequest: 1,
+      enableOfflineQueue: false
+    });
+    redisClient.on('error', (e) => {
+      if (!e.message?.includes('ECONNREFUSED')) console.warn('[Redis] error:', e.message);
+    });
+    await redisClient.connect().catch(() => { redisClient = null; });
+  } catch {
+    redisClient = null;
+  }
+}
+
+// ================================================
+// SERVICE INITIALIZATION
+// ================================================
+const userStore = new UserStore();
+
+let authService;
+try {
+  authService = new AuthService(userStore, redisClient);
+} catch (e) {
+  // JWT secrets not set - auth disabled in this env (set JWT_SECRET + JWT_REFRESH_SECRET)
+  console.warn('[Auth] JWT secrets missing - auth routes disabled:', e.message);
+  authService = null;
+}
+
+const analyticsService = new AnalyticsService(userStore, redisClient);
+const subscriptionService = new SubscriptionService(userStore);
+const gameService = new GameTrackingService(userStore);
+const integrationService = new IntegrationService(userStore, redisClient);
+const securityScanService = new SecurityScanService((event, details) => security.logAudit(event, details));
+
+// ================================================
 // SOCKET.IO WITH ENCRYPTION
 // ================================================
 const io = new Server(httpServer, {
@@ -441,8 +501,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-pro';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +875,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -1099,20 +1159,54 @@ app.get('/api/templates/app', (req, res) => {
 });
 
 // ================================================
+// NEW SERVICE ROUTES
+// ================================================
+
+if (authService) {
+  app.use('/api/auth', createAuthRouter(authService));
+  app.use('/api/analytics', createAnalyticsRouter(analyticsService, authService));
+  app.use('/api/subscriptions', createSubscriptionRouter(subscriptionService, authService));
+  app.use('/api/game', createGameRouter(gameService, authService));
+  app.use('/api/connectors', createConnectorRouter(integrationService, authService));
+  app.use('/api/security', createSecurityRouter(securityScanService, security, authService));
+}
+
+// I18n endpoint (no auth required)
+app.get('/api/i18n/languages', (req, res) => {
+  res.json({ languages: i18nService.getSupportedLanguages() });
+});
+
+app.get('/api/i18n/translations/:lang', (req, res) => {
+  const lang = req.params.lang;
+  const keys = ['auth.invalid_credentials', 'auth.register_success', 'payment.success', 'error.generic', 'error.unauthorized'];
+  const translations = {};
+  for (const key of keys) {
+    translations[key] = i18nService.translate(key, lang);
+  }
+  res.json({ lang, translations });
+});
+
+// ================================================
 // WEBSOCKET HANDLING
 // ================================================
 
 io.use((socket, next) => {
-  // Authenticate socket connection
+  // Authenticate socket connection using JWT if available
   const token = socket.handshake.auth.token;
-  if (token) {
-    // Verify token
+  if (token && authService) {
+    const decoded = authService.verifyAccessToken(token);
+    if (decoded) {
+      socket.userId = decoded.sub;
+      socket.userRole = decoded.role;
+    } else {
+      socket.userId = uuidv4();
+    }
+  } else if (token) {
     socket.userId = security.hash(token);
-    next();
   } else {
     socket.userId = uuidv4();
-    next();
   }
+  next();
 });
 
 io.on('connection', (socket) => {
@@ -1145,22 +1239,51 @@ io.on('connection', (socket) => {
     socket.broadcast.emit('workflow:updated', data);
   });
 
+  // Analytics real-time streaming
+  socket.on('analytics:subscribe', (data) => {
+    if (socket.userId && data?.platforms) {
+      analyticsService.streamMetrics(socket, socket.userId, data.platforms, 30000);
+    }
+  });
+
+  // Security alert subscription
+  socket.on('security:subscribe', () => {
+    socket.join('security:alerts');
+  });
+
+  // Game dashboard real-time
+  socket.on('game:subscribe', (data) => {
+    if (socket.userId) {
+      socket.join(`game:${socket.userId}`);
+    }
+  });
+
   socket.on('disconnect', () => {
     security.logAudit('SOCKET_DISCONNECT', { socketId: socket.id });
   });
 });
 
+// Start network security monitoring
+securityScanService.startNetworkMonitor(io);
+
 // ================================================
-// AUTO-PATCHING SCHEDULER
+// SCHEDULED TASKS
 // ================================================
 
+// Security scan every hour (no auto-patch - security decisions should be manual)
 setInterval(async () => {
-  console.log('Running automated security scan...');
-  const scan = await security.scanVulnerabilities();
-
-  if (scan.vulnerabilities.length > 0) {
-    console.log('Vulnerabilities detected, auto-patching...');
-    await security.autoPatch();
+  try {
+    const scan = await securityScanService.runScan('full');
+    if (scan.summary?.critical > 0 || scan.summary?.high > 0) {
+      io.to('security:alerts').emit('security:alert', {
+        type: 'SCAN_FINDINGS',
+        severity: scan.summary.critical > 0 ? 'critical' : 'high',
+        summary: scan.summary,
+        timestamp: Date.now()
+      });
+    }
+  } catch (e) {
+    // Non-fatal scan error
   }
 }, 60 * 60 * 1000); // Every hour
 

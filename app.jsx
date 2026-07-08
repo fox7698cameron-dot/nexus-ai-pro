@@ -4,6 +4,13 @@
 */
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { securityService } from './src/security-service.js';
+import AuthSystem from './src/auth/AuthSystem.jsx';
+import AnalyticsDashboard from './src/dashboards/AnalyticsDashboard.jsx';
+import SecurityDashboard from './src/dashboards/SecurityDashboard.jsx';
+import GameDashboard from './src/dashboards/GameDashboard.jsx';
+import AdminDashboard from './src/dashboards/AdminDashboard.jsx';
+import ConnectorsDashboard from './src/dashboards/ConnectorsDashboard.jsx';
+import CheckoutSystem from './src/checkout/CheckoutSystem.jsx';
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
   Settings, Menu, X, Plus, Trash2, Download, Upload,
@@ -85,7 +92,7 @@ const SUBSCRIPTION_TIERS = {
     color: 'from-purple-400 to-pink-600',
     textColor: 'text-purple-700',
     bgColor: 'bg-purple-50',
-    models: Object.keys(AI_MODELS),
+    models: [],
     features: ['Everything in Pro', 'Custom models', 'API access', 'Dedicated support', 'SLA guarantee'],
     badge: '👑',
     reasoningTime: '🔬 Expert',
@@ -449,6 +456,9 @@ const AI_MODELS = {
   }
 };
 
+// Populate enterprise models now that AI_MODELS is defined
+SUBSCRIPTION_TIERS.enterprise.models = Object.keys(AI_MODELS);
+
 // ============================================
 // TOOL CATEGORIES
 // ============================================
@@ -625,6 +635,15 @@ export default function NexusAI() {
     encryptionStatus: 'secure',
     overallScore: 92
   });
+
+  // Auth state (persisted across page reloads)
+  const [authToken, setAuthToken] = useState(() => {
+    try { return localStorage.getItem('nexus:token') || null; } catch { return null; }
+  });
+  const [authUser, setAuthUser] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('nexus:user')); } catch { return null; }
+  });
+  const [activeView, setActiveView] = useState('chat');
 
   // User customization
   const [userAvatar, setUserAvatar] = useState(AVATAR_STYLES.user[0]);
@@ -817,6 +836,45 @@ export default function NexusAI() {
 
   const deleteMemory = (index) => setMemories(memories.filter((_, i) => i !== index));
 
+  // Auth handlers
+  const handleAuthSuccess = useCallback(({ tokens, user }) => {
+    const token = tokens?.accessToken || tokens?.token;
+    try {
+      localStorage.setItem('nexus:token', token);
+      localStorage.setItem('nexus:user', JSON.stringify(user));
+    } catch {}
+    setAuthToken(token);
+    setAuthUser(user);
+    setActiveView('chat');
+  }, []);
+
+  const handleLogout = useCallback(() => {
+    try {
+      localStorage.removeItem('nexus:token');
+      localStorage.removeItem('nexus:user');
+    } catch {}
+    setAuthToken(null);
+    setAuthUser(null);
+    setActiveView('chat');
+  }, []);
+
+  // Dashboard navigation permissions by role
+  const dashboardNav = useMemo(() => {
+    const role = authUser?.role;
+    const nav = [
+      { id: 'chat', label: 'AI Chat', emoji: '💬' },
+      { id: 'analytics', label: 'Analytics', emoji: '📊' },
+      { id: 'security_dash', label: 'Security', emoji: '🛡️' },
+      { id: 'game', label: 'Game Dev', emoji: '🎮' },
+      { id: 'connectors', label: 'Integrations', emoji: '🔌' },
+      { id: 'checkout', label: 'Billing', emoji: '💳' },
+    ];
+    if (role === 'admin' || role === 'dev') {
+      nav.push({ id: 'admin', label: 'Admin', emoji: '👑' });
+    }
+    return nav;
+  }, [authUser]);
+
   // Group models by capability for selector
   const modelGroups = useMemo(() => {
     const groups = {
@@ -840,6 +898,19 @@ export default function NexusAI() {
 
     return groups;
   }, []);
+
+  // Show auth screen when not logged in
+  if (!authToken) {
+    return (
+      <div className="nexus-app" style={{ alignItems: 'center', justifyContent: 'center' }}>
+        <AuthSystem onAuthSuccess={handleAuthSuccess} />
+        <style>{`
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          .nexus-app { font-family: 'Inter', sans-serif; background: #0a0a0a; min-height: 100vh; display: flex; }
+        `}</style>
+      </div>
+    );
+  }
 
   return (
     <div className="nexus-app">
@@ -915,7 +986,18 @@ export default function NexusAI() {
           <button className="icon-btn" onClick={() => setIsMemoryOpen(!isMemoryOpen)}><Brain size={20} /></button>
           <button className="icon-btn" onClick={() => setIsCallActive(true)}><Phone size={20} /></button>
           <button className="icon-btn" onClick={() => setIsSettingsOpen(true)}><Settings size={20} /></button>
-          <div className="user-avatar">{userAvatar?.emoji || '≡ƒæñ'}</div>
+          {authUser && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div className="user-avatar" title={authUser.email}>{userAvatar?.emoji || '👤'}</div>
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-3)', lineHeight: 1.3 }}>
+                <div style={{ color: 'var(--text-2)' }}>{authUser.username || authUser.email}</div>
+                <div style={{ textTransform: 'uppercase', letterSpacing: 1 }}>{authUser.role}</div>
+              </div>
+              <button className="icon-btn" onClick={handleLogout} title="Sign out" style={{ color: '#ef4444' }}>
+                <User size={18} />
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
@@ -924,23 +1006,81 @@ export default function NexusAI() {
         {/* Sidebar */}
         {isSidebarOpen && (
           <div className="sidebar">
-            <div className="sidebar-header">
-              <h3><History size={18} /> Chats</h3>
-              <button className="new-chat-btn" onClick={createNewChat}><Plus size={18} /></button>
-            </div>
-            <div className="chat-list">
-              {chats.map(chat => (
-                <div key={chat.id} className={`chat-item ${activeChat === chat.id ? 'active' : ''}`} onClick={() => setActiveChat(chat.id)}>
-                  <span className="chat-title">{chat.title}</span>
-                  <button className="delete-btn" onClick={(e) => { e.stopPropagation(); deleteChat(chat.id); }}><Trash2 size={14} /></button>
-                </div>
+            {/* Dashboard nav */}
+            <div style={{ padding: '12px 8px 4px', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ fontSize: '0.65rem', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 1, padding: '4px 8px 8px' }}>Dashboards</div>
+              {dashboardNav.map(({ id, label, emoji }) => (
+                <button
+                  key={id}
+                  onClick={() => setActiveView(id)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    width: '100%', padding: '9px 12px', borderRadius: 8,
+                    background: activeView === id ? 'var(--bg-4)' : 'transparent',
+                    border: activeView === id ? '1px solid var(--border)' : '1px solid transparent',
+                    color: activeView === id ? 'var(--text-1)' : 'var(--text-2)',
+                    fontSize: '0.85rem', cursor: 'pointer', marginBottom: 2, textAlign: 'left'
+                  }}
+                >
+                  <span>{emoji}</span>
+                  <span>{label}</span>
+                </button>
               ))}
             </div>
+            {/* Chat list (only shown in chat view) */}
+            {activeView === 'chat' && (
+              <>
+                <div className="sidebar-header">
+                  <h3><History size={18} /> Chats</h3>
+                  <button className="new-chat-btn" onClick={createNewChat}><Plus size={18} /></button>
+                </div>
+                <div className="chat-list">
+                  {chats.map(chat => (
+                    <div key={chat.id} className={`chat-item ${activeChat === chat.id ? 'active' : ''}`} onClick={() => setActiveChat(chat.id)}>
+                      <span className="chat-title">{chat.title}</span>
+                      <button className="delete-btn" onClick={(e) => { e.stopPropagation(); deleteChat(chat.id); }}><Trash2 size={14} /></button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
 
-        {/* Chat Area */}
-        <main className="chat-area">
+        {/* Dashboard views (non-chat) */}
+        {activeView === 'analytics' && (
+          <div style={{ flex: 1, overflow: 'auto' }}>
+            <AnalyticsDashboard token={authToken} />
+          </div>
+        )}
+        {activeView === 'security_dash' && (
+          <div style={{ flex: 1, overflow: 'auto' }}>
+            <SecurityDashboard token={authToken} />
+          </div>
+        )}
+        {activeView === 'game' && (
+          <div style={{ flex: 1, overflow: 'auto' }}>
+            <GameDashboard token={authToken} />
+          </div>
+        )}
+        {activeView === 'admin' && (authUser?.role === 'admin' || authUser?.role === 'dev') && (
+          <div style={{ flex: 1, overflow: 'auto' }}>
+            <AdminDashboard token={authToken} user={authUser} />
+          </div>
+        )}
+        {activeView === 'connectors' && (
+          <div style={{ flex: 1, overflow: 'auto' }}>
+            <ConnectorsDashboard token={authToken} />
+          </div>
+        )}
+        {activeView === 'checkout' && (
+          <div style={{ flex: 1, overflow: 'auto' }}>
+            <CheckoutSystem token={authToken} user={authUser} />
+          </div>
+        )}
+
+        {/* Chat Area (shown only in chat view) */}
+        {activeView !== 'chat' ? null : <main className="chat-area">
           {/* Tool Panel */}
           <div className="tool-panel">
             {Object.entries(TOOLS).map(([key, tool]) => {
@@ -1168,7 +1308,7 @@ export default function NexusAI() {
               <span className="secure"><Lock size={12} /> End-to-end encrypted</span>
             </div>
           </div>
-        </main>
+        </main>}
 
         {/* Memory Panel */}
         {isMemoryOpen && (

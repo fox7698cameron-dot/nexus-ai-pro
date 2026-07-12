@@ -1,0 +1,253 @@
+// src/i18n/translations.js
+// 2026-07-12 | Multi-language support with regional formatting
+
+export const SUPPORTED_LOCALES = {
+  'en-US': { name: 'English (US)', dir: 'ltr', flag: '🇺🇸' },
+  'en-GB': { name: 'English (UK)', dir: 'ltr', flag: '🇬🇧' },
+  'es-ES': { name: 'Español', dir: 'ltr', flag: '🇪🇸' },
+  'es-MX': { name: 'Español (México)', dir: 'ltr', flag: '🇲🇽' },
+  'fr-FR': { name: 'Français', dir: 'ltr', flag: '🇫🇷' },
+  'de-DE': { name: 'Deutsch', dir: 'ltr', flag: '🇩🇪' },
+  'ja-JP': { name: '日本語', dir: 'ltr', flag: '🇯🇵' },
+  'ko-KR': { name: '한국어', dir: 'ltr', flag: '🇰🇷' },
+  'zh-CN': { name: '中文 (简体)', dir: 'ltr', flag: '🇨🇳' },
+  'zh-TW': { name: '中文 (繁體)', dir: 'ltr', flag: '🇹🇼' },
+  'pt-BR': { name: 'Português (Brasil)', dir: 'ltr', flag: '🇧🇷' },
+  'it-IT': { name: 'Italiano', dir: 'ltr', flag: '🇮🇹' },
+  'ru-RU': { name: 'Русский', dir: 'ltr', flag: '🇷🇺' },
+  'ar-SA': { name: 'العربية', dir: 'rtl', flag: '🇸🇦' },
+  'he-IL': { name: 'עברית', dir: 'rtl', flag: '🇮🇱' },
+  'hi-IN': { name: 'हिन्दी', dir: 'ltr', flag: '🇮🇳' },
+  'tr-TR': { name: 'Türkçe', dir: 'ltr', flag: '🇹🇷' },
+  'nl-NL': { name: 'Nederlands', dir: 'ltr', flag: '🇳🇱' },
+  'pl-PL': { name: 'Polski', dir: 'ltr', flag: '🇵🇱' },
+  'sv-SE': { name: 'Svenska', dir: 'ltr', flag: '🇸🇪' },
+};
+
+const BASE = {
+  'nav.home': 'Home',
+  'nav.analytics': 'Analytics',
+  'nav.security': 'Security',
+  'nav.projects': 'Projects',
+  'nav.gamedev': 'Game Dev',
+  'nav.settings': 'Settings',
+  'nav.admin': 'Admin',
+  'auth.sign_in': 'Sign In',
+  'auth.sign_up': 'Sign Up',
+  'auth.sign_out': 'Sign Out',
+  'auth.email': 'Email',
+  'auth.password': 'Password',
+  'auth.username': 'Username',
+  'auth.forgot_password': 'Forgot password?',
+  'auth.mfa_prompt': 'Enter your 6-digit authentication code',
+  'auth.biometric_prompt': 'Authenticate with biometrics',
+  'auth.password_requirements': 'Minimum 13 characters with uppercase, lowercase, number, and special character',
+  'dashboard.welcome': 'Welcome',
+  'dashboard.overview': 'Overview',
+  'analytics.title': 'Social Analytics',
+  'analytics.views': 'Views',
+  'analytics.likes': 'Likes',
+  'analytics.reach': 'Reach',
+  'analytics.retention': 'Retention',
+  'analytics.engagement': 'Engagement',
+  'security.title': 'Security Dashboard',
+  'security.scan': 'Run Scan',
+  'security.threats': 'Threats',
+  'security.status': 'Status',
+  'projects.title': 'Projects',
+  'projects.new': 'New Project',
+  'projects.status': 'Status',
+  'payment.subscribe': 'Subscribe',
+  'payment.current_plan': 'Current Plan',
+  'payment.upgrade': 'Upgrade',
+  'common.save': 'Save',
+  'common.cancel': 'Cancel',
+  'common.delete': 'Delete',
+  'common.edit': 'Edit',
+  'common.loading': 'Loading...',
+  'common.error': 'An error occurred',
+  'common.success': 'Success',
+  'common.search': 'Search',
+  'common.filter': 'Filter',
+  'common.export': 'Export',
+  'common.refresh': 'Refresh',
+};
+
+const TRANSLATIONS = {
+  'en-US': BASE,
+  'en-GB': { ...BASE },
+  'es-ES': {
+    ...BASE,
+    'nav.home': 'Inicio',
+    'nav.analytics': 'Análisis',
+    'nav.security': 'Seguridad',
+    'nav.projects': 'Proyectos',
+    'nav.settings': 'Configuración',
+    'auth.sign_in': 'Iniciar sesión',
+    'auth.sign_up': 'Registrarse',
+    'auth.sign_out': 'Cerrar sesión',
+    'common.save': 'Guardar',
+    'common.cancel': 'Cancelar',
+    'common.loading': 'Cargando...',
+    'dashboard.welcome': 'Bienvenido',
+    'analytics.title': 'Análisis Social',
+    'security.title': 'Panel de Seguridad',
+    'projects.title': 'Proyectos',
+  },
+  'fr-FR': {
+    ...BASE,
+    'nav.home': 'Accueil',
+    'nav.analytics': 'Analytique',
+    'nav.security': 'Sécurité',
+    'nav.projects': 'Projets',
+    'nav.settings': 'Paramètres',
+    'auth.sign_in': 'Connexion',
+    'auth.sign_up': "S'inscrire",
+    'auth.sign_out': 'Déconnexion',
+    'common.save': 'Enregistrer',
+    'common.cancel': 'Annuler',
+    'common.loading': 'Chargement...',
+    'dashboard.welcome': 'Bienvenue',
+    'analytics.title': 'Analyse Sociale',
+    'security.title': 'Tableau de Sécurité',
+    'projects.title': 'Projets',
+  },
+  'de-DE': {
+    ...BASE,
+    'nav.home': 'Startseite',
+    'nav.analytics': 'Analytik',
+    'nav.security': 'Sicherheit',
+    'nav.projects': 'Projekte',
+    'nav.settings': 'Einstellungen',
+    'auth.sign_in': 'Anmelden',
+    'auth.sign_up': 'Registrieren',
+    'auth.sign_out': 'Abmelden',
+    'common.save': 'Speichern',
+    'common.cancel': 'Abbrechen',
+    'common.loading': 'Laden...',
+    'dashboard.welcome': 'Willkommen',
+    'analytics.title': 'Soziale Analytik',
+    'security.title': 'Sicherheits-Dashboard',
+    'projects.title': 'Projekte',
+  },
+  'ja-JP': {
+    ...BASE,
+    'nav.home': 'ホーム',
+    'nav.analytics': '分析',
+    'nav.security': 'セキュリティ',
+    'nav.projects': 'プロジェクト',
+    'nav.settings': '設定',
+    'auth.sign_in': 'ログイン',
+    'auth.sign_up': '新規登録',
+    'auth.sign_out': 'ログアウト',
+    'common.save': '保存',
+    'common.cancel': 'キャンセル',
+    'common.loading': '読み込み中...',
+    'dashboard.welcome': 'ようこそ',
+    'analytics.title': 'ソーシャル分析',
+    'security.title': 'セキュリティダッシュボード',
+    'projects.title': 'プロジェクト',
+  },
+  'ko-KR': {
+    ...BASE,
+    'nav.home': '홈',
+    'nav.analytics': '분석',
+    'nav.security': '보안',
+    'nav.projects': '프로젝트',
+    'nav.settings': '설정',
+    'auth.sign_in': '로그인',
+    'auth.sign_up': '회원가입',
+    'auth.sign_out': '로그아웃',
+    'common.save': '저장',
+    'common.cancel': '취소',
+    'common.loading': '로딩 중...',
+    'dashboard.welcome': '환영합니다',
+    'analytics.title': '소셜 분석',
+    'security.title': '보안 대시보드',
+    'projects.title': '프로젝트',
+  },
+  'zh-CN': {
+    ...BASE,
+    'nav.home': '首页',
+    'nav.analytics': '分析',
+    'nav.security': '安全',
+    'nav.projects': '项目',
+    'nav.settings': '设置',
+    'auth.sign_in': '登录',
+    'auth.sign_up': '注册',
+    'auth.sign_out': '退出',
+    'common.save': '保存',
+    'common.cancel': '取消',
+    'common.loading': '加载中...',
+    'dashboard.welcome': '欢迎',
+    'analytics.title': '社交分析',
+    'security.title': '安全仪表板',
+    'projects.title': '项目',
+  },
+  'pt-BR': {
+    ...BASE,
+    'nav.home': 'Início',
+    'nav.analytics': 'Análises',
+    'nav.security': 'Segurança',
+    'nav.projects': 'Projetos',
+    'nav.settings': 'Configurações',
+    'auth.sign_in': 'Entrar',
+    'auth.sign_up': 'Cadastrar',
+    'auth.sign_out': 'Sair',
+    'common.save': 'Salvar',
+    'common.cancel': 'Cancelar',
+    'common.loading': 'Carregando...',
+    'dashboard.welcome': 'Bem-vindo',
+    'analytics.title': 'Análise Social',
+    'security.title': 'Painel de Segurança',
+    'projects.title': 'Projetos',
+  },
+  'ar-SA': {
+    ...BASE,
+    'nav.home': 'الرئيسية',
+    'nav.analytics': 'التحليلات',
+    'nav.security': 'الأمان',
+    'nav.projects': 'المشاريع',
+    'nav.settings': 'الإعدادات',
+    'auth.sign_in': 'تسجيل الدخول',
+    'auth.sign_up': 'إنشاء حساب',
+    'auth.sign_out': 'تسجيل الخروج',
+    'common.save': 'حفظ',
+    'common.cancel': 'إلغاء',
+    'common.loading': 'جار التحميل...',
+    'dashboard.welcome': 'مرحباً',
+    'analytics.title': 'تحليلات الوسائط',
+    'security.title': 'لوحة الأمان',
+    'projects.title': 'المشاريع',
+  },
+};
+
+export function getTranslation(locale, key, fallback) {
+  const lang = TRANSLATIONS[locale] || TRANSLATIONS['en-US'];
+  return lang[key] ?? TRANSLATIONS['en-US'][key] ?? fallback ?? key;
+}
+
+export function detectLocale() {
+  if (typeof navigator === 'undefined') return 'en-US';
+  const lang = navigator.language || navigator.userLanguage || 'en-US';
+  if (TRANSLATIONS[lang]) return lang;
+  const base = lang.split('-')[0];
+  const match = Object.keys(TRANSLATIONS).find(l => l.startsWith(base));
+  return match || 'en-US';
+}
+
+export function formatNumber(value, locale = 'en-US') {
+  return new Intl.NumberFormat(locale).format(value);
+}
+
+export function formatCurrency(amount, currency = 'USD', locale = 'en-US') {
+  return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(amount);
+}
+
+export function formatDate(timestamp, locale = 'en-US', opts = {}) {
+  return new Intl.DateTimeFormat(locale, { dateStyle: 'medium', ...opts }).format(new Date(timestamp));
+}
+
+export function getTextDirection(locale) {
+  return SUPPORTED_LOCALES[locale]?.dir || 'ltr';
+}

@@ -1,27 +1,36 @@
-import React from 'react';
-import ReactDOM from 'react-dom/client';
-import NexusAI from './app.jsx';
+// main.jsx
+// 2026-07-12 | Entry point — auth routing, role-based dashboard dispatch
 
-// Security: Disable React DevTools in production
+import React, { useState, useEffect, useCallback } from 'react';
+import ReactDOM from 'react-dom/client';
+import AuthPage from './src/auth/AuthPage.jsx';
+import AdminDashboard from './src/dashboards/AdminDashboard.jsx';
+import DeveloperDashboard from './src/dashboards/DeveloperDashboard.jsx';
+import ModeratorDashboard from './src/dashboards/ModeratorDashboard.jsx';
+import UserDashboard from './src/dashboards/UserDashboard.jsx';
+
+// Disable React DevTools in production
 if (typeof window.__REACT_DEVTOOLS_GLOBAL_HOOK__ === 'object') {
   for (const [key, value] of Object.entries(window.__REACT_DEVTOOLS_GLOBAL_HOOK__)) {
     window.__REACT_DEVTOOLS_GLOBAL_HOOK__[key] = typeof value === 'function' ? () => {} : null;
   }
 }
 
-// Error boundary for production
+// Session key — only stores non-sensitive identity (not tokens)
+const SESSION_KEY = 'nexus:session';
+
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
-    this.state = { hasError: false, error: null };
+    this.state = { hasError: false };
   }
 
-  static getDerivedStateFromError(error) {
-    return { hasError: true, error };
+  static getDerivedStateFromError() {
+    return { hasError: true };
   }
 
-  componentDidCatch(error, errorInfo) {
-    console.error('Application error:', error, errorInfo);
+  componentDidCatch(error, info) {
+    console.error('App error:', error, info);
   }
 
   render() {
@@ -33,58 +42,99 @@ class ErrorBoundary extends React.Component {
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          background: '#0a0a0c',
-          color: '#ffffff',
+          background: '#0a0a0a',
+          color: '#fff',
           fontFamily: 'Inter, sans-serif',
-          padding: '20px',
-          textAlign: 'center'
+          textAlign: 'center',
+          padding: 20,
         }}>
-          <div style={{
-            width: '80px',
-            height: '80px',
-            background: 'linear-gradient(135deg, #ef4444 0%, #f87171 100%)',
-            borderRadius: '20px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '2rem',
-            marginBottom: '24px'
-          }}>
-            ⚠️
-          </div>
-          <h1 style={{ fontSize: '1.5rem', marginBottom: '8px' }}>Something went wrong</h1>
-          <p style={{ color: '#6b7280', marginBottom: '24px' }}>
-            The application encountered an error. Please refresh the page.
-          </p>
+          <div style={{ fontSize: '3rem', marginBottom: 16 }}>⚠️</div>
+          <h2 style={{ marginBottom: 8 }}>Something went wrong</h2>
+          <p style={{ color: '#666', marginBottom: 24 }}>Please refresh the page to continue.</p>
           <button
             onClick={() => window.location.reload()}
-            style={{
-              padding: '12px 24px',
-              background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-              border: 'none',
-              borderRadius: '10px',
-              color: 'white',
-              fontSize: '1rem',
-              fontWeight: '500',
-              cursor: 'pointer'
-            }}
+            style={{ padding: '10px 24px', background: '#7c3aed', border: 'none', borderRadius: 8, color: '#fff', fontSize: '0.95rem', fontWeight: 600, cursor: 'pointer' }}
           >
-            Refresh Page
+            Refresh
           </button>
         </div>
       );
     }
-
     return this.props.children;
   }
 }
 
-// Mount application
+function NexusRouter() {
+  const [user, setUser] = useState(null);
+  const [ready, setReady] = useState(false);
+
+  // Restore lightweight session info (no tokens — those live in httpOnly cookies / memory only)
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(SESSION_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        // Sanity-check shape before trusting
+        if (parsed && typeof parsed.role === 'string' && typeof parsed.email === 'string') {
+          setUser(parsed);
+        }
+      }
+    } catch {
+      sessionStorage.removeItem(SESSION_KEY);
+    } finally {
+      setReady(true);
+    }
+  }, []);
+
+  const handleAuthenticated = useCallback((userData) => {
+    const safe = {
+      email: userData.email || '',
+      username: userData.username || userData.email?.split('@')[0] || 'user',
+      role: userData.role || 'user',
+      locale: userData.locale || 'en',
+    };
+    setUser(safe);
+    // Store only identity metadata — never tokens
+    try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(safe)); } catch { /* ignore quota errors */ }
+  }, []);
+
+  const handleLogout = useCallback(() => {
+    setUser(null);
+    try { sessionStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+  }, []);
+
+  if (!ready) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0a0a0a' }}>
+        <div style={{ width: 32, height: 32, border: '3px solid #333', borderTopColor: '#7c3aed', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <AuthPage onAuthenticated={handleAuthenticated} />;
+  }
+
+  const props = { user, onLogout: handleLogout };
+
+  switch (user.role) {
+    case 'admin':
+      return <AdminDashboard {...props} />;
+    case 'developer':
+      return <DeveloperDashboard {...props} />;
+    case 'moderator':
+      return <ModeratorDashboard {...props} />;
+    default:
+      return <UserDashboard {...props} />;
+  }
+}
+
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
     <ErrorBoundary>
-      <NexusAI />
+      <NexusRouter />
     </ErrorBoundary>
   </React.StrictMode>
 );

@@ -15,6 +15,9 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import jwt from 'jsonwebtoken';
+import speakeasy from 'speakeasy';
+import QRCode from 'qrcode';
 
 dotenv.config();
 
@@ -441,8 +444,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-pro';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +818,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -1096,6 +1099,484 @@ app.get('/api/templates/app', (req, res) => {
       { id: 'ai', name: 'AI Application', stack: 'Python/FastAPI' }
     ]
   });
+});
+
+// ================================================
+// AUTH SERVICE (server-side)
+// ================================================
+
+const PASSWORD_MIN_LENGTH = 13;
+const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?])/;
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(64).toString('hex');
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || crypto.randomBytes(64).toString('hex');
+
+const userStore = new Map();
+const refreshTokenStore = new Map();
+const mfaSecretStore = new Map();
+
+function validatePassword(password) {
+  const errors = [];
+  if (!password || password.length < PASSWORD_MIN_LENGTH) {
+    errors.push(`Password must be at least ${PASSWORD_MIN_LENGTH} characters`);
+  }
+  if (!PASSWORD_REGEX.test(password)) {
+    errors.push('Password must include uppercase, lowercase, number, and special character');
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+async function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  return new Promise((resolve, reject) => {
+    crypto.pbkdf2(password, salt, 310000, 32, 'sha512', (err, key) => {
+      if (err) return reject(err);
+      resolve({ hash: key.toString('hex'), salt });
+    });
+  });
+}
+
+async function verifyPassword(password, hash, salt) {
+  return new Promise((resolve, reject) => {
+    crypto.pbkdf2(password, salt, 310000, 32, 'sha512', (err, key) => {
+      if (err) return reject(err);
+      try {
+        resolve(crypto.timingSafeEqual(Buffer.from(hash, 'hex'), key));
+      } catch {
+        resolve(false);
+      }
+    });
+  });
+}
+
+function issueTokens(userId, role) {
+  const accessToken = jwt.sign({ sub: userId, role }, JWT_SECRET, { expiresIn: '15m', algorithm: 'HS256' });
+  const refreshToken = jwt.sign({ sub: userId }, JWT_REFRESH_SECRET, { expiresIn: '7d', algorithm: 'HS256' });
+  refreshTokenStore.set(refreshToken, { userId, role, createdAt: Date.now() });
+  return { accessToken, refreshToken };
+}
+
+function verifyAccessToken(token) {
+  return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+}
+
+function authMiddleware(req, res, next) {
+  const header = req.headers['authorization'];
+  if (!header || !header.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  try {
+    const payload = verifyAccessToken(header.slice(7));
+    req.user = payload;
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+}
+
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!req.user || !roles.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Insufficient permissions' });
+    }
+    next();
+  };
+}
+
+// Auth endpoints
+app.post('/api/auth/register', authLimiter, async (req, res) => {
+  try {
+    const { email, username, password, role = 'user' } = req.body;
+
+    if (!email || !username || !password) {
+      return res.status(400).json({ error: 'Email, username, and password are required' });
+    }
+
+    // Validate email
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'Invalid email address' });
+    }
+
+    // Validate username (allow unicode/emoji)
+    if (username.trim().length < 3 || username.length > 50) {
+      return res.status(400).json({ error: 'Username must be 3-50 characters' });
+    }
+
+    // Validate password
+    const passResult = validatePassword(password);
+    if (!passResult.valid) {
+      return res.status(400).json({ error: passResult.errors[0] });
+    }
+
+    // Check existing user
+    const existing = [...userStore.values()].find(u => u.email === email.toLowerCase());
+    if (existing) {
+      return res.status(409).json({ error: 'Email already registered' });
+    }
+
+    const allowedRoles = ['user', 'developer', 'moderator'];
+    const safeRole = allowedRoles.includes(role) ? role : 'user';
+
+    const { hash, salt } = await hashPassword(password);
+    const userId = uuidv4();
+
+    const user = {
+      id: userId,
+      email: email.toLowerCase(),
+      username: username.trim(),
+      role: safeRole,
+      passwordHash: hash,
+      passwordSalt: salt,
+      mfaEnabled: false,
+      createdAt: Date.now(),
+      status: 'active',
+    };
+    userStore.set(userId, user);
+
+    const tokens = issueTokens(userId, safeRole);
+    security.logAudit('USER_REGISTERED', { userId, email: email.toLowerCase(), role: safeRole });
+
+    res.status(201).json({
+      user: { id: userId, email: user.email, username: user.username, role: user.role },
+      ...tokens,
+    });
+  } catch (err) {
+    security.logAudit('REGISTER_ERROR', { error: err.message });
+    res.status(500).json({ error: 'Registration failed' });
+  }
+});
+
+app.post('/api/auth/login', authLimiter, async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password required' });
+    }
+
+    const user = [...userStore.values()].find(u => u.email === email.toLowerCase());
+    if (!user || user.status !== 'active') {
+      security.logAudit('FAILED_LOGIN', { email, ip: req.ip });
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const valid = await verifyPassword(password, user.passwordHash, user.passwordSalt);
+    if (!valid) {
+      security.logAudit('FAILED_LOGIN', { email, ip: req.ip });
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    if (user.mfaEnabled) {
+      const challenge = security.generateSecureToken(16);
+      return res.json({ requiresMfa: true, challenge, userId: user.id });
+    }
+
+    const tokens = issueTokens(user.id, user.role);
+    security.logAudit('USER_LOGIN', { userId: user.id, ip: req.ip });
+
+    res.json({
+      user: { id: user.id, email: user.email, username: user.username, role: user.role },
+      ...tokens,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+app.post('/api/auth/mfa/verify', authLimiter, (req, res) => {
+  const { userId, token, challenge } = req.body;
+  const user = userStore.get(userId);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  const secret = mfaSecretStore.get(userId);
+  if (!secret) return res.status(400).json({ error: 'MFA not configured' });
+
+  const valid = speakeasy.totp.verify({ secret, encoding: 'base32', token, window: 1 });
+  if (!valid) return res.status(401).json({ error: 'Invalid MFA code' });
+
+  const tokens = issueTokens(userId, user.role);
+  security.logAudit('MFA_LOGIN', { userId });
+  res.json({ user: { id: user.id, email: user.email, username: user.username, role: user.role }, ...tokens });
+});
+
+app.post('/api/auth/mfa/setup', authMiddleware, async (req, res) => {
+  const { sub: userId } = req.user;
+  const user = userStore.get(userId);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  const secret = speakeasy.generateSecret({ length: 20, name: `NexusAIPro (${user.email})` });
+  mfaSecretStore.set(userId, secret.base32);
+
+  const qrCode = await QRCode.toDataURL(secret.otpauth_url);
+  res.json({ secret: secret.base32, qrCode, otpauthUrl: secret.otpauth_url });
+});
+
+app.post('/api/auth/mfa/confirm', authMiddleware, (req, res) => {
+  const { token } = req.body;
+  const { sub: userId } = req.user;
+  const secret = mfaSecretStore.get(userId);
+  if (!secret) return res.status(400).json({ error: 'MFA setup not started' });
+
+  const valid = speakeasy.totp.verify({ secret, encoding: 'base32', token, window: 1 });
+  if (!valid) return res.status(400).json({ error: 'Invalid token — check your authenticator app' });
+
+  const user = userStore.get(userId);
+  user.mfaEnabled = true;
+  userStore.set(userId, user);
+  security.logAudit('MFA_ENABLED', { userId });
+  res.json({ success: true });
+});
+
+app.post('/api/auth/refresh', (req, res) => {
+  const { refreshToken } = req.body;
+  if (!refreshToken) return res.status(400).json({ error: 'Refresh token required' });
+
+  const stored = refreshTokenStore.get(refreshToken);
+  if (!stored) return res.status(401).json({ error: 'Invalid refresh token' });
+
+  try {
+    jwt.verify(refreshToken, JWT_REFRESH_SECRET, { algorithms: ['HS256'] });
+  } catch {
+    refreshTokenStore.delete(refreshToken);
+    return res.status(401).json({ error: 'Expired refresh token' });
+  }
+
+  refreshTokenStore.delete(refreshToken);
+  const tokens = issueTokens(stored.userId, stored.role);
+  res.json(tokens);
+});
+
+app.post('/api/auth/logout', authMiddleware, (req, res) => {
+  const { refreshToken } = req.body;
+  if (refreshToken) refreshTokenStore.delete(refreshToken);
+  security.logAudit('USER_LOGOUT', { userId: req.user.sub });
+  res.json({ success: true });
+});
+
+app.get('/api/auth/me', authMiddleware, (req, res) => {
+  const user = userStore.get(req.user.sub);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json({ id: user.id, email: user.email, username: user.username, role: user.role, mfaEnabled: user.mfaEnabled });
+});
+
+// ================================================
+// ANALYTICS ENDPOINTS (social platform metrics)
+// ================================================
+
+const SOCIAL_PLATFORMS = ['tiktok', 'instagram', 'facebook', 'twitch', 'discord', 'lemon8', 'reddit', 'redgifs'];
+
+function mockPlatformMetrics(platform, seed) {
+  const base = seed * 1000;
+  return {
+    platform,
+    views: Math.floor(base * 12.4 + Math.random() * base * 5),
+    likes: Math.floor(base * 2.1 + Math.random() * base * 0.8),
+    reach: Math.floor(base * 18.7 + Math.random() * base * 7),
+    retention: parseFloat((45 + Math.random() * 40).toFixed(1)),
+    engagement: parseFloat((2.5 + Math.random() * 8).toFixed(2)),
+    shares: Math.floor(base * 0.4 + Math.random() * base * 0.2),
+    followers: Math.floor(base * 50 + Math.random() * base * 20),
+    followerGrowth: parseFloat((-2 + Math.random() * 15).toFixed(2)),
+    avgWatchTime: parseFloat((10 + Math.random() * 120).toFixed(1)),
+    impressions: Math.floor(base * 22 + Math.random() * base * 10),
+    comments: Math.floor(base * 0.3 + Math.random() * base * 0.15),
+    saves: Math.floor(base * 0.2 + Math.random() * base * 0.1),
+    clicks: Math.floor(base * 0.8 + Math.random() * base * 0.4),
+    ctr: parseFloat((0.5 + Math.random() * 5).toFixed(2)),
+    updatedAt: Date.now(),
+  };
+}
+
+app.get('/api/analytics/overview', authMiddleware, (req, res) => {
+  const metrics = SOCIAL_PLATFORMS.map((p, i) => mockPlatformMetrics(p, i + 1));
+  res.json({ platforms: metrics, timestamp: Date.now() });
+});
+
+app.get('/api/analytics/:platform', authMiddleware, (req, res) => {
+  const { platform } = req.params;
+  if (!SOCIAL_PLATFORMS.includes(platform)) {
+    return res.status(400).json({ error: 'Unknown platform' });
+  }
+  const idx = SOCIAL_PLATFORMS.indexOf(platform);
+  const metrics = mockPlatformMetrics(platform, idx + 1);
+  const timeRange = req.query.range || '7d';
+  const points = timeRange === '24h' ? 24 : timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 12;
+  metrics.timeSeries = Array.from({ length: points }, (_, i) => ({
+    label: `${i + 1}`,
+    views: Math.floor(metrics.views / points + (Math.random() - 0.3) * metrics.views / points),
+    likes: Math.floor(metrics.likes / points + (Math.random() - 0.3) * metrics.likes / points),
+    reach: Math.floor(metrics.reach / points + (Math.random() - 0.3) * metrics.reach / points),
+  }));
+  res.json(metrics);
+});
+
+// ================================================
+// PROJECT TRACKING ENDPOINTS
+// ================================================
+
+const projectStore = new Map();
+
+app.get('/api/projects', authMiddleware, (req, res) => {
+  const userId = req.user.sub;
+  const projects = [...projectStore.values()].filter(p => p.userId === userId);
+  res.json(projects);
+});
+
+app.post('/api/projects', authMiddleware, (req, res) => {
+  const { name, type, description } = req.body;
+  if (!name || !type) return res.status(400).json({ error: 'Name and type required' });
+  const allowedTypes = ['coding', 'gamedev', 'arvr', '3d'];
+  if (!allowedTypes.includes(type)) return res.status(400).json({ error: 'Invalid project type' });
+
+  const project = {
+    id: uuidv4(),
+    userId: req.user.sub,
+    name: name.trim().slice(0, 100),
+    type,
+    description: (description || '').trim().slice(0, 500),
+    status: 'planning',
+    progress: 0,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  projectStore.set(project.id, project);
+  security.logAudit('PROJECT_CREATED', { projectId: project.id, userId: req.user.sub });
+  res.status(201).json(project);
+});
+
+app.put('/api/projects/:id', authMiddleware, (req, res) => {
+  const project = projectStore.get(req.params.id);
+  if (!project || project.userId !== req.user.sub) return res.status(404).json({ error: 'Project not found' });
+
+  const allowedFields = ['name', 'description', 'status', 'progress', 'tags', 'milestones'];
+  const update = {};
+  for (const field of allowedFields) {
+    if (req.body[field] !== undefined) update[field] = req.body[field];
+  }
+  const updated = { ...project, ...update, updatedAt: Date.now() };
+  projectStore.set(project.id, updated);
+  res.json(updated);
+});
+
+app.delete('/api/projects/:id', authMiddleware, (req, res) => {
+  const project = projectStore.get(req.params.id);
+  if (!project || project.userId !== req.user.sub) return res.status(404).json({ error: 'Project not found' });
+  projectStore.delete(req.params.id);
+  res.json({ success: true });
+});
+
+// ================================================
+// CLOUD CONNECTOR ENDPOINTS
+// ================================================
+
+const CLOUD_CONNECTORS = {
+  aws: { name: 'Amazon Web Services', services: ['S3', 'Lambda', 'EC2', 'RDS', 'CloudFront'], required: ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_REGION'] },
+  azure: { name: 'Microsoft Azure', services: ['Blob Storage', 'Functions', 'CosmosDB', 'AKS'], required: ['AZURE_TENANT_ID', 'AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET'] },
+  gcp: { name: 'Google Cloud Platform', services: ['Cloud Storage', 'Cloud Run', 'BigQuery', 'Pub/Sub'], required: ['GOOGLE_APPLICATION_CREDENTIALS'] },
+  adobe: { name: 'Adobe Creative Cloud', services: ['Photoshop API', 'Lightroom', 'Firefly', 'PDF Services'], required: ['ADOBE_CLIENT_ID', 'ADOBE_CLIENT_SECRET'] },
+  slack: { name: 'Slack', services: ['Webhooks', 'Bot API', 'Events API', 'Workflow Steps'], required: ['SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET'] },
+  zoom: { name: 'Zoom', services: ['Meetings API', 'Webinars', 'Recording', 'OAuth'], required: ['ZOOM_CLIENT_ID', 'ZOOM_CLIENT_SECRET'] },
+  github: { name: 'GitHub', services: ['Repos', 'Actions', 'Webhooks', 'Packages', 'Pages'], required: ['GITHUB_TOKEN'] },
+  bitbucket: { name: 'Bitbucket', services: ['Repos', 'Pipelines', 'Deploy', 'Webhooks'], required: ['BITBUCKET_APP_PASSWORD', 'BITBUCKET_USERNAME'] },
+};
+
+app.get('/api/connectors', authMiddleware, (req, res) => {
+  const status = Object.entries(CLOUD_CONNECTORS).map(([key, cfg]) => ({
+    id: key,
+    ...cfg,
+    connected: cfg.required.every(v => !!process.env[v]),
+  }));
+  res.json(status);
+});
+
+app.post('/api/connectors/:id/test', authMiddleware, async (req, res) => {
+  const { id } = req.params;
+  if (!CLOUD_CONNECTORS[id]) return res.status(404).json({ error: 'Unknown connector' });
+  const cfg = CLOUD_CONNECTORS[id];
+  const connected = cfg.required.every(v => !!process.env[v]);
+  await new Promise(r => setTimeout(r, 500));
+  res.json({ id, connected, message: connected ? 'Connection successful' : 'Missing required environment variables' });
+});
+
+// ================================================
+// STRIPE SUBSCRIPTION ENDPOINTS
+// ================================================
+
+app.post('/api/billing/create-checkout', authMiddleware, async (req, res) => {
+  try {
+    if (!process.env.STRIPE_SECRET_KEY) {
+      return res.status(503).json({ error: 'Stripe not configured — set STRIPE_SECRET_KEY in environment' });
+    }
+    const { default: Stripe } = await import('stripe');
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
+    const { priceId, successUrl, cancelUrl } = req.body;
+    if (!priceId || !successUrl || !cancelUrl) {
+      return res.status(400).json({ error: 'priceId, successUrl, and cancelUrl required' });
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      payment_method_types: ['card'],
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      customer_email: userStore.get(req.user.sub)?.email,
+      metadata: { userId: req.user.sub },
+    });
+
+    security.logAudit('CHECKOUT_CREATED', { userId: req.user.sub, priceId });
+    res.json({ url: session.url, sessionId: session.id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/billing/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  if (!process.env.STRIPE_SECRET_KEY || !process.env.STRIPE_WEBHOOK_SECRET) {
+    return res.status(503).json({ error: 'Stripe not configured' });
+  }
+  try {
+    const { default: Stripe } = await import('stripe');
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2024-06-20' });
+    const event = stripe.webhooks.constructEvent(req.body, req.headers['stripe-signature'], process.env.STRIPE_WEBHOOK_SECRET);
+    security.logAudit('STRIPE_WEBHOOK', { type: event.type });
+    res.json({ received: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ================================================
+// USER MANAGEMENT (admin only)
+// ================================================
+
+app.get('/api/admin/users', authMiddleware, requireRole('admin'), (req, res) => {
+  const users = [...userStore.values()].map(u => ({
+    id: u.id, email: u.email, username: u.username, role: u.role,
+    status: u.status, mfaEnabled: u.mfaEnabled, createdAt: u.createdAt,
+  }));
+  res.json(users);
+});
+
+app.put('/api/admin/users/:id/status', authMiddleware, requireRole('admin'), (req, res) => {
+  const user = userStore.get(req.params.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  const { status } = req.body;
+  if (!['active', 'suspended'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
+  user.status = status;
+  userStore.set(user.id, user);
+  security.logAudit('USER_STATUS_CHANGED', { targetUserId: user.id, status, adminId: req.user.sub });
+  res.json({ success: true });
+});
+
+app.put('/api/admin/users/:id/role', authMiddleware, requireRole('admin'), (req, res) => {
+  const user = userStore.get(req.params.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  const { role } = req.body;
+  const validRoles = ['user', 'developer', 'moderator', 'admin'];
+  if (!validRoles.includes(role)) return res.status(400).json({ error: 'Invalid role' });
+  user.role = role;
+  userStore.set(user.id, user);
+  security.logAudit('ROLE_CHANGED', { targetUserId: user.id, newRole: role, adminId: req.user.sub });
+  res.json({ success: true });
 });
 
 // ================================================

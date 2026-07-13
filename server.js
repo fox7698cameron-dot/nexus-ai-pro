@@ -14,7 +14,16 @@ import { Server } from 'socket.io';
 import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
-import Jexl from 'jexl';
+import jwt from 'jsonwebtoken';
+import { safeEval, evalCondition } from './src/services/safeEval.js';
+import authRouter from './src/routes/auth.js';
+import securityRouter from './src/routes/security.js';
+import connectorsRouter from './src/routes/connectors.js';
+import projectsRouter from './src/routes/projects.js';
+import gamedevRouter from './src/routes/gamedev.js';
+import analyticsRouter from './src/routes/analytics.js';
+import paymentsRouter from './src/routes/payments.js';
+import { seedAdmin } from './src/services/userStore.js';
 
 dotenv.config();
 
@@ -315,8 +324,10 @@ app.use('/api/', limiter);
 // Stricter rate limit for auth endpoints
 const authLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
-  max: 5,
-  message: { error: 'Too many authentication attempts.' }
+  max: 20,
+  message: { error: 'Too many authentication attempts.' },
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
 // CORS
@@ -441,8 +452,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-pro';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -788,13 +798,12 @@ class WorkflowEngine {
   }
 
   async executeCodeNode(node, context) {
-    // Execute code node as a Jexl expression instead of raw JavaScript
     const { code } = node.config || {};
     if (typeof code !== 'string' || !code.trim()) {
       return { codeError: 'Invalid code expression' };
     }
     try {
-      const result = await Jexl.eval(code, context);
+      const result = await safeEval(code, context);
       return { codeResult: result };
     } catch (error) {
       return { codeError: error.message };
@@ -806,21 +815,21 @@ class WorkflowEngine {
     if (typeof condition !== 'string' || !condition.trim()) {
       return { conditionResult: false };
     }
-    const { transform } = node.config || {};
     try {
-      const result = await Jexl.eval(condition, context);
-      return { conditionResult: !!result };
+      const result = await evalCondition(condition, context);
+      return { conditionResult: result };
     } catch (error) {
       return { conditionResult: false };
     }
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
     try {
-      const result = await Jexl.eval(transform, context);
+      const result = await safeEval(transform, context);
       return { transformResult: result };
     } catch (error) {
       return { transformError: error.message };
@@ -831,6 +840,17 @@ class WorkflowEngine {
 const workflowEngine = new WorkflowEngine();
 
 // ================================================
+// ROUTE MOUNTS
+// ================================================
+app.use('/api/auth', authLimiter, authRouter);
+app.use('/api/security', securityRouter);
+app.use('/api/connectors', connectorsRouter);
+app.use('/api/projects', projectsRouter);
+app.use('/api/gamedev', gamedevRouter);
+app.use('/api/analytics', analyticsRouter);
+app.use('/api/payments', paymentsRouter);
+
+// ================================================
 // API ROUTES
 // ================================================
 
@@ -839,20 +859,14 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'healthy',
     security: security.getSecurityStatus(),
-    timestamp: Date.now()
+    timestamp: Date.now(),
+    version: '2.0.0',
+    platform: process.platform,
+    node: process.version,
   });
 });
 
-// Security endpoints
-app.get('/api/security/status', (req, res) => {
-  res.json(security.getSecurityStatus());
-});
-
-app.post('/api/security/scan', async (req, res) => {
-  const results = await security.scanVulnerabilities();
-  res.json(results);
-});
-
+// Legacy security endpoints (kept for backward compat — new ones in /api/security router)
 app.post('/api/security/patch', async (req, res) => {
   const patches = await security.autoPatch();
   res.json({ patches });
@@ -1103,14 +1117,20 @@ app.get('/api/templates/app', (req, res) => {
 // ================================================
 
 io.use((socket, next) => {
-  // Authenticate socket connection
   const token = socket.handshake.auth.token;
-  if (token) {
-    // Verify token
-    socket.userId = security.hash(token);
+  if (!token) {
+    socket.userId = null;
+    socket.userRole = 'anonymous';
+    return next();
+  }
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET || '', { algorithms: ['HS256'] });
+    socket.userId = payload.id;
+    socket.userRole = payload.role;
     next();
-  } else {
-    socket.userId = uuidv4();
+  } catch {
+    socket.userId = null;
+    socket.userRole = 'anonymous';
     next();
   }
 });
@@ -1188,29 +1208,17 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3001;
 
-httpServer.listen(PORT, () => {
-  console.log(`
-╔════════════════════════════════════════════════════════════════╗
-║                                                                ║
-║     ███╗   ██╗███████╗██╗  ██╗██╗   ██╗███████╗               ║
-║     ████╗  ██║██╔════╝╚██╗██╔╝██║   ██║██╔════╝               ║
-║     ██╔██╗ ██║█████╗   ╚███╔╝ ██║   ██║███████╗               ║
-║     ██║╚██╗██║██╔══╝   ██╔██╗ ██║   ██║╚════██║               ║
-║     ██║ ╚████║███████╗██╔╝ ██╗╚██████╔╝███████║               ║
-║     ╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝               ║
-║                                                                ║
-║              🛡️  NEXUS AI PRO - SECURE SERVER  🛡️              ║
-║                                                                ║
-║     🔒 Military-Grade AES-256-GCM Encryption: ACTIVE          ║
-║     🛡️  Auto-Patching: ENABLED                                ║
-║     📡 Server running on port ${PORT}                            ║
-║     🔐 Security Status: SECURE                                 ║
-║                                                                ║
-╚════════════════════════════════════════════════════════════════╝
-  `);
+httpServer.listen(PORT, async () => {
+  // Seed admin user from env vars (no-op if already exists)
+  await seedAdmin().catch(err => console.error('[startup] seedAdmin failed:', err.message));
 
   // Initial security scan
-  security.scanVulnerabilities();
+  security.scanVulnerabilities().catch(() => {});
+
+  const isDev = process.env.NODE_ENV !== 'production';
+  if (isDev) {
+    console.log(`[nexus-ai-pro] Server listening on port ${PORT} (${process.env.NODE_ENV || 'development'})`);
+  }
 });
 
 export default app;

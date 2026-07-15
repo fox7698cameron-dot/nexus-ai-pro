@@ -4,6 +4,11 @@
 */
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { securityService } from './src/security-service.js';
+import AuthService from './src/auth/AuthService.js';
+import AuthDashboard from './src/components/AuthDashboard.jsx';
+import AdminDashboard from './src/components/AdminDashboard.jsx';
+import DeveloperDashboard from './src/components/DeveloperDashboard.jsx';
+import ModeratorDashboard from './src/components/ModeratorDashboard.jsx';
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
   Settings, Menu, X, Plus, Trash2, Download, Upload,
@@ -2150,4 +2155,97 @@ export default function NexusAI() {
     </div>
   );
 }
+
+// ─── Role-based root router ────────────────────────────────────────────────────
+
+function RoleRouter() {
+  const [authState, setAuthState] = useState(() => ({
+    isAuthenticated: AuthService.isAuthenticated(),
+    role: AuthService.getRole(),
+  }));
+
+  useEffect(() => {
+    function onStorage() {
+      setAuthState({
+        isAuthenticated: AuthService.isAuthenticated(),
+        role: AuthService.getRole(),
+      });
+    }
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
+  function handleAuthSuccess() {
+    setAuthState({
+      isAuthenticated: AuthService.isAuthenticated(),
+      role: AuthService.getRole(),
+    });
+  }
+
+  function handleLogout() {
+    AuthService.logout();
+    setAuthState({ isAuthenticated: false, role: null });
+  }
+
+  if (!authState.isAuthenticated) {
+    return <AuthDashboard onAuthenticated={handleAuthSuccess} />;
+  }
+
+  const role = authState.role;
+
+  if (role === 'admin') {
+    return (
+      <div>
+        <RoleTopBar role={role} onLogout={handleLogout} />
+        <AdminDashboard />
+      </div>
+    );
+  }
+  if (role === 'developer') {
+    return (
+      <div>
+        <RoleTopBar role={role} onLogout={handleLogout} />
+        <DeveloperDashboard />
+      </div>
+    );
+  }
+  if (role === 'moderator') {
+    return (
+      <div>
+        <RoleTopBar role={role} onLogout={handleLogout} />
+        <ModeratorDashboard />
+      </div>
+    );
+  }
+
+  // Default: regular user gets the full AI chat interface
+  return <NexusAI onLogout={handleLogout} />;
+}
+
+function RoleTopBar({ role, onLogout }) {
+  const COLORS = { admin: '#ef4444', developer: '#a855f7', moderator: '#3b82f6' };
+  const color = COLORS[role] ?? '#6b7280';
+  return (
+    <div style={{
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      padding: '10px 20px', background: '#0f0f1a', borderBottom: '1px solid #2d2d44',
+      fontFamily: 'system-ui, -apple-system, sans-serif',
+    }}>
+      <div style={{ fontWeight: 700, fontSize: 16, color: '#e2e8f0' }}>
+        Nexus AI Pro
+        <span style={{ marginLeft: 10, padding: '2px 8px', background: `${color}22`, color, borderRadius: 8, fontSize: 11, fontWeight: 700 }}>
+          {role.toUpperCase()}
+        </span>
+      </div>
+      <button onClick={onLogout} style={{
+        padding: '6px 14px', background: 'rgba(239,68,68,0.15)', color: '#ef4444',
+        border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+      }}>
+        Logout
+      </button>
+    </div>
+  );
+}
+
+export { RoleRouter as default, NexusAI };
 

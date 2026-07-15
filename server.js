@@ -16,6 +16,18 @@ import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
 
+// ─── Feature route modules ────────────────────────────────────────────────────
+import authRouter      from './src/routes/auth.js';
+import analyticsRouter from './src/routes/analytics.js';
+import paymentsRouter  from './src/routes/payments.js';
+import projectsRouter  from './src/routes/projects.js';
+import gamesRouter     from './src/routes/games.js';
+import connectorsRouter from './src/routes/connectors.js';
+import adminRouter     from './src/routes/admin.js';
+import developerRouter from './src/routes/developer.js';
+import moderatorRouter from './src/routes/moderator.js';
+import translateRouter from './src/routes/translate.js';
+
 dotenv.config();
 
 const app = express();
@@ -842,6 +854,20 @@ app.get('/api/health', (req, res) => {
     timestamp: Date.now()
   });
 });
+
+// ─── Feature routers ──────────────────────────────────────────────────────────
+app.use('/api/auth/login',    authLimiter);
+app.use('/api/auth/register', authLimiter);
+app.use('/api/auth',          authRouter);
+app.use('/api/analytics',  analyticsRouter);
+app.use('/api/payments',   paymentsRouter);
+app.use('/api/projects',   projectsRouter);
+app.use('/api/games',      gamesRouter);
+app.use('/api/connectors', connectorsRouter);
+app.use('/api/admin',      adminRouter);
+app.use('/api/developer',  developerRouter);
+app.use('/api/moderator',  moderatorRouter);
+app.use('/api/translate',  translateRouter);
 
 // Security endpoints
 app.get('/api/security/status', (req, res) => {

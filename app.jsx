@@ -1,9 +1,16 @@
-/* app.jsx
-   Updated: make UI more responsive for mobile/desktop, persist model selection, chats, memories, settings,
-   ensure AES-256 label present, and small responsive CSS tweaks.
-*/
+// Copyright © 2025-2026 Cameron Fox. All rights reserved.
+// app.jsx — 2026-07-16
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { securityService } from './src/security-service.js';
+import './src/i18n/index.js';
+import { useTranslation } from 'react-i18next';
+import { AuthSystem } from './src/components/AuthSystem.jsx';
+import { AnalyticsDashboard } from './src/components/AnalyticsDashboard.jsx';
+import { SecurityDashboardFull } from './src/components/SecurityDashboardFull.jsx';
+import { GameDevTracker } from './src/components/GameDevTracker.jsx';
+import { PaymentSystem } from './src/components/PaymentSystem.jsx';
+import { AdminDashboard, DeveloperDashboard, ModeratorDashboard, UserDashboard } from './src/components/RoleDashboards.jsx';
+import { SUPPORTED_LANGUAGES } from './src/i18n/index.js';
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
   Settings, Menu, X, Plus, Trash2, Download, Upload,
@@ -461,8 +468,15 @@ const TOOLS = {
   appdev: { name: 'App Dev', icon: Smartphone, description: 'Application development' },
   automation: { name: 'Automation', icon: Workflow, description: 'N8N-style workflows' },
   deploy: { name: 'Deploy', icon: Rocket, description: 'App deployment' },
-  security: { name: 'Security', icon: Shield, description: 'Security analysis' },
-  schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' }
+  security: { name: 'Security', icon: Shield, description: 'Real-time security dashboard' },
+  schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' },
+  analytics: { name: 'Analytics', icon: BarChart3, description: 'Social media analytics' },
+  gametracker: { name: 'Game Tracker', icon: Gamepad2, description: 'Game/AR/VR project tracking' },
+  subscription: { name: 'Subscription', icon: Star, description: 'Manage your plan' },
+  profile: { name: 'Profile', icon: User, description: 'Your account & settings' },
+  admin: { name: 'Admin', icon: ShieldCheck, description: 'Admin dashboard' },
+  devpanel: { name: 'Dev Panel', icon: Cpu, description: 'Developer tools & API' },
+  modpanel: { name: 'Mod Panel', icon: ShieldAlert, description: 'Moderation tools' },
 };
 
 // ============================================
@@ -595,9 +609,77 @@ const WORKFLOW_NODES = {
 };
 
 // ============================================
+// LANGUAGE SWITCHER COMPONENT
+// ============================================
+function LanguageSwitcher() {
+  const { i18n } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const current = SUPPORTED_LANGUAGES.find(l => l.code === i18n.language) || SUPPORTED_LANGUAGES[0];
+
+  const switchLang = (code) => {
+    i18n.changeLanguage(code);
+    localStorage.setItem('nexus:language', code);
+    const dir = SUPPORTED_LANGUAGES.find(l => l.code === code)?.dir || 'ltr';
+    document.documentElement.setAttribute('dir', dir);
+    setOpen(false);
+  };
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button onClick={() => setOpen(v => !v)} style={{
+        background: '#1f2937', border: '1px solid #374151', borderRadius: 6,
+        color: '#e5e7eb', padding: '4px 8px', cursor: 'pointer', fontSize: 12,
+        display: 'flex', alignItems: 'center', gap: 4,
+      }}>
+        {current.flag} {current.code.toUpperCase()}
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', right: 0, marginTop: 4, zIndex: 1000,
+          background: '#1f2937', border: '1px solid #374151', borderRadius: 8, overflow: 'hidden', minWidth: 160,
+        }}>
+          {SUPPORTED_LANGUAGES.map(l => (
+            <button key={l.code} onClick={() => switchLang(l.code)} style={{
+              display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 12px',
+              background: l.code === i18n.language ? '#374151' : 'none', border: 'none',
+              color: '#e5e7eb', cursor: 'pointer', fontSize: 13, textAlign: 'left',
+            }}>
+              {l.flag} {l.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================
 // MAIN APP COMPONENT
 // ============================================
 export default function NexusAI() {
+  const { t } = useTranslation();
+
+  // Auth state
+  const [currentUser, setCurrentUser] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('nexus:user') || 'null'); } catch { return null; }
+  });
+  const [showAuth, setShowAuth] = useState(!localStorage.getItem('nexus:token'));
+
+  const handleAuthSuccess = useCallback((user, token) => {
+    setCurrentUser(user);
+    setShowAuth(false);
+    localStorage.setItem('nexus:user', JSON.stringify(user));
+    localStorage.setItem('nexus:token', token);
+  }, []);
+
+  const handleSignOut = useCallback(() => {
+    localStorage.removeItem('nexus:token');
+    localStorage.removeItem('nexus:refresh_token');
+    localStorage.removeItem('nexus:user');
+    setCurrentUser(null);
+    setShowAuth(true);
+  }, []);
+
   // State
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -615,6 +697,10 @@ export default function NexusAI() {
   const [gameTemplate, setGameTemplate] = useState(null);
   const [appTemplate, setAppTemplate] = useState(null);
   const [showToolContent, setShowToolContent] = useState(false);
+
+  if (showAuth) {
+    return <AuthSystem onAuthSuccess={handleAuthSuccess} />;
+  }
 
   // Security Dashboard State
   const [securityScan, setSecurityScan] = useState({
@@ -912,10 +998,12 @@ export default function NexusAI() {
             <Lock size={10} />
             <span>AES-256</span>
           </div>
+          <LanguageSwitcher />
           <button className="icon-btn" onClick={() => setIsMemoryOpen(!isMemoryOpen)}><Brain size={20} /></button>
           <button className="icon-btn" onClick={() => setIsCallActive(true)}><Phone size={20} /></button>
           <button className="icon-btn" onClick={() => setIsSettingsOpen(true)}><Settings size={20} /></button>
-          <div className="user-avatar">{userAvatar?.emoji || '≡ƒæñ'}</div>
+          <button className="icon-btn" title="Sign out" onClick={handleSignOut}><User size={20} /></button>
+          <div className="user-avatar" title={currentUser?.username || currentUser?.email}>{currentUser?.username?.[0]?.toUpperCase() || userAvatar?.emoji || '?'}</div>
         </div>
       </header>
 
@@ -946,7 +1034,7 @@ export default function NexusAI() {
             {Object.entries(TOOLS).map(([key, tool]) => {
               const Icon = tool.icon;
               return (
-                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security'].includes(key)) setShowToolContent(true); }}>
+                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security', 'analytics', 'gametracker', 'subscription', 'profile', 'admin', 'devpanel', 'modpanel'].includes(key)) setShowToolContent(true); else setShowToolContent(false); }}>
                   <Icon size={18} />
                   <span>{tool.name}</span>
                 </button>
@@ -995,112 +1083,59 @@ export default function NexusAI() {
             </div>
           )}
 
-          {/* Security Dashboard */}
+          {/* Security Dashboard — Full */}
           {showToolContent && activeTool === 'security' && (
-            <div className="tool-content security-dashboard">
-              <div className="panel-header">
-                <ShieldCheck size={18} />
-                <h3>Security Dashboard</h3>
-              </div>
-              
-              <div className="security-grid">
-                {/* Overall Score */}
-                <div className="security-card score-card">
-                  <div className="score-circle">
-                    <div className="score-value">{securityScan.overallScore}</div>
-                    <div className="score-label">Security Score</div>
-                  </div>
-                  <div className="score-status">
-                    <div className="status-item">
-                      <ShieldCheck size={16} style={{ color: '#10b981' }} />
-                      <span>Encryption: {securityScan.encryptionStatus.toUpperCase()}</span>
-                    </div>
-                    <div className="status-item">
-                      <Lock size={16} style={{ color: '#3b82f6' }} />
-                      <span>AES-256-GCM Active</span>
-                    </div>
-                  </div>
-                </div>
+            <div style={{ position: 'absolute', inset: 0, zIndex: 10, overflow: 'auto' }}>
+              <SecurityDashboardFull />
+            </div>
+          )}
 
-                {/* Scan Button */}
-                <div className="security-card action-card">
-                  <button 
-                    className={`scan-btn ${securityScan.isScanning ? 'scanning' : ''}`}
-                    onClick={runSecurityScan}
-                    disabled={securityScan.isScanning}
-                  >
-                    {securityScan.isScanning ? (
-                      <>
-                        <Loader2 size={18} className="spin" />
-                        Scanning...
-                      </>
-                    ) : (
-                      <>
-                        <Zap size={18} />
-                        Run Full Scan
-                      </>
-                    )}
-                  </button>
-                  {securityScan.lastScanTime && (
-                    <div className="scan-time">
-                      Last scan: {new Date(securityScan.lastScanTime).toLocaleTimeString()}
-                    </div>
-                  )}
-                </div>
+          {/* Analytics Dashboard */}
+          {showToolContent && activeTool === 'analytics' && (
+            <div style={{ position: 'absolute', inset: 0, zIndex: 10, overflow: 'auto' }}>
+              <AnalyticsDashboard />
+            </div>
+          )}
 
-                {/* Vulnerabilities */}
-                <div className="security-card vulnerabilities-card">
-                  <h4><AlertTriangle size={16} /> Vulnerabilities</h4>
-                  <div className="vuln-list">
-                    {securityScan.vulnerabilities.length > 0 ? (
-                      securityScan.vulnerabilities.map(vuln => (
-                        <div key={vuln.id} className={`vuln-item severity-${vuln.severity} status-${vuln.status}`}>
-                          <div className="vuln-header">
-                            <span className={`severity-badge ${vuln.severity}`}>{vuln.severity.toUpperCase()}</span>
-                            <span className="vuln-name">{vuln.name}</span>
-                            <span className={`status-badge ${vuln.status}`}>{vuln.status.toUpperCase()}</span>
-                          </div>
-                          <div className="vuln-desc">{vuln.description}</div>
-                          {vuln.status !== 'patched' && (
-                            <button 
-                              className="patch-btn"
-                              onClick={() => patchVulnerability(vuln.id)}
-                            >
-                              <Wrench size={14} /> Patch Now
-                            </button>
-                          )}
-                        </div>
-                      ))
-                    ) : (
-                      <div className="empty-state">No vulnerabilities detected</div>
-                    )}
-                  </div>
-                </div>
+          {/* Game Dev Tracker */}
+          {showToolContent && activeTool === 'gametracker' && (
+            <div style={{ position: 'absolute', inset: 0, zIndex: 10, overflow: 'auto' }}>
+              <GameDevTracker />
+            </div>
+          )}
 
-                {/* Threats */}
-                <div className="security-card threats-card">
-                  <h4><Network size={16} /> Recent Threats</h4>
-                  <div className="threat-list">
-                    {securityScan.threats.length > 0 ? (
-                      securityScan.threats.map((threat, idx) => (
-                        <div key={idx} className={`threat-item status-${threat.status}`}>
-                          <div className="threat-status">
-                            {threat.status === 'blocked' && <ShieldAlert size={16} style={{ color: '#ef4444' }} />}
-                            {threat.status === 'prevented' && <ShieldCheck size={16} style={{ color: '#10b981' }} />}
-                            {threat.status === 'filtered' && <Eye size={16} style={{ color: '#f59e0b' }} />}
-                          </div>
-                          <div className="threat-info">
-                            <div className="threat-type">{threat.type}</div>
-                            <div className="threat-time">{threat.status.toUpperCase()} ΓÇó {new Date(threat.timestamp).toLocaleTimeString()}</div>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="empty-state">No threats detected</div>
-                    )}
-                  </div>
-                </div>
-              </div>
+          {/* Payment / Subscription */}
+          {showToolContent && activeTool === 'subscription' && (
+            <div style={{ position: 'absolute', inset: 0, zIndex: 10, overflow: 'auto' }}>
+              <PaymentSystem currentPlan={currentUser?.plan} />
+            </div>
+          )}
+
+          {/* Admin Dashboard */}
+          {showToolContent && activeTool === 'admin' && currentUser?.role === 'admin' && (
+            <div style={{ position: 'absolute', inset: 0, zIndex: 10, overflow: 'auto' }}>
+              <AdminDashboard />
+            </div>
+          )}
+
+          {/* Developer Dashboard */}
+          {showToolContent && activeTool === 'devpanel' && ['admin', 'developer'].includes(currentUser?.role) && (
+            <div style={{ position: 'absolute', inset: 0, zIndex: 10, overflow: 'auto' }}>
+              <DeveloperDashboard />
+            </div>
+          )}
+
+          {/* Moderator Dashboard */}
+          {showToolContent && activeTool === 'modpanel' && ['admin', 'moderator'].includes(currentUser?.role) && (
+            <div style={{ position: 'absolute', inset: 0, zIndex: 10, overflow: 'auto' }}>
+              <ModeratorDashboard />
+            </div>
+          )}
+
+          {/* User Profile Dashboard */}
+          {showToolContent && activeTool === 'profile' && (
+            <div style={{ position: 'absolute', inset: 0, zIndex: 10, overflow: 'auto' }}>
+              <UserDashboard user={currentUser} />
             </div>
           )}
 

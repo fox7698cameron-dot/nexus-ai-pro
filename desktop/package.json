@@ -11,8 +11,13 @@
   "private": false,
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/nexus-ai-pro"
+    "url": "https://github.com/fox7698cameron-dot/nexus-ai-pro.git",
+    "directory": "desktop"
   },
+  "bugs": {
+    "url": "https://github.com/fox7698cameron-dot/nexus-ai-pro/issues"
+  },
+  "homepage": "https://github.com/fox7698cameron-dot/nexus-ai-pro#readme",
   "scripts": {
     "start": "electron .",
     "dev": "concurrently \"npm run dev:web --prefix ..\" \"wait-on http://localhost:5173 && electron .\"",
@@ -28,7 +33,12 @@
     "dist:linux": "npm run build && electron-builder --linux --publish never",
     "dist:all": "npm run build && electron-builder --win --mac --linux --publish never",
     "pack": "electron-builder --dir",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "electron-builder install-app-deps",
+    "lint": "eslint . --ext .js,.ts",
+    "lint:fix": "eslint . --ext .js,.ts --fix",
+    "format": "prettier --write \"**/*.{js,ts,json}\"",
+    "format:check": "prettier --check \"**/*.{js,ts,json}\"",
+    "type-check": "tsc --noEmit"
   },
   "build": {
     "appId": "com.cameronfox.nexusaipro",
@@ -55,15 +65,22 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64", "ia32"]
+          "arch": [
+            "x64",
+            "ia32"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "build/icon.ico",
@@ -71,18 +88,26 @@
       "verifyUpdateCodeSignature": false,
       "certificateFile": null,
       "certificatePassword": null,
-      "signingHashAlgorithms": ["sha256"],
+      "signingHashAlgorithms": [
+        "sha256"
+      ],
       "requestedExecutionLevel": "asInvoker"
     },
     "mac": {
       "target": [
         {
           "target": "dmg",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
       ],
       "icon": "build/icon.icns",
@@ -98,23 +123,37 @@
       "target": [
         {
           "target": "AppImage",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         },
         {
           "target": "deb",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         },
         {
           "target": "rpm",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         },
         {
           "target": "snap",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "tar.gz",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
       ],
       "icon": "build/icons",
@@ -195,7 +234,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "yourusername",
+      "owner": "fox7698cameron-dot",
       "repo": "nexus-ai-pro",
       "private": false,
       "releaseType": "release"
@@ -207,11 +246,19 @@
     "keytar": "^7.9.0"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2",
-    "electron": "^28.2.0",
-    "electron-builder": "^24.13.3",
+    "@types/electron": "^31.3.0",
+    "@types/node": "^22.10.5",
+    "@typescript-eslint/eslint-plugin": "^8.18.0",
+    "@typescript-eslint/parser": "^8.18.0",
+    "concurrently": "^9.1.2",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.0",
     "electron-notarize": "^1.2.2",
     "electron-updater": "^6.1.8",
+    "eslint": "^9.17.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.6.3",
     "wait-on": "^7.2.0"
   },
   "engines": {

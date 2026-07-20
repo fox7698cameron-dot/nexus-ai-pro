@@ -36,10 +36,10 @@ export default defineConfig({
     },
     rollupOptions: {
       output: {
-        manualChunks: {
-          'react-vendor': ['react', 'react-dom'],
-          'ai-vendor': ['@anthropic-ai/sdk', 'openai'],
-          'ui-vendor': ['lucide-react']
+        manualChunks(id) {
+          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) return 'react-vendor';
+          if (id.includes('@anthropic-ai') || id.includes('node_modules/openai')) return 'ai-vendor';
+          if (id.includes('node_modules/lucide-react')) return 'ui-vendor';
         }
       }
     },

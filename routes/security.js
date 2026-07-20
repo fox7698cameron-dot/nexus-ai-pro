@@ -55,21 +55,13 @@ const firewallRules = [
 function requireAuth(req, res, next) {
   const auth = req.headers.authorization || '';
   if (!auth.startsWith('Bearer ')) {
-    // In development without a token, allow through with a guest userId
     req.userId = 'guest';
     return next();
   }
-  try {
-    // Only verify when secret is configured; otherwise pass through
-    if (process.env.JWT_SECRET) {
-      const { createVerify } = await import('crypto');
-      // lightweight check – real apps should use jsonwebtoken
-    }
-    req.userId = 'authenticated-user';
-    next();
-  } catch {
-    return res.status(401).json({ error: 'Invalid token' });
-  }
+  // When JWT_SECRET is configured, real apps should verify with jsonwebtoken.
+  // For now, accept any Bearer token and mark as authenticated.
+  req.userId = 'authenticated-user';
+  next();
 }
 
 // Simpler synchronous auth guard used below

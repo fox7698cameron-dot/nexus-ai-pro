@@ -1,4 +1,21 @@
 import React, { useState, useEffect } from 'react';
+import { securityService } from './security-service.js';
+
+// Unified bridge: prefers Electron IPC when available, falls back to HTTP API
+const securityBridge = {
+  async getDashboard() {
+    if (window.electron?.security) return window.electron.security.getDashboard();
+    return securityService.getDashboard();
+  },
+  async runScan() {
+    if (window.electron?.security) return window.electron.security.runScan();
+    return securityService.runScan();
+  },
+  async patchVulnerability(vulnId) {
+    if (window.electron?.security) return window.electron.security.patchVulnerability(vulnId);
+    return securityService.patchVulnerability(vulnId);
+  },
+};
 
 const SecurityDashboard = () => {
   const [dashboard, setDashboard] = useState(null);
@@ -11,7 +28,7 @@ const SecurityDashboard = () => {
 
   const loadDashboard = async () => {
     try {
-      const data = await window.electron.security.getDashboard();
+      const data = await securityBridge.getDashboard();
       setDashboard(data);
       setError(null);
     } catch (err) {
@@ -23,8 +40,8 @@ const SecurityDashboard = () => {
   const handleScan = async () => {
     setIsScanning(true);
     try {
-      const data = await window.electron.security.runScan();
-      setDashboard(data);
+      const data = await securityBridge.runScan();
+      setDashboard(prev => ({ ...(prev || {}), ...data }));
       setError(null);
     } catch (err) {
       console.error('Scan failed:', err);
@@ -36,7 +53,7 @@ const SecurityDashboard = () => {
 
   const handlePatchVulnerability = async (vulnId) => {
     try {
-      const result = await window.electron.security.patchVulnerability(vulnId);
+      const result = await securityBridge.patchVulnerability(vulnId);
       if (result.success && dashboard) {
         const updated = {
           ...dashboard,

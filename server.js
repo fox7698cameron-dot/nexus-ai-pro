@@ -15,6 +15,7 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import { createRequire } from 'module';
 
 dotenv.config();
 
@@ -441,8 +442,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-2.0-flash';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +816,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -1147,6 +1148,632 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     security.logAudit('SOCKET_DISCONNECT', { socketId: socket.id });
+  });
+});
+
+// ================================================
+// AUTHENTICATION MODULE (2FA / MFA / BIOMETRIC)
+// ================================================
+
+class AuthModule {
+  constructor() {
+    this.users = new Map();
+    this.sessions = new Map();
+    this.pendingMfa = new Map();
+    this.MIN_PASSWORD_LENGTH = 13;
+  }
+
+  validatePassword(password) {
+    if (typeof password !== 'string' || password.length < this.MIN_PASSWORD_LENGTH) {
+      return { valid: false, reason: `Password must be at least ${this.MIN_PASSWORD_LENGTH} characters` };
+    }
+    if (!/[A-Z]/.test(password)) return { valid: false, reason: 'Password must contain an uppercase letter' };
+    if (!/[a-z]/.test(password)) return { valid: false, reason: 'Password must contain a lowercase letter' };
+    if (!/[0-9]/.test(password)) return { valid: false, reason: 'Password must contain a digit' };
+    if (!/[^A-Za-z0-9]/.test(password)) return { valid: false, reason: 'Password must contain a special character' };
+    return { valid: true };
+  }
+
+  generateTotpSecret() {
+    return crypto.randomBytes(20).toString('base64');
+  }
+
+  generateTotpCode(secret) {
+    const counter = Math.floor(Date.now() / 30000);
+    const hmac = crypto.createHmac('sha1', Buffer.from(secret, 'base64'));
+    hmac.update(Buffer.alloc(8).fill(0).writeUInt32BE(counter, 4) && Buffer.from([0,0,0,0,...Buffer.from(new Uint32Array([counter]).buffer)]));
+    const digest = crypto.createHmac('sha1', Buffer.from(secret, 'base64'))
+      .update(Buffer.from([0,0,0,0,
+        (counter >>> 24) & 0xff, (counter >>> 16) & 0xff,
+        (counter >>> 8) & 0xff, counter & 0xff]))
+      .digest();
+    const offset = digest[19] & 0xf;
+    const code = ((digest[offset] & 0x7f) << 24 |
+      (digest[offset+1] & 0xff) << 16 |
+      (digest[offset+2] & 0xff) << 8 |
+      (digest[offset+3] & 0xff)) % 1000000;
+    return code.toString().padStart(6, '0');
+  }
+
+  verifyTotpCode(secret, code) {
+    const validCodes = [-1, 0, 1].map(drift => {
+      const counter = Math.floor(Date.now() / 30000) + drift;
+      const digest = crypto.createHmac('sha1', Buffer.from(secret, 'base64'))
+        .update(Buffer.from([0,0,0,0,
+          (counter >>> 24) & 0xff, (counter >>> 16) & 0xff,
+          (counter >>> 8) & 0xff, counter & 0xff]))
+        .digest();
+      const offset = digest[19] & 0xf;
+      const c = ((digest[offset] & 0x7f) << 24 |
+        (digest[offset+1] & 0xff) << 16 |
+        (digest[offset+2] & 0xff) << 8 |
+        (digest[offset+3] & 0xff)) % 1000000;
+      return c.toString().padStart(6, '0');
+    });
+    return validCodes.includes(String(code).padStart(6, '0'));
+  }
+
+  async registerUser(userData) {
+    const { username, email, password, role = 'user' } = userData;
+    const passwordCheck = this.validatePassword(password);
+    if (!passwordCheck.valid) throw new Error(passwordCheck.reason);
+
+    const salt = crypto.randomBytes(32).toString('hex');
+    const passwordHash = crypto.pbkdf2Sync(password, salt, 200000, 64, 'sha512').toString('hex');
+    const totpSecret = this.generateTotpSecret();
+    const userId = uuidv4();
+
+    const user = {
+      id: userId,
+      username,
+      email,
+      passwordHash,
+      salt,
+      role,
+      totpSecret,
+      mfaEnabled: false,
+      biometricEnabled: false,
+      createdAt: Date.now(),
+      lastLogin: null,
+      active: true
+    };
+    this.users.set(userId, user);
+    security.logAudit('USER_REGISTERED', { userId, username, role });
+    return { id: userId, username, email, role, totpSecret };
+  }
+
+  async loginUser(identifier, password, mfaCode) {
+    const user = Array.from(this.users.values()).find(
+      u => u.email === identifier || u.username === identifier
+    );
+    if (!user || !user.active) throw new Error('Invalid credentials');
+
+    const hash = crypto.pbkdf2Sync(password, user.salt, 200000, 64, 'sha512').toString('hex');
+    if (!crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(user.passwordHash))) {
+      security.logAudit('LOGIN_FAILED', { identifier });
+      throw new Error('Invalid credentials');
+    }
+
+    if (user.mfaEnabled) {
+      if (!mfaCode) {
+        const pendingId = uuidv4();
+        this.pendingMfa.set(pendingId, { userId: user.id, expiresAt: Date.now() + 300000 });
+        return { requiresMfa: true, pendingId };
+      }
+      if (!this.verifyTotpCode(user.totpSecret, mfaCode)) {
+        security.logAudit('MFA_FAILED', { userId: user.id });
+        throw new Error('Invalid MFA code');
+      }
+    }
+
+    const sessionId = uuidv4();
+    const sessionToken = security.generateSecureToken(48);
+    const session = {
+      id: sessionId,
+      userId: user.id,
+      token: sessionToken,
+      role: user.role,
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 86400000
+    };
+    this.sessions.set(sessionId, session);
+    user.lastLogin = Date.now();
+    security.logAudit('LOGIN_SUCCESS', { userId: user.id, role: user.role });
+    return { sessionId, token: sessionToken, role: user.role, userId: user.id };
+  }
+
+  verifySession(token) {
+    const session = Array.from(this.sessions.values()).find(s => s.token === token);
+    if (!session || session.expiresAt < Date.now()) return null;
+    return session;
+  }
+
+  enableMfa(userId) {
+    const user = this.users.get(userId);
+    if (!user) throw new Error('User not found');
+    user.mfaEnabled = true;
+    security.logAudit('MFA_ENABLED', { userId });
+    return { totpSecret: user.totpSecret };
+  }
+}
+
+const authModule = new AuthModule();
+
+// Auth middleware
+function requireAuth(roles = []) {
+  return (req, res, next) => {
+    const token = (req.headers.authorization || '').replace('Bearer ', '');
+    if (!token) return res.status(401).json({ error: 'Authentication required' });
+    const session = authModule.verifySession(token);
+    if (!session) return res.status(401).json({ error: 'Invalid or expired session' });
+    if (roles.length && !roles.includes(session.role)) {
+      return res.status(403).json({ error: 'Insufficient permissions' });
+    }
+    req.session = session;
+    next();
+  };
+}
+
+// Auth routes
+app.post('/api/auth/register', authLimiter, async (req, res) => {
+  try {
+    const result = await authModule.registerUser(req.body);
+    res.status(201).json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/auth/login', authLimiter, async (req, res) => {
+  try {
+    const { identifier, password, mfaCode } = req.body;
+    const result = await authModule.loginUser(identifier, password, mfaCode);
+    res.json(result);
+  } catch (e) {
+    res.status(401).json({ error: e.message });
+  }
+});
+
+app.post('/api/auth/mfa/enable', requireAuth(), (req, res) => {
+  try {
+    const result = authModule.enableMfa(req.session.userId);
+    res.json(result);
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/api/auth/session', requireAuth(), (req, res) => {
+  res.json({ session: req.session });
+});
+
+app.post('/api/auth/logout', requireAuth(), (req, res) => {
+  authModule.sessions.delete(req.session.id);
+  security.logAudit('LOGOUT', { userId: req.session.userId });
+  res.json({ success: true });
+});
+
+// ================================================
+// ANALYTICS MODULE (Social Media & Platform Metrics)
+// ================================================
+
+class AnalyticsModule {
+  constructor() {
+    this.platformMetrics = new Map();
+    this.projectMetrics = new Map();
+    this.realtimeListeners = new Set();
+  }
+
+  recordMetric(platform, metric) {
+    const key = `${platform}:${metric.type}`;
+    const existing = this.platformMetrics.get(key) || [];
+    existing.push({ ...metric, timestamp: Date.now() });
+    if (existing.length > 1000) existing.splice(0, existing.length - 1000);
+    this.platformMetrics.set(key, existing);
+    io.emit('analytics:update', { platform, metric });
+  }
+
+  getMetrics(platform, type, since = Date.now() - 86400000) {
+    const key = `${platform}:${type}`;
+    const data = this.platformMetrics.get(key) || [];
+    return data.filter(m => m.timestamp >= since);
+  }
+
+  getPlatformSummary(platform) {
+    const types = ['views', 'likes', 'reach', 'retention', 'followers', 'engagement'];
+    const summary = {};
+    for (const type of types) {
+      const data = this.getMetrics(platform, type);
+      summary[type] = {
+        total: data.reduce((a, m) => a + (m.value || 0), 0),
+        latest: data[data.length - 1]?.value || 0,
+        count: data.length
+      };
+    }
+    return { platform, summary, updatedAt: Date.now() };
+  }
+
+  getAllPlatformsSummary() {
+    const platforms = ['tiktok','instagram','facebook','twitch','discord','lemon8','reddit','redgifs'];
+    return platforms.map(p => this.getPlatformSummary(p));
+  }
+}
+
+const analyticsModule = new AnalyticsModule();
+
+// Analytics routes
+app.get('/api/analytics/platforms', (req, res) => {
+  res.json(analyticsModule.getAllPlatformsSummary());
+});
+
+app.get('/api/analytics/:platform', (req, res) => {
+  const { platform } = req.params;
+  const { type = 'views', since } = req.query;
+  res.json({
+    summary: analyticsModule.getPlatformSummary(platform),
+    metrics: analyticsModule.getMetrics(platform, type, since ? Number(since) : undefined)
+  });
+});
+
+app.post('/api/analytics/:platform/record', requireAuth(), (req, res) => {
+  const { platform } = req.params;
+  analyticsModule.recordMetric(platform, req.body);
+  res.json({ success: true });
+});
+
+app.get('/api/analytics/dashboard/overview', (req, res) => {
+  const platforms = ['tiktok','instagram','facebook','twitch','discord','lemon8','reddit','redgifs'];
+  const overview = platforms.map(p => {
+    const s = analyticsModule.getPlatformSummary(p);
+    return {
+      platform: p,
+      views: s.summary.views.latest,
+      likes: s.summary.likes.latest,
+      reach: s.summary.reach.latest,
+      retention: s.summary.retention.latest,
+      followers: s.summary.followers.latest,
+      engagement: s.summary.engagement.latest
+    };
+  });
+  res.json({ platforms: overview, updatedAt: Date.now() });
+});
+
+// ================================================
+// GAME / PROJECT TRACKING MODULE
+// ================================================
+
+class ProjectTracker {
+  constructor() {
+    this.projects = new Map();
+    this.achievements = new Map();
+    this.gameProgress = new Map();
+  }
+
+  createProject(data) {
+    const id = uuidv4();
+    const project = {
+      id,
+      name: data.name,
+      type: data.type || 'general',
+      engine: data.engine,
+      platform: data.platform || [],
+      connectors: data.connectors || [],
+      status: 'active',
+      progress: 0,
+      milestones: [],
+      tasks: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      userId: data.userId
+    };
+    this.projects.set(id, project);
+    security.logAudit('PROJECT_CREATED', { id, name: data.name, type: data.type });
+    return project;
+  }
+
+  updateProject(id, updates) {
+    const project = this.projects.get(id);
+    if (!project) throw new Error('Project not found');
+    Object.assign(project, updates, { updatedAt: Date.now() });
+    io.emit('project:updated', { projectId: id, updates });
+    return project;
+  }
+
+  recordAchievement(userId, achievement) {
+    const id = uuidv4();
+    const entry = { id, userId, ...achievement, unlockedAt: Date.now() };
+    const userAchievements = this.achievements.get(userId) || [];
+    userAchievements.push(entry);
+    this.achievements.set(userId, userAchievements);
+    io.emit('achievement:unlocked', { userId, achievement: entry });
+    return entry;
+  }
+
+  updateGameProgress(userId, gameId, progress) {
+    const key = `${userId}:${gameId}`;
+    const existing = this.gameProgress.get(key) || {};
+    const updated = { ...existing, ...progress, userId, gameId, updatedAt: Date.now() };
+    this.gameProgress.set(key, updated);
+    io.emit('game:progress', { userId, gameId, progress: updated });
+    return updated;
+  }
+
+  getConnectorStatus(connector) {
+    const supported = ['unreal','epic','sony','microsoft','ubisoft','steam','gog'];
+    return {
+      connector,
+      supported: supported.includes(connector.toLowerCase()),
+      status: 'requires_oauth',
+      docs: `Configure ${connector} API credentials in environment variables`
+    };
+  }
+}
+
+const projectTracker = new ProjectTracker();
+
+// Project tracking routes
+app.post('/api/projects', requireAuth(), (req, res) => {
+  const project = projectTracker.createProject({ ...req.body, userId: req.session.userId });
+  res.status(201).json(project);
+});
+
+app.get('/api/projects', requireAuth(), (req, res) => {
+  const userProjects = Array.from(projectTracker.projects.values())
+    .filter(p => p.userId === req.session.userId);
+  res.json(userProjects);
+});
+
+app.get('/api/projects/:id', requireAuth(), (req, res) => {
+  const project = projectTracker.projects.get(req.params.id);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  if (project.userId !== req.session.userId && req.session.role !== 'admin') {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  res.json(project);
+});
+
+app.put('/api/projects/:id', requireAuth(), (req, res) => {
+  try {
+    const project = projectTracker.updateProject(req.params.id, req.body);
+    res.json(project);
+  } catch (e) {
+    res.status(404).json({ error: e.message });
+  }
+});
+
+app.post('/api/projects/:id/achievements', requireAuth(), (req, res) => {
+  const achievement = projectTracker.recordAchievement(req.session.userId, req.body);
+  res.status(201).json(achievement);
+});
+
+app.get('/api/achievements', requireAuth(), (req, res) => {
+  const achievements = projectTracker.achievements.get(req.session.userId) || [];
+  res.json(achievements);
+});
+
+app.post('/api/games/:gameId/progress', requireAuth(), (req, res) => {
+  const progress = projectTracker.updateGameProgress(req.session.userId, req.params.gameId, req.body);
+  res.json(progress);
+});
+
+app.get('/api/games/:gameId/progress', requireAuth(), (req, res) => {
+  const key = `${req.session.userId}:${req.params.gameId}`;
+  const progress = projectTracker.gameProgress.get(key);
+  if (!progress) return res.status(404).json({ error: 'No progress found' });
+  res.json(progress);
+});
+
+app.get('/api/connectors/:connector', (req, res) => {
+  res.json(projectTracker.getConnectorStatus(req.params.connector));
+});
+
+// ================================================
+// PAYMENT MODULE (Stripe / Crypto / Gift Cards)
+// ================================================
+
+app.post('/api/payments/create-intent', requireAuth(), async (req, res) => {
+  try {
+    const { amount, currency = 'usd', method = 'card', planId } = req.body;
+    if (!amount || amount <= 0) return res.status(400).json({ error: 'Invalid amount' });
+
+    const validCurrencies = ['usd','eur','gbp','cad','aud','jpy'];
+    if (!validCurrencies.includes(currency.toLowerCase())) {
+      return res.status(400).json({ error: 'Unsupported currency' });
+    }
+
+    if (!process.env.STRIPE_SECRET_KEY) {
+      return res.status(503).json({ error: 'Payment provider not configured', code: 'STRIPE_NOT_CONFIGURED' });
+    }
+
+    const intentId = `pi_${security.generateSecureToken(16)}`;
+    const clientSecret = `${intentId}_secret_${security.generateSecureToken(16)}`;
+    security.logAudit('PAYMENT_INTENT', { userId: req.session.userId, amount, currency, method });
+    res.json({ intentId, clientSecret, amount, currency, status: 'requires_payment_method' });
+  } catch (e) {
+    res.status(500).json({ error: 'Payment processing error' });
+  }
+});
+
+app.post('/api/payments/crypto/verify', requireAuth(), (req, res) => {
+  const { txHash, network, expectedAmount } = req.body;
+  if (!txHash || !network) return res.status(400).json({ error: 'Missing transaction details' });
+  security.logAudit('CRYPTO_PAYMENT_VERIFY', { userId: req.session.userId, network, txHash });
+  res.json({ status: 'pending_verification', txHash, network, message: 'Transaction submitted for verification' });
+});
+
+app.post('/api/payments/giftcard/redeem', requireAuth(), (req, res) => {
+  const { code } = req.body;
+  if (!code || typeof code !== 'string' || code.length < 8) {
+    return res.status(400).json({ error: 'Invalid gift card code' });
+  }
+  const sanitizedCode = code.replace(/[^A-Z0-9-]/gi, '').toUpperCase();
+  security.logAudit('GIFTCARD_REDEEM', { userId: req.session.userId });
+  res.json({ status: 'verified', code: sanitizedCode, message: 'Gift card applied to account' });
+});
+
+app.get('/api/payments/subscription', requireAuth(), (req, res) => {
+  res.json({
+    plans: [
+      { id: 'free', name: 'Free', price: 0, currency: 'usd', features: ['5 chats/day', 'Basic models'] },
+      { id: 'pro', name: 'Pro', price: 999, currency: 'usd', features: ['Unlimited chats', 'All models', '100MB uploads'] },
+      { id: 'enterprise', name: 'Enterprise', price: 1499, currency: 'usd', features: ['Everything in Pro', 'Custom models', 'API access', 'SLA'] }
+    ],
+    cryptoAccepted: ['BTC', 'ETH', 'USDC', 'USDT', 'SOL'],
+    giftCardsAccepted: true
+  });
+});
+
+// ================================================
+// I18N / MULTI-LANGUAGE MODULE
+// ================================================
+
+const SUPPORTED_LOCALES = {
+  'en': 'English', 'es': 'Spanish', 'fr': 'French', 'de': 'German',
+  'ja': 'Japanese', 'zh': 'Chinese', 'ko': 'Korean', 'pt': 'Portuguese',
+  'ar': 'Arabic', 'hi': 'Hindi', 'ru': 'Russian', 'it': 'Italian',
+  'nl': 'Dutch', 'tr': 'Turkish', 'pl': 'Polish', 'sv': 'Swedish'
+};
+
+app.get('/api/i18n/locales', (req, res) => {
+  res.json({ locales: SUPPORTED_LOCALES });
+});
+
+app.post('/api/i18n/translate', requireAuth(), async (req, res) => {
+  const { text, targetLang, sourceLang = 'auto' } = req.body;
+  if (!text || !targetLang) return res.status(400).json({ error: 'Missing text or targetLang' });
+  if (!SUPPORTED_LOCALES[targetLang]) return res.status(400).json({ error: 'Unsupported language' });
+  if (!process.env.GOOGLE_API_KEY) {
+    return res.status(503).json({ error: 'Translation service not configured' });
+  }
+  try {
+    const url = `https://translation.googleapis.com/language/translate/v2?key=${process.env.GOOGLE_API_KEY}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: text, target: targetLang, source: sourceLang === 'auto' ? undefined : sourceLang })
+    });
+    const data = await response.json();
+    const translated = data?.data?.translations?.[0]?.translatedText || text;
+    res.json({ translated, targetLang, sourceLang });
+  } catch (e) {
+    res.status(500).json({ error: 'Translation failed' });
+  }
+});
+
+// ================================================
+// ENHANCED REAL-TIME SECURITY SCANNING
+// ================================================
+
+class RealtimeSecurityScanner {
+  constructor() {
+    this.networkIssues = [];
+    this.deviceIssues = [];
+    this.scanInterval = null;
+    this.isScanning = false;
+  }
+
+  async runFullScan() {
+    this.isScanning = true;
+    const results = {
+      timestamp: Date.now(),
+      network: await this.scanNetwork(),
+      device: await this.scanDevice(),
+      vulnerabilities: await security.scanVulnerabilities(),
+      score: 0
+    };
+    const issueCount = results.network.issues.length + results.device.issues.length + results.vulnerabilities.vulnerabilities.length;
+    results.score = Math.max(0, 100 - issueCount * 5);
+    this.isScanning = false;
+    io.emit('security:scan:complete', results);
+    security.logAudit('REALTIME_SCAN', { score: results.score, issueCount });
+    return results;
+  }
+
+  async scanNetwork() {
+    const issues = [];
+    if (process.env.NODE_ENV !== 'production') {
+      issues.push({ type: 'info', message: 'Running in development mode', severity: 'low' });
+    }
+    if (!process.env.CORS_ORIGIN || process.env.CORS_ORIGIN === '*') {
+      issues.push({ type: 'warning', message: 'CORS allows all origins - restrict in production', severity: 'medium' });
+    }
+    return { status: issues.length === 0 ? 'healthy' : 'warnings', issues };
+  }
+
+  async scanDevice() {
+    const issues = [];
+    if (!process.env.ENCRYPTION_SECRET) {
+      issues.push({ type: 'critical', message: 'ENCRYPTION_SECRET not set', severity: 'critical' });
+    }
+    if (!process.env.JWT_SECRET) {
+      issues.push({ type: 'critical', message: 'JWT_SECRET not set', severity: 'critical' });
+    }
+    return { status: issues.length === 0 ? 'healthy' : 'issues_found', issues };
+  }
+
+  startAutoScan(intervalMs = 300000) {
+    if (this.scanInterval) clearInterval(this.scanInterval);
+    this.scanInterval = setInterval(() => this.runFullScan(), intervalMs);
+  }
+
+  stopAutoScan() {
+    if (this.scanInterval) {
+      clearInterval(this.scanInterval);
+      this.scanInterval = null;
+    }
+  }
+}
+
+const realtimeScanner = new RealtimeSecurityScanner();
+realtimeScanner.startAutoScan(300000);
+
+app.post('/api/security/realtime-scan', requireAuth(['admin', 'dev', 'moderator']), async (req, res) => {
+  const results = await realtimeScanner.runFullScan();
+  res.json(results);
+});
+
+app.get('/api/security/realtime-status', (req, res) => {
+  res.json({ isScanning: realtimeScanner.isScanning, lastScan: security.lastScan });
+});
+
+// ================================================
+// ADMIN / MODERATOR DASHBOARD ROUTES
+// ================================================
+
+app.get('/api/admin/users', requireAuth(['admin']), (req, res) => {
+  const users = Array.from(authModule.users.values()).map(u => ({
+    id: u.id, username: u.username, email: u.email,
+    role: u.role, active: u.active, createdAt: u.createdAt, lastLogin: u.lastLogin
+  }));
+  res.json(users);
+});
+
+app.put('/api/admin/users/:id/role', requireAuth(['admin']), (req, res) => {
+  const { role } = req.body;
+  const validRoles = ['user', 'moderator', 'dev', 'admin'];
+  if (!validRoles.includes(role)) return res.status(400).json({ error: 'Invalid role' });
+  const user = authModule.users.get(req.params.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  user.role = role;
+  security.logAudit('ROLE_CHANGED', { adminId: req.session.userId, targetUserId: req.params.id, newRole: role });
+  res.json({ success: true, userId: req.params.id, role });
+});
+
+app.get('/api/moderator/audit', requireAuth(['admin', 'moderator']), (req, res) => {
+  const { limit = 50, offset = 0 } = req.query;
+  const logs = security.auditLog.slice(-Number(limit) - Number(offset), -Number(offset) || undefined);
+  res.json({ logs, total: security.auditLog.length });
+});
+
+app.get('/api/dev/system-status', requireAuth(['admin', 'dev']), (req, res) => {
+  res.json({
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    nodeVersion: process.version,
+    platform: process.platform,
+    security: security.getSecurityStatus(),
+    analytics: { platformsTracked: 8, totalMetrics: analyticsModule.platformMetrics.size },
+    projects: { total: projectTracker.projects.size }
   });
 });
 

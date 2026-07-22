@@ -1,6 +1,6 @@
 -- ================================================
 -- NEXUS AI PRO - Database Initialization
--- PostgreSQL schema for production deployment
+-- 2026-07-22 | PostgreSQL schema for production deployment
 -- ================================================
 
 -- Enable extensions
@@ -12,13 +12,120 @@ CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
+    username VARCHAR(64) NOT NULL DEFAULT '',
     display_name VARCHAR(255),
     avatar_url TEXT,
+    role VARCHAR(20) NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'dev', 'moderator', 'user')),
+    language VARCHAR(10) DEFAULT 'en',
+    region VARCHAR(10) DEFAULT 'US',
+    mfa_enabled BOOLEAN DEFAULT FALSE,
+    mfa_secret TEXT,
+    email_verified BOOLEAN DEFAULT FALSE,
+    verification_token TEXT,
+    biometric_keys JSONB DEFAULT '[]',
     settings JSONB DEFAULT '{}',
-    api_keys JSONB DEFAULT '{}',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     last_login TIMESTAMP WITH TIME ZONE
+);
+
+-- Refresh tokens
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    token_hash VARCHAR(128) UNIQUE NOT NULL,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);
+
+-- Analytics platform metrics
+CREATE TABLE IF NOT EXISTS analytics_metrics (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    platform VARCHAR(50) NOT NULL,
+    metrics JSONB NOT NULL DEFAULT '{}',
+    recorded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_analytics_user_platform ON analytics_metrics(user_id, platform);
+CREATE INDEX IF NOT EXISTS idx_analytics_recorded_at ON analytics_metrics(recorded_at DESC);
+
+-- Game development projects
+CREATE TABLE IF NOT EXISTS game_projects (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    type VARCHAR(20) DEFAULT 'game',
+    engine VARCHAR(50),
+    target_platforms TEXT[],
+    genre VARCHAR(50),
+    team_size INTEGER DEFAULT 1,
+    status VARCHAR(30) DEFAULT 'planning',
+    progress INTEGER DEFAULT 0 CHECK (progress BETWEEN 0 AND 100),
+    milestones JSONB DEFAULT '[]',
+    builds JSONB DEFAULT '[]',
+    connectors JSONB DEFAULT '[]',
+    metrics JSONB DEFAULT '{}',
+    xr_metrics JSONB DEFAULT '{}',
+    start_date DATE,
+    target_release_date DATE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_game_projects_user_id ON game_projects(user_id);
+
+-- Achievements
+CREATE TABLE IF NOT EXISTS achievements (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    project_id UUID REFERENCES game_projects(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    points INTEGER DEFAULT 10,
+    hidden BOOLEAN DEFAULT FALSE,
+    platform VARCHAR(50),
+    icon_url TEXT,
+    unlocked BOOLEAN DEFAULT FALSE,
+    unlocked_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_achievements_user_id ON achievements(user_id);
+
+-- Subscriptions
+CREATE TABLE IF NOT EXISTS subscriptions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE UNIQUE,
+    plan_id VARCHAR(50) NOT NULL DEFAULT 'free',
+    status VARCHAR(30) DEFAULT 'active',
+    stripe_customer_id VARCHAR(100),
+    stripe_subscription_id VARCHAR(100),
+    payment_method VARCHAR(30),
+    started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP WITH TIME ZONE,
+    cancelled_at TIMESTAMP WITH TIME ZONE
+);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id);
+
+-- Gift codes
+CREATE TABLE IF NOT EXISTS gift_codes (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    code VARCHAR(20) UNIQUE NOT NULL,
+    plan_id VARCHAR(50) NOT NULL,
+    used BOOLEAN DEFAULT FALSE,
+    used_by UUID REFERENCES users(id) ON DELETE SET NULL,
+    used_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Platform connectors (no credentials stored — reference only)
+CREATE TABLE IF NOT EXISTS platform_connectors (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    connector_id VARCHAR(50) NOT NULL,
+    connected BOOLEAN DEFAULT FALSE,
+    connected_at TIMESTAMP WITH TIME ZONE,
+    UNIQUE (user_id, connector_id)
 );
 
 -- Chats table

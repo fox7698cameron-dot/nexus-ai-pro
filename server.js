@@ -291,6 +291,25 @@ const requireAuth = (req, res, next) => {
   next();
 };
 
+// Model → minimum subscription tier map
+const MODEL_TIER_MAP = {
+  free: ['gpt4', 'claude-sonnet', 'claude-haiku', 'gemini-flash'],
+  pro: ['gpt5', 'gpt4o', 'o1', 'o1-mini', 'dalle3', 'claude4', 'gemini-ultra', 'gemini-pro',
+        'grok3', 'deepseek-v3', 'deepseek-r1', 'deepseek-coder', 'llama3', 'code-llama',
+        'mistral-large', 'mixtral', 'codestral', 'phi4', 'qwen', 'perplexity',
+        'stable-diffusion'],
+  enterprise: ['sora', 'imagen3', 'veo', 'grok4', 'aurora', 'llama4', 'copilot-pro',
+               'kimi', 'groq', 'midjourney', 'flux', 'ideogram', 'runway', 'pika',
+               'kling', 'luma'],
+};
+const TIER_RANK = { free: 0, pro: 1, enterprise: 2 };
+
+const requireSubscription = (minimumTier) => (req, res, next) => {
+  const userTier = req.user?.subscriptionTier || 'free';
+  if ((TIER_RANK[userTier] ?? 0) >= (TIER_RANK[minimumTier] ?? 0)) return next();
+  res.status(403).json({ error: `This feature requires a ${minimumTier} subscription or higher.` });
+};
+
 // ================================================
 // SOCKET.IO WITH ENCRYPTION
 // ================================================
@@ -957,10 +976,25 @@ app.get('/api/security/encryption-health', (req, res) => {
   });
 });
 
-// Chat completion
+// Chat completion — optional auth; when present, enforce model tier
 app.post('/api/chat', async (req, res) => {
   try {
     const { model, messages, options, encrypt = true } = req.body;
+
+    // Enforce model tier if user is authenticated
+    if (req.headers.authorization) {
+      const token = req.headers.authorization.replace('Bearer ', '');
+      const user = authService.verifySession(token);
+      if (user) {
+        const userTier = user.subscriptionTier || 'free';
+        let requiredTier = 'free';
+        if (model && MODEL_TIER_MAP.enterprise.includes(model)) requiredTier = 'enterprise';
+        else if (model && MODEL_TIER_MAP.pro.includes(model)) requiredTier = 'pro';
+        if ((TIER_RANK[userTier] ?? 0) < (TIER_RANK[requiredTier] ?? 0)) {
+          return res.status(403).json({ error: `Model ${model} requires a ${requiredTier} subscription.` });
+        }
+      }
+    }
 
     // Encrypt messages if required
     let processedMessages = messages;

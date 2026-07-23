@@ -1,5 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import './src/index.css';
 import NexusAI from './app.jsx';
 
 // Security: Disable React DevTools in production

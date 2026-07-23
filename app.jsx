@@ -4,6 +4,10 @@
 */
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { securityService } from './src/security-service.js';
+import AnalyticsDashboard from './src/dashboards/AnalyticsDashboard.jsx';
+import ProjectDashboard from './src/dashboards/ProjectDashboard.jsx';
+import AuthDashboard from './src/dashboards/AuthDashboard.jsx';
+import SecurityDashboardEnhanced from './src/dashboards/SecurityDashboardEnhanced.jsx';
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
   Settings, Menu, X, Plus, Trash2, Download, Upload,
@@ -85,7 +89,7 @@ const SUBSCRIPTION_TIERS = {
     color: 'from-purple-400 to-pink-600',
     textColor: 'text-purple-700',
     bgColor: 'bg-purple-50',
-    models: Object.keys(AI_MODELS),
+    get models() { return Object.keys(AI_MODELS); },
     features: ['Everything in Pro', 'Custom models', 'API access', 'Dedicated support', 'SLA guarantee'],
     badge: '👑',
     reasoningTime: '🔬 Expert',
@@ -615,6 +619,10 @@ export default function NexusAI() {
   const [gameTemplate, setGameTemplate] = useState(null);
   const [appTemplate, setAppTemplate] = useState(null);
   const [showToolContent, setShowToolContent] = useState(false);
+  const [currentView, setCurrentView] = useState('chat');
+  const [authState, setAuthState] = useState({ isLoggedIn: false, user: null, role: null, sessionToken: null });
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [reasoningTier, setReasoningTier] = useState('mid');
 
   // Security Dashboard State
   const [securityScan, setSecurityScan] = useState({
@@ -850,7 +858,7 @@ export default function NexusAI() {
             <Menu size={20} />
           </button>
           {showToolContent && (
-            <button className="back-btn" onClick={() => setShowToolContent(false)}>
+            <button className="back-btn" onClick={() => { setShowToolContent(false); setCurrentView('chat'); }}>
               <ArrowLeft size={18} />
               <span>Back</span>
             </button>
@@ -912,10 +920,24 @@ export default function NexusAI() {
             <Lock size={10} />
             <span>AES-256</span>
           </div>
+          <div className="reasoning-selector">
+            {['mini', 'mid', 'max', 'enterprise'].map(tier => (
+              <button
+                key={tier}
+                className={`reasoning-btn ${reasoningTier === tier ? 'active' : ''}`}
+                onClick={() => setReasoningTier(tier)}
+                title={tier === 'mini' ? 'Fast / Low-cost' : tier === 'mid' ? 'Balanced' : tier === 'max' ? 'Thorough reasoning' : 'Maximum depth'}
+              >{tier}</button>
+            ))}
+          </div>
           <button className="icon-btn" onClick={() => setIsMemoryOpen(!isMemoryOpen)}><Brain size={20} /></button>
           <button className="icon-btn" onClick={() => setIsCallActive(true)}><Phone size={20} /></button>
           <button className="icon-btn" onClick={() => setIsSettingsOpen(true)}><Settings size={20} /></button>
-          <div className="user-avatar">{userAvatar?.emoji || '≡ƒæñ'}</div>
+          <button
+            className={`user-avatar ${authState.isLoggedIn ? 'logged-in' : ''}`}
+            onClick={() => setShowAuthModal(true)}
+            title={authState.isLoggedIn ? `${authState.user?.username} (${authState.role})` : 'Sign in'}
+          >{authState.isLoggedIn ? (userAvatar?.emoji || '👤') : '🔐'}</button>
         </div>
       </header>
 
@@ -930,32 +952,125 @@ export default function NexusAI() {
             </div>
             <div className="chat-list">
               {chats.map(chat => (
-                <div key={chat.id} className={`chat-item ${activeChat === chat.id ? 'active' : ''}`} onClick={() => setActiveChat(chat.id)}>
+                <div key={chat.id} className={`chat-item ${activeChat === chat.id && currentView === 'chat' ? 'active' : ''}`} onClick={() => { setActiveChat(chat.id); setCurrentView('chat'); setShowToolContent(false); }}>
                   <span className="chat-title">{chat.title}</span>
                   <button className="delete-btn" onClick={(e) => { e.stopPropagation(); deleteChat(chat.id); }}><Trash2 size={14} /></button>
                 </div>
               ))}
             </div>
+
+            <div className="sidebar-section">
+              <h4 className="sidebar-section-title"><BarChart3 size={14} /> Dashboards</h4>
+              <button className={`sidebar-nav-btn ${currentView === 'analytics' ? 'active' : ''}`} onClick={() => { setCurrentView('analytics'); setShowToolContent(false); }}>
+                <TrendingUp size={15} /> Analytics
+              </button>
+              <button className={`sidebar-nav-btn ${currentView === 'projects' ? 'active' : ''}`} onClick={() => { setCurrentView('projects'); setShowToolContent(false); }}>
+                <Rocket size={15} /> Projects
+              </button>
+              <button className={`sidebar-nav-btn ${currentView === 'security-enhanced' ? 'active' : ''}`} onClick={() => { setCurrentView('security-enhanced'); setShowToolContent(false); }}>
+                <Shield size={15} /> Security Pro
+              </button>
+            </div>
+
+            {authState.isLoggedIn && ['admin', 'dev', 'moderator'].includes(authState.role) && (
+              <div className="sidebar-section">
+                <h4 className="sidebar-section-title"><Users size={14} /> Role View</h4>
+                {authState.role === 'admin' && (
+                  <button className={`sidebar-nav-btn ${currentView === 'admin' ? 'active' : ''}`} onClick={() => setCurrentView('admin')}>
+                    <ShieldCheck size={15} /> Admin Panel
+                  </button>
+                )}
+                {['admin', 'dev'].includes(authState.role) && (
+                  <button className={`sidebar-nav-btn ${currentView === 'dev' ? 'active' : ''}`} onClick={() => setCurrentView('dev')}>
+                    <Terminal size={15} /> Dev Console
+                  </button>
+                )}
+                {['admin', 'moderator'].includes(authState.role) && (
+                  <button className={`sidebar-nav-btn ${currentView === 'moderator' ? 'active' : ''}`} onClick={() => setCurrentView('moderator')}>
+                    <Eye size={15} /> Moderator
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         )}
 
         {/* Chat Area */}
         <main className="chat-area">
           {/* Tool Panel */}
+          {currentView === 'chat' && (
           <div className="tool-panel">
             {Object.entries(TOOLS).map(([key, tool]) => {
               const Icon = tool.icon;
               return (
-                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security'].includes(key)) setShowToolContent(true); }}>
+                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => {
+                  setActiveTool(key);
+                  if (key === 'security') { setCurrentView('security-enhanced'); setShowToolContent(false); }
+                  else if (['gamedev', 'appdev', 'automation'].includes(key)) setShowToolContent(true);
+                  else setShowToolContent(false);
+                }}>
                   <Icon size={18} />
                   <span>{tool.name}</span>
                 </button>
               );
             })}
+            <div className="reasoning-tier-tag">
+              <Cpu size={13} />
+              <span>{reasoningTier}</span>
+            </div>
           </div>
+          )}
+
+          {/* Dashboard Views */}
+          {currentView === 'analytics' && (
+            <div className="dashboard-view">
+              <AnalyticsDashboard userId={authState.user?.id || 'demo'} socket={null} locale='en' />
+            </div>
+          )}
+          {currentView === 'projects' && (
+            <div className="dashboard-view">
+              <ProjectDashboard userId={authState.user?.id || 'demo'} socket={null} />
+            </div>
+          )}
+          {currentView === 'security-enhanced' && (
+            <div className="dashboard-view">
+              <SecurityDashboardEnhanced socket={null} />
+            </div>
+          )}
+          {currentView === 'admin' && authState.role === 'admin' && (
+            <div className="dashboard-view role-dashboard admin-dashboard">
+              <div className="role-header"><ShieldCheck size={22} /><h2>Admin Panel</h2><span className="role-badge admin">ADMIN</span></div>
+              <div className="role-grid">
+                <div className="role-card"><Users size={20} /><h4>Users</h4><p>Manage all user accounts, roles, and permissions</p><button className="role-action-btn" onClick={() => window.open('/api/admin/users', '_blank')}>View Users</button></div>
+                <div className="role-card"><Activity size={20} /><h4>Audit Log</h4><p>Review security events and system activity</p><button className="role-action-btn" onClick={() => window.open('/api/security/audit', '_blank')}>View Logs</button></div>
+                <div className="role-card"><Shield size={20} /><h4>Security</h4><p>Platform security configuration and monitoring</p><button className="role-action-btn" onClick={() => setCurrentView('security-enhanced')}>Open Security</button></div>
+                <div className="role-card"><Database size={20} /><h4>Storage</h4><p>Blob storage and cache status</p><button className="role-action-btn" onClick={() => window.open('/api/storage/status', '_blank')}>View Storage</button></div>
+              </div>
+            </div>
+          )}
+          {currentView === 'dev' && ['admin', 'dev'].includes(authState.role) && (
+            <div className="dashboard-view role-dashboard dev-dashboard">
+              <div className="role-header"><Terminal size={22} /><h2>Dev Console</h2><span className="role-badge dev">DEV</span></div>
+              <div className="role-grid">
+                <div className="role-card"><Rocket size={20} /><h4>Projects</h4><p>Access all project tracking and builds</p><button className="role-action-btn" onClick={() => setCurrentView('projects')}>Open Projects</button></div>
+                <div className="role-card"><GitBranch size={20} /><h4>Workflows</h4><p>Manage automation workflows and executions</p><button className="role-action-btn" onClick={() => { setActiveTool('automation'); setCurrentView('chat'); }}>Open Workflows</button></div>
+                <div className="role-card"><Code size={20} /><h4>API Health</h4><p>Monitor API endpoints and performance</p><button className="role-action-btn" onClick={() => window.open('/api/health', '_blank')}>Check Health</button></div>
+                <div className="role-card"><Cloud size={20} /><h4>Connectors</h4><p>Manage third-party integrations</p><button className="role-action-btn" onClick={() => window.open('/api/connectors/supported', '_blank')}>View Connectors</button></div>
+              </div>
+            </div>
+          )}
+          {currentView === 'moderator' && ['admin', 'moderator'].includes(authState.role) && (
+            <div className="dashboard-view role-dashboard mod-dashboard">
+              <div className="role-header"><Eye size={22} /><h2>Moderator</h2><span className="role-badge mod">MOD</span></div>
+              <div className="role-grid">
+                <div className="role-card"><AlertTriangle size={20} /><h4>Security Alerts</h4><p>Review flagged events and threats</p><button className="role-action-btn" onClick={() => window.open('/api/security/alerts', '_blank')}>View Alerts</button></div>
+                <div className="role-card"><Activity size={20} /><h4>Platform Activity</h4><p>Monitor analytics across all platforms</p><button className="role-action-btn" onClick={() => setCurrentView('analytics')}>View Analytics</button></div>
+              </div>
+            </div>
+          )}
 
           {/* Tool Content Panels */}
-          {showToolContent && activeTool === 'gamedev' && (
+          {currentView === 'chat' && showToolContent && activeTool === 'gamedev' && (
             <div className="tool-content">
               <div className="panel-header">
                 <Gamepad2 size={18} />
@@ -977,7 +1092,7 @@ export default function NexusAI() {
             </div>
           )}
 
-          {showToolContent && activeTool === 'appdev' && (
+          {currentView === 'chat' && showToolContent && activeTool === 'appdev' && (
             <div className="tool-content">
               <div className="panel-header">
                 <Smartphone size={18} />
@@ -995,117 +1110,8 @@ export default function NexusAI() {
             </div>
           )}
 
-          {/* Security Dashboard */}
-          {showToolContent && activeTool === 'security' && (
-            <div className="tool-content security-dashboard">
-              <div className="panel-header">
-                <ShieldCheck size={18} />
-                <h3>Security Dashboard</h3>
-              </div>
-              
-              <div className="security-grid">
-                {/* Overall Score */}
-                <div className="security-card score-card">
-                  <div className="score-circle">
-                    <div className="score-value">{securityScan.overallScore}</div>
-                    <div className="score-label">Security Score</div>
-                  </div>
-                  <div className="score-status">
-                    <div className="status-item">
-                      <ShieldCheck size={16} style={{ color: '#10b981' }} />
-                      <span>Encryption: {securityScan.encryptionStatus.toUpperCase()}</span>
-                    </div>
-                    <div className="status-item">
-                      <Lock size={16} style={{ color: '#3b82f6' }} />
-                      <span>AES-256-GCM Active</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Scan Button */}
-                <div className="security-card action-card">
-                  <button 
-                    className={`scan-btn ${securityScan.isScanning ? 'scanning' : ''}`}
-                    onClick={runSecurityScan}
-                    disabled={securityScan.isScanning}
-                  >
-                    {securityScan.isScanning ? (
-                      <>
-                        <Loader2 size={18} className="spin" />
-                        Scanning...
-                      </>
-                    ) : (
-                      <>
-                        <Zap size={18} />
-                        Run Full Scan
-                      </>
-                    )}
-                  </button>
-                  {securityScan.lastScanTime && (
-                    <div className="scan-time">
-                      Last scan: {new Date(securityScan.lastScanTime).toLocaleTimeString()}
-                    </div>
-                  )}
-                </div>
-
-                {/* Vulnerabilities */}
-                <div className="security-card vulnerabilities-card">
-                  <h4><AlertTriangle size={16} /> Vulnerabilities</h4>
-                  <div className="vuln-list">
-                    {securityScan.vulnerabilities.length > 0 ? (
-                      securityScan.vulnerabilities.map(vuln => (
-                        <div key={vuln.id} className={`vuln-item severity-${vuln.severity} status-${vuln.status}`}>
-                          <div className="vuln-header">
-                            <span className={`severity-badge ${vuln.severity}`}>{vuln.severity.toUpperCase()}</span>
-                            <span className="vuln-name">{vuln.name}</span>
-                            <span className={`status-badge ${vuln.status}`}>{vuln.status.toUpperCase()}</span>
-                          </div>
-                          <div className="vuln-desc">{vuln.description}</div>
-                          {vuln.status !== 'patched' && (
-                            <button 
-                              className="patch-btn"
-                              onClick={() => patchVulnerability(vuln.id)}
-                            >
-                              <Wrench size={14} /> Patch Now
-                            </button>
-                          )}
-                        </div>
-                      ))
-                    ) : (
-                      <div className="empty-state">No vulnerabilities detected</div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Threats */}
-                <div className="security-card threats-card">
-                  <h4><Network size={16} /> Recent Threats</h4>
-                  <div className="threat-list">
-                    {securityScan.threats.length > 0 ? (
-                      securityScan.threats.map((threat, idx) => (
-                        <div key={idx} className={`threat-item status-${threat.status}`}>
-                          <div className="threat-status">
-                            {threat.status === 'blocked' && <ShieldAlert size={16} style={{ color: '#ef4444' }} />}
-                            {threat.status === 'prevented' && <ShieldCheck size={16} style={{ color: '#10b981' }} />}
-                            {threat.status === 'filtered' && <Eye size={16} style={{ color: '#f59e0b' }} />}
-                          </div>
-                          <div className="threat-info">
-                            <div className="threat-type">{threat.type}</div>
-                            <div className="threat-time">{threat.status.toUpperCase()} ΓÇó {new Date(threat.timestamp).toLocaleTimeString()}</div>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="empty-state">No threats detected</div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Messages */}
-          <div className="messages-container">
+          {/* Messages — chat view only */}
+          {currentView === 'chat' && <div className="messages-container">
             {messages.length === 0 ? (
               <div className="welcome">
                 <div className="welcome-icon"><Sparkles size={48} /></div>
@@ -1141,10 +1147,10 @@ export default function NexusAI() {
               </div>
             )}
             <div ref={messagesEndRef} />
-          </div>
+          </div>}
 
-          {/* Input */}
-          <div className="input-area">
+          {/* Input — chat view only */}
+          {currentView === 'chat' && <div className="input-area">
             <div className="input-box">
               <button className="attach-btn" onClick={() => fileInputRef.current?.click()}><Upload size={20} /></button>
               <input type="file" ref={fileInputRef} onChange={handleFileUpload} multiple hidden />
@@ -1165,9 +1171,10 @@ export default function NexusAI() {
             <div className="input-footer">
               <span className="model-tag">{AI_MODELS[selectedModel]?.icon} {AI_MODELS[selectedModel]?.name}</span>
               <span className="tool-tag">{TOOLS[activeTool]?.name}</span>
-              <span className="secure"><Lock size={12} /> End-to-end encrypted</span>
+              <span className="reasoning-tag"><Cpu size={10} /> {reasoningTier}</span>
+              <span className="secure"><Lock size={12} /> E2E encrypted</span>
             </div>
-          </div>
+          </div>}
         </main>
 
         {/* Memory Panel */}
@@ -1185,6 +1192,37 @@ export default function NexusAI() {
           </div>
         )}
       </div>
+
+      {/* Auth Modal */}
+      {showAuthModal && (
+        <div className="modal-overlay" onClick={() => setShowAuthModal(false)}>
+          <div className="modal large" onClick={e => e.stopPropagation()} style={{ maxWidth: '520px', maxHeight: '90vh', overflowY: 'auto' }}>
+            <div className="modal-header">
+              <h3><Fingerprint size={18} /> {authState.isLoggedIn ? 'Account' : 'Sign In'}</h3>
+              <button onClick={() => setShowAuthModal(false)}><X size={20} /></button>
+            </div>
+            {authState.isLoggedIn ? (
+              <div className="modal-body">
+                <div style={{ textAlign: 'center', padding: '24px 0' }}>
+                  <div style={{ fontSize: '3rem', marginBottom: '12px' }}>{userAvatar?.emoji || '👤'}</div>
+                  <h3 style={{ fontSize: '1.2rem', marginBottom: '4px' }}>{authState.user?.username}</h3>
+                  <p style={{ color: 'var(--text-2)', fontSize: '0.9rem', marginBottom: '8px' }}>{authState.user?.email}</p>
+                  <span className={`role-badge ${authState.role}`} style={{ display: 'inline-block', padding: '4px 12px', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 600, textTransform: 'uppercase' }}>{authState.role}</span>
+                  <div style={{ marginTop: '24px' }}>
+                    <button style={{ padding: '10px 24px', background: '#ef4444', border: 'none', borderRadius: '8px', color: 'white', cursor: 'pointer', fontWeight: 500 }}
+                      onClick={() => { setAuthState({ isLoggedIn: false, user: null, role: null, sessionToken: null }); setShowAuthModal(false); }}>Sign Out</button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <AuthDashboard onLogin={(user, sessionToken, role) => {
+                setAuthState({ isLoggedIn: true, user, role: role || user?.role || 'user', sessionToken });
+                setShowAuthModal(false);
+              }} />
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Settings Modal */}
       {isSettingsOpen && (
@@ -2132,6 +2170,147 @@ export default function NexusAI() {
           font-size: 0.9rem;
         }
         
+        /* Reasoning Selector */
+        .reasoning-selector {
+          display: flex;
+          align-items: center;
+          gap: 2px;
+          background: var(--bg-3);
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          padding: 3px;
+        }
+        .reasoning-btn {
+          padding: 5px 9px;
+          background: transparent;
+          border: none;
+          border-radius: 5px;
+          color: var(--text-3);
+          font-size: 0.72rem;
+          font-weight: 500;
+          cursor: pointer;
+          text-transform: lowercase;
+          transition: all 0.15s;
+        }
+        .reasoning-btn:hover { color: var(--text-1); background: var(--bg-4); }
+        .reasoning-btn.active { background: var(--accent); color: white; }
+
+        /* Reasoning tier tag in tool panel */
+        .reasoning-tier-tag {
+          display: flex; align-items: center; gap: 5px;
+          margin-left: auto;
+          padding: 6px 10px;
+          background: var(--bg-4);
+          border: 1px solid var(--border);
+          border-radius: 6px;
+          color: var(--text-3);
+          font-size: 0.72rem;
+          white-space: nowrap;
+        }
+
+        /* Reasoning tag in footer */
+        .reasoning-tag {
+          display: flex; align-items: center; gap: 4px;
+          padding: 4px 8px;
+          background: var(--bg-3);
+          border-radius: 4px;
+          font-size: 0.72rem;
+          color: var(--text-3);
+        }
+
+        /* Sidebar sections */
+        .sidebar-section {
+          padding: 12px 8px 8px;
+          border-top: 1px solid var(--border);
+          margin-top: 8px;
+        }
+        .sidebar-section-title {
+          display: flex; align-items: center; gap: 6px;
+          font-size: 0.68rem;
+          color: var(--text-3);
+          text-transform: uppercase;
+          letter-spacing: 1px;
+          padding: 4px 8px 8px;
+        }
+        .sidebar-nav-btn {
+          display: flex; align-items: center; gap: 8px;
+          width: 100%;
+          padding: 10px 12px;
+          background: transparent;
+          border: none;
+          border-radius: 7px;
+          color: var(--text-2);
+          font-size: 0.84rem;
+          cursor: pointer;
+          text-align: left;
+          margin-bottom: 2px;
+          transition: all 0.15s;
+        }
+        .sidebar-nav-btn:hover { background: var(--bg-3); color: var(--text-1); }
+        .sidebar-nav-btn.active { background: var(--bg-4); color: var(--text-1); border-left: 2px solid var(--accent); }
+
+        /* Dashboard View Container */
+        .dashboard-view {
+          flex: 1;
+          overflow-y: auto;
+          background: var(--bg-1);
+        }
+
+        /* Role Dashboards */
+        .role-dashboard {
+          padding: 24px;
+        }
+        .role-header {
+          display: flex; align-items: center; gap: 12px;
+          margin-bottom: 24px;
+        }
+        .role-header h2 { font-size: 1.3rem; }
+        .role-badge {
+          padding: 4px 10px;
+          border-radius: 6px;
+          font-size: 0.7rem;
+          font-weight: 700;
+          letter-spacing: 1px;
+        }
+        .role-badge.admin { background: rgba(239,68,68,0.15); color: #fca5a5; }
+        .role-badge.dev { background: rgba(59,130,246,0.15); color: #93c5fd; }
+        .role-badge.mod { background: rgba(245,158,11,0.15); color: #fcd34d; }
+        .role-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+          gap: 16px;
+        }
+        .role-card {
+          background: var(--bg-2);
+          border: 1px solid var(--border);
+          border-radius: 12px;
+          padding: 20px;
+          display: flex; flex-direction: column; gap: 10px;
+        }
+        .role-card svg { color: var(--text-2); }
+        .role-card h4 { font-size: 1rem; }
+        .role-card p { font-size: 0.85rem; color: var(--text-3); flex: 1; }
+        .role-action-btn {
+          padding: 8px 16px;
+          background: var(--bg-3);
+          border: 1px solid var(--border);
+          border-radius: 7px;
+          color: var(--text-2);
+          font-size: 0.82rem;
+          cursor: pointer;
+          transition: all 0.15s;
+          text-align: center;
+        }
+        .role-action-btn:hover { background: var(--accent); color: white; border-color: var(--accent); }
+
+        /* User avatar logged-in state */
+        .user-avatar {
+          cursor: pointer;
+          transition: all 0.2s;
+        }
+        .user-avatar:hover { opacity: 0.8; transform: scale(1.05); }
+        .user-avatar.logged-in { border: 2px solid #10b981; }
+
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }

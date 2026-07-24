@@ -1,9 +1,15 @@
-/* app.jsx
-   Updated: make UI more responsive for mobile/desktop, persist model selection, chats, memories, settings,
-   ensure AES-256 label present, and small responsive CSS tweaks.
-*/
+// app.jsx
+// 2026-07-24 | Nexus AI Pro - Main Application
+// Full-stack: auth, analytics, projects, payments, gaming, i18n, admin
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { securityService } from './src/security-service.js';
+import { AuthScreens } from './src/components/AuthScreens.jsx';
+import { AnalyticsDashboard } from './src/components/AnalyticsDashboard.jsx';
+import { ProjectTracker } from './src/components/ProjectTracker.jsx';
+import { PaymentCheckout } from './src/components/PaymentCheckout.jsx';
+import { AdminDashboard } from './src/components/AdminDashboard.jsx';
+import { EnhancedSecurityDashboard } from './src/components/EnhancedSecurityDashboard.jsx';
+import { GamingConnectors } from './src/components/GamingConnectors.jsx';
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
   Settings, Menu, X, Plus, Trash2, Download, Upload,
@@ -457,11 +463,16 @@ const TOOLS = {
   code: { name: 'Code', icon: Code, description: 'Code generation & debugging' },
   image: { name: 'Image Gen', icon: ImagePlus, description: 'AI image generation' },
   video: { name: 'Video Gen', icon: Clapperboard, description: 'AI video creation' },
+  analytics: { name: 'Analytics', icon: BarChart3, description: 'Social media analytics' },
+  projects: { name: 'Projects', icon: Rocket, description: 'Real-time project tracking' },
+  gaming: { name: 'Gaming', icon: Gamepad2, description: 'Gaming platform connectors' },
+  billing: { name: 'Billing', icon: Activity, description: 'Plans & subscriptions' },
   gamedev: { name: 'Game Dev', icon: Gamepad2, description: 'Game development suite' },
   appdev: { name: 'App Dev', icon: Smartphone, description: 'Application development' },
   automation: { name: 'Automation', icon: Workflow, description: 'N8N-style workflows' },
   deploy: { name: 'Deploy', icon: Rocket, description: 'App deployment' },
-  security: { name: 'Security', icon: Shield, description: 'Security analysis' },
+  security: { name: 'Security', icon: Shield, description: 'Security dashboard' },
+  admin: { name: 'Admin', icon: Users, description: 'Admin & user management' },
   schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' }
 };
 
@@ -598,6 +609,67 @@ const WORKFLOW_NODES = {
 // MAIN APP COMPONENT
 // ============================================
 export default function NexusAI() {
+  // ── Auth state ────────────────────────────────────────────────────────────
+  const [authUser, setAuthUser] = useState(() => {
+    const token = localStorage.getItem('nexus:accessToken');
+    if (!token) return null;
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      if (payload.exp * 1000 < Date.now()) { localStorage.removeItem('nexus:accessToken'); return null; }
+      return { id: payload.sub, username: payload.username, role: payload.role, email: payload.email };
+    } catch { return null; }
+  });
+  const [socket, setSocket] = useState(null);
+  const [locale, setLocale] = useState(() => localStorage.getItem('nexus:locale') || 'en');
+
+  // Socket.IO connection
+  useEffect(() => {
+    if (!authUser) return;
+    const token = localStorage.getItem('nexus:accessToken');
+    // Dynamic import so it doesn't break if socket.io-client isn't available
+    import('socket.io-client').then(({ io }) => {
+      const s = io({ auth: { token }, transports: ['websocket', 'polling'] });
+      setSocket(s);
+      return () => s.disconnect();
+    }).catch(() => {/* socket.io-client may not be bundled */});
+  }, [authUser]);
+
+  // Token refresh
+  useEffect(() => {
+    if (!authUser) return;
+    const interval = setInterval(async () => {
+      const refreshToken = localStorage.getItem('nexus:refreshToken');
+      if (!refreshToken) return;
+      const res = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      });
+      if (res.ok) {
+        const { accessToken } = await res.json();
+        localStorage.setItem('nexus:accessToken', accessToken);
+      }
+    }, 10 * 60 * 1000); // Refresh every 10 min
+    return () => clearInterval(interval);
+  }, [authUser]);
+
+  const handleAuthSuccess = (user, accessToken) => setAuthUser(user);
+  const handleLogout = () => {
+    const rt = localStorage.getItem('nexus:refreshToken');
+    if (rt) fetch('/api/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ refreshToken: rt }) });
+    localStorage.removeItem('nexus:accessToken');
+    localStorage.removeItem('nexus:refreshToken');
+    setAuthUser(null);
+    socket?.disconnect();
+    setSocket(null);
+  };
+
+  // Show auth screen if not logged in
+  if (!authUser) {
+    return <AuthScreens onAuthSuccess={handleAuthSuccess} />;
+  }
+
+  // ── App state ─────────────────────────────────────────────────────────────
   // State
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -915,7 +987,24 @@ export default function NexusAI() {
           <button className="icon-btn" onClick={() => setIsMemoryOpen(!isMemoryOpen)}><Brain size={20} /></button>
           <button className="icon-btn" onClick={() => setIsCallActive(true)}><Phone size={20} /></button>
           <button className="icon-btn" onClick={() => setIsSettingsOpen(true)}><Settings size={20} /></button>
-          <div className="user-avatar">{userAvatar?.emoji || '≡ƒæñ'}</div>
+          <div className="user-info-badge" style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(255,255,255,0.07)', borderRadius: '8px', padding: '4px 10px', fontSize: '13px' }}>
+            <div className="user-avatar" style={{ margin: 0 }}>{userAvatar?.emoji || '🤖'}</div>
+            <div style={{ lineHeight: 1.2 }}>
+              <div style={{ color: '#fff', fontWeight: 600, maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{authUser.username}</div>
+              <div style={{ color: '#9ca3af', fontSize: '10px', textTransform: 'capitalize' }}>{authUser.role}</div>
+            </div>
+            <button
+              onClick={handleLogout}
+              title="Sign out"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', display: 'flex', alignItems: 'center', padding: '2px', marginLeft: '2px' }}
+              onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
+              onMouseLeave={e => e.currentTarget.style.color = '#9ca3af'}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+              </svg>
+            </button>
+          </div>
         </div>
       </header>
 
@@ -946,7 +1035,7 @@ export default function NexusAI() {
             {Object.entries(TOOLS).map(([key, tool]) => {
               const Icon = tool.icon;
               return (
-                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security'].includes(key)) setShowToolContent(true); }}>
+                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security', 'analytics', 'projects', 'gaming', 'billing', 'admin'].includes(key)) setShowToolContent(true); }}>
                   <Icon size={18} />
                   <span>{tool.name}</span>
                 </button>
@@ -955,6 +1044,49 @@ export default function NexusAI() {
           </div>
 
           {/* Tool Content Panels */}
+
+          {/* Analytics Dashboard */}
+          {activeTool === 'analytics' && (
+            <div className="tool-content" style={{ padding: 0 }}>
+              <AnalyticsDashboard socket={socket} />
+            </div>
+          )}
+
+          {/* Project Tracker */}
+          {activeTool === 'projects' && (
+            <div className="tool-content" style={{ padding: 0 }}>
+              <ProjectTracker socket={socket} />
+            </div>
+          )}
+
+          {/* Gaming Connectors */}
+          {activeTool === 'gaming' && (
+            <div className="tool-content" style={{ padding: 0 }}>
+              <GamingConnectors />
+            </div>
+          )}
+
+          {/* Billing/Payments */}
+          {activeTool === 'billing' && (
+            <div className="tool-content" style={{ padding: 0 }}>
+              <PaymentCheckout user={authUser} />
+            </div>
+          )}
+
+          {/* Enhanced Security Dashboard */}
+          {activeTool === 'security' && (
+            <div className="tool-content" style={{ padding: 0 }}>
+              <EnhancedSecurityDashboard socket={socket} />
+            </div>
+          )}
+
+          {/* Admin Dashboard (role-gated) */}
+          {activeTool === 'admin' && ['admin', 'moderator', 'developer'].includes(authUser?.role) && (
+            <div className="tool-content" style={{ padding: 0 }}>
+              <AdminDashboard user={authUser} />
+            </div>
+          )}
+
           {showToolContent && activeTool === 'gamedev' && (
             <div className="tool-content">
               <div className="panel-header">
@@ -996,7 +1128,7 @@ export default function NexusAI() {
           )}
 
           {/* Security Dashboard */}
-          {showToolContent && activeTool === 'security' && (
+          {showToolContent && activeTool === 'security_legacy' && (
             <div className="tool-content security-dashboard">
               <div className="panel-header">
                 <ShieldCheck size={18} />

@@ -1227,6 +1227,21 @@ app.get('/api/templates/app', (req, res) => {
 });
 
 // ================================================
+// WEBSOCKET HELPERS
+// ================================================
+
+function pushAnalyticsUpdates(socket, platforms) {
+  for (const platform of platforms) {
+    socket.emit('analytics:update', {
+      platform,
+      metric: 'views',
+      delta: Math.floor(Math.random() * 500),
+      timestamp: Date.now()
+    });
+  }
+}
+
+// ================================================
 // WEBSOCKET HANDLING
 // ================================================
 
@@ -1275,23 +1290,10 @@ io.on('connection', (socket) => {
 
   // Real-time analytics subscription
   socket.on('analytics:subscribe', ({ platforms }) => {
-    if (Array.isArray(platforms)) {
-      socket.join(`analytics:${socket.userId}`);
-      // Push simulated live metric updates every 30s for subscribed platforms
-      const intervalId = setInterval(() => {
-        if (Array.isArray(platforms)) {
-          platforms.forEach(platform => {
-            socket.emit('analytics:update', {
-              platform,
-              metric: 'views',
-              delta: Math.floor(Math.random() * 500),
-              timestamp: Date.now()
-            });
-          });
-        }
-      }, 30000);
-      socket.on('disconnect', () => clearInterval(intervalId));
-    }
+    if (!Array.isArray(platforms)) return;
+    socket.join(`analytics:${socket.userId}`);
+    const intervalId = setInterval(() => pushAnalyticsUpdates(socket, platforms), 30000);
+    socket.on('disconnect', () => clearInterval(intervalId));
   });
 
   socket.on('analytics:unsubscribe', () => {

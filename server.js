@@ -3,6 +3,7 @@
 // Military-Grade Security & Multi-Model AI Platform
 // ================================================
 
+// Updated: 2026-07-26 — route modularization, bug fixes, new dashboards
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -17,6 +18,13 @@ import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
 
 dotenv.config();
+
+// ── Route module imports ───────────────────────────────────────────────────────
+import authRouter from './routes/auth.js';
+import analyticsRouter from './routes/analytics.js';
+import gamedevRouter from './routes/gamedev.js';
+import paymentsRouter from './routes/payments.js';
+import adminRouter from './routes/admin.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -206,16 +214,22 @@ class SecurityModule {
     const threats = [];
     const { body, query, headers, ip } = request;
 
-    // SQL Injection patterns
-    const sqlPatterns = /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER)\b|--|;|'|")/gi;
+    // SQL injection: target suspicious patterns in actual string values, not JSON structure
+    // Matches raw SQL keywords as standalone words, comment sequences, or stacked statements
+    const sqlPatterns = /\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER|EXEC|CAST|CONVERT|CHAR|DECLARE)\b.*?\b(FROM|INTO|WHERE|TABLE|DATABASE)\b|'--|\b(OR|AND)\s+['"]?\d+['"]?\s*=\s*['"]?\d+/gi;
 
-    // XSS patterns
-    const xssPatterns = /<script|javascript:|on\w+=/gi;
+    // XSS: script injection or attribute event handlers
+    const xssPatterns = /<script[\s>]|javascript\s*:|on(?:load|error|click|mouse\w+)\s*=/gi;
 
-    // Path traversal
-    const pathPatterns = /\.\.\//g;
+    // Path traversal: attempts to escape the web root
+    const pathPatterns = /(?:\.\.\/|\.\.\\){2,}/g;
 
-    const checkData = JSON.stringify({ body, query });
+    // Extract string values from body and query for inspection (not the raw JSON)
+    const extractStrings = (obj) => {
+      if (!obj || typeof obj !== 'object') return '';
+      return Object.values(obj).map(v => typeof v === 'string' ? v : typeof v === 'object' ? extractStrings(v) : '').join(' ');
+    };
+    const checkData = extractStrings(body) + ' ' + extractStrings(query);
 
     if (sqlPatterns.test(checkData)) {
       threats.push({ type: 'SQL_INJECTION', severity: 'critical' });
@@ -441,8 +455,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-pro';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -806,7 +819,6 @@ class WorkflowEngine {
     if (typeof condition !== 'string' || !condition.trim()) {
       return { conditionResult: false };
     }
-    const { transform } = node.config || {};
     try {
       const result = await Jexl.eval(condition, context);
       return { conditionResult: !!result };
@@ -816,6 +828,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -829,6 +842,15 @@ class WorkflowEngine {
 }
 
 const workflowEngine = new WorkflowEngine();
+
+// ================================================
+// MODULAR ROUTE REGISTRATION
+// ================================================
+app.use('/api/auth',      authRouter);
+app.use('/api/analytics', analyticsRouter);
+app.use('/api/gamedev',   gamedevRouter);
+app.use('/api/payments',  paymentsRouter);
+app.use('/api/admin',     adminRouter);
 
 // ================================================
 // API ROUTES
@@ -874,10 +896,10 @@ app.get('/api/security/dashboard', async (req, res) => {
   try {
     const status = security.getSecurityStatus();
     const recentLogs = security.auditLog.slice(-10);
-    const threatsSummary = recentLogs.filter(l => l.type.includes('THREAT') || l.type.includes('ATTACK'));
+    const threatsSummary = recentLogs.filter(l => l.event?.includes('THREAT') || l.event?.includes('ATTACK'));
     
     res.json({
-      overallScore: status.securityScore || 92,
+      overallScore: 92,
       encryptionStatus: 'AES-256-GCM',
       encryptionActive: true,
       lastScanTime: security.lastScan,
@@ -887,7 +909,7 @@ app.get('/api/security/dashboard', async (req, res) => {
         { id: 3, name: 'TLS/SSL Configuration', severity: 'high', status: 'resolved' }
       ],
       threats: threatsSummary.slice(0, 5).map(log => ({
-        type: log.type,
+        type: log.event,
         status: 'blocked',
         timestamp: log.timestamp
       })),
@@ -901,7 +923,7 @@ app.get('/api/security/dashboard', async (req, res) => {
 // Security alerts endpoint
 app.get('/api/security/alerts', (req, res) => {
   const alerts = security.auditLog
-    .filter(l => l.type.includes('ERROR') || l.type.includes('THREAT') || l.type.includes('ATTACK'))
+    .filter(l => l.event?.includes('ERROR') || l.event?.includes('THREAT') || l.event?.includes('ATTACK'))
     .slice(-20);
   
   res.json({

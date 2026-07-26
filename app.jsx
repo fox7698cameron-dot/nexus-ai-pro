@@ -1,9 +1,21 @@
 /* app.jsx
-   Updated: make UI more responsive for mobile/desktop, persist model selection, chats, memories, settings,
-   ensure AES-256 label present, and small responsive CSS tweaks.
-*/
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+ * Nexus AI Pro - Main application
+ * Updated: 2026-07-26
+ * Features: Auth portal, analytics dashboard, project tracker,
+ *   security dashboard, admin panel, payments, MFA, biometrics,
+ *   multi-language, game dev connectors
+ */
+import React, { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react';
 import { securityService } from './src/security-service.js';
+import { getStoredAuth, clearAuth, isAuthenticated } from './src/lib/auth.js';
+import { detectLocale, setLocale } from './src/lib/i18n.js';
+
+const AuthPortal = lazy(() => import('./src/components/AuthPortal.jsx'));
+const AnalyticsDashboard = lazy(() => import('./src/components/AnalyticsDashboard.jsx'));
+const ProjectTracker = lazy(() => import('./src/components/ProjectTracker.jsx'));
+const EnhancedSecurityDashboard = lazy(() => import('./src/components/EnhancedSecurityDashboard.jsx'));
+const AdminDashboard = lazy(() => import('./src/components/AdminDashboard.jsx'));
+const PaymentModal = lazy(() => import('./src/components/PaymentModal.jsx'));
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
   Settings, Menu, X, Plus, Trash2, Download, Upload,
@@ -453,16 +465,18 @@ const AI_MODELS = {
 // TOOL CATEGORIES
 // ============================================
 const TOOLS = {
-  chat: { name: 'Chat', icon: MessageSquare, description: 'Conversational AI' },
-  code: { name: 'Code', icon: Code, description: 'Code generation & debugging' },
-  image: { name: 'Image Gen', icon: ImagePlus, description: 'AI image generation' },
-  video: { name: 'Video Gen', icon: Clapperboard, description: 'AI video creation' },
-  gamedev: { name: 'Game Dev', icon: Gamepad2, description: 'Game development suite' },
-  appdev: { name: 'App Dev', icon: Smartphone, description: 'Application development' },
-  automation: { name: 'Automation', icon: Workflow, description: 'N8N-style workflows' },
-  deploy: { name: 'Deploy', icon: Rocket, description: 'App deployment' },
-  security: { name: 'Security', icon: Shield, description: 'Security analysis' },
-  schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' }
+  chat:       { name: 'Chat',       icon: MessageSquare, description: 'Conversational AI' },
+  code:       { name: 'Code',       icon: Code,          description: 'Code generation & debugging' },
+  image:      { name: 'Image Gen',  icon: ImagePlus,     description: 'AI image generation' },
+  video:      { name: 'Video Gen',  icon: Clapperboard,  description: 'AI video creation' },
+  analytics:  { name: 'Analytics',  icon: BarChart3,     description: 'Social media real-time analytics' },
+  projects:   { name: 'Projects',   icon: Rocket,        description: 'Project & game dev tracker' },
+  gamedev:    { name: 'Game Dev',   icon: Gamepad2,      description: 'Game development suite' },
+  appdev:     { name: 'App Dev',    icon: Smartphone,    description: 'Application development' },
+  automation: { name: 'Automation', icon: Workflow,      description: 'N8N-style workflows' },
+  security:   { name: 'Security',   icon: Shield,        description: 'Security analysis & real-time scans' },
+  admin:      { name: 'Dashboard',  icon: Users,         description: 'Admin / Dev / Moderator panel' },
+  schedule:   { name: 'Schedule',   icon: Calendar,      description: 'Task scheduling' },
 };
 
 // ============================================
@@ -598,6 +612,28 @@ const WORKFLOW_NODES = {
 // MAIN APP COMPONENT
 // ============================================
 export default function NexusAI() {
+  // Auth state
+  const [currentUser, setCurrentUser] = useState(() => getStoredAuth());
+  const [showPayment, setShowPayment] = useState(false);
+
+  // Initialise locale on mount
+  useEffect(() => {
+    setLocale(detectLocale());
+  }, []);
+
+  // If not authenticated, show AuthPortal
+  if (!currentUser) {
+    return (
+      <Suspense fallback={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: 'var(--text-1)' }}>Loading…</div>}>
+        <AuthPortal onAuthSuccess={user => setCurrentUser(user)} />
+      </Suspense>
+    );
+  }
+
+  return <NexusAIApp currentUser={currentUser} onLogout={() => { clearAuth(); setCurrentUser(null); }} />;
+}
+
+function NexusAIApp({ currentUser, onLogout }) {
   // State
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -615,6 +651,7 @@ export default function NexusAI() {
   const [gameTemplate, setGameTemplate] = useState(null);
   const [appTemplate, setAppTemplate] = useState(null);
   const [showToolContent, setShowToolContent] = useState(false);
+  const [showPayment, setShowPayment] = useState(false);
 
   // Security Dashboard State
   const [securityScan, setSecurityScan] = useState({
@@ -915,8 +952,23 @@ export default function NexusAI() {
           <button className="icon-btn" onClick={() => setIsMemoryOpen(!isMemoryOpen)}><Brain size={20} /></button>
           <button className="icon-btn" onClick={() => setIsCallActive(true)}><Phone size={20} /></button>
           <button className="icon-btn" onClick={() => setIsSettingsOpen(true)}><Settings size={20} /></button>
-          <div className="user-avatar">{userAvatar?.emoji || '≡ƒæñ'}</div>
+          <button className="icon-btn" onClick={() => setShowPayment(true)} title="Upgrade plan" style={{ color: '#a78bfa' }}>
+            <Star size={20} />
+          </button>
+          <div
+            className="user-avatar"
+            title={`${currentUser?.username} (${currentUser?.role})`}
+            onClick={onLogout}
+            style={{ cursor: 'pointer' }}
+          >
+            {currentUser?.username?.[0]?.toUpperCase() || '👤'}
+          </div>
         </div>
+        {showPayment && (
+          <Suspense fallback={null}>
+            <PaymentModal onClose={() => setShowPayment(false)} currentPlan="free" />
+          </Suspense>
+        )}
       </header>
 
       {/* Main Content */}
@@ -946,7 +998,7 @@ export default function NexusAI() {
             {Object.entries(TOOLS).map(([key, tool]) => {
               const Icon = tool.icon;
               return (
-                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security'].includes(key)) setShowToolContent(true); }}>
+                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation'].includes(key)) setShowToolContent(true); else setShowToolContent(false); }}>
                   <Icon size={18} />
                   <span>{tool.name}</span>
                 </button>
@@ -1104,8 +1156,41 @@ export default function NexusAI() {
             </div>
           )}
 
-          {/* Messages */}
-          <div className="messages-container">
+          {/* ── New Full-Panel Views ── */}
+          {activeTool === 'analytics' && (
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
+              <Suspense fallback={<div style={{ padding: 40, color: 'var(--text-3)' }}>Loading Analytics…</div>}>
+                <AnalyticsDashboard />
+              </Suspense>
+            </div>
+          )}
+
+          {activeTool === 'projects' && (
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
+              <Suspense fallback={<div style={{ padding: 40, color: 'var(--text-3)' }}>Loading Project Tracker…</div>}>
+                <ProjectTracker />
+              </Suspense>
+            </div>
+          )}
+
+          {activeTool === 'security' && (
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
+              <Suspense fallback={<div style={{ padding: 40, color: 'var(--text-3)' }}>Loading Security…</div>}>
+                <EnhancedSecurityDashboard />
+              </Suspense>
+            </div>
+          )}
+
+          {activeTool === 'admin' && (
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
+              <Suspense fallback={<div style={{ padding: 40, color: 'var(--text-3)' }}>Loading Dashboard…</div>}>
+                <AdminDashboard currentUser={currentUser} />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Messages — only shown for chat-type tools */}
+          <div className="messages-container" style={{ display: ['chat','code','image','video','gamedev','appdev','automation','schedule'].includes(activeTool) ? undefined : 'none' }}>
             {messages.length === 0 ? (
               <div className="welcome">
                 <div className="welcome-icon"><Sparkles size={48} /></div>
@@ -1143,8 +1228,8 @@ export default function NexusAI() {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input */}
-          <div className="input-area">
+          {/* Input — hidden for panel-mode tools */}
+          <div className="input-area" style={{ display: ['analytics','projects','security','admin'].includes(activeTool) ? 'none' : undefined }}>
             <div className="input-box">
               <button className="attach-btn" onClick={() => fileInputRef.current?.click()}><Upload size={20} /></button>
               <input type="file" ref={fileInputRef} onChange={handleFileUpload} multiple hidden />

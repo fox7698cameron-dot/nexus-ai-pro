@@ -1,6 +1,7 @@
 // ================================================
-// NEXUS AI PRO - Enhanced Backend Server
-// Military-Grade Security & Multi-Model AI Platform
+// NEXUS AI PRO - Enhanced Backend Server v2.0
+// Enterprise Full-Stack Platform
+// Updated: 2026-07-26
 // ================================================
 
 import express from 'express';
@@ -15,6 +16,10 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
+import speakeasy from 'speakeasy';
+import QRCode from 'qrcode';
 
 dotenv.config();
 
@@ -201,35 +206,48 @@ class SecurityModule {
     return patches;
   }
 
-  // Threat detection
+  // Threat detection — checks string-type values only to avoid false positives on JSON structure
   detectThreat(request) {
     const threats = [];
-    const { body, query, headers, ip } = request;
+    const { body, query, ip } = request;
 
-    // SQL Injection patterns
-    const sqlPatterns = /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER)\b|--|;|'|")/gi;
+    // Extract string leaf values from an object (avoids flagging JSON syntax chars like " and {)
+    const extractStrings = (obj, depth = 0) => {
+      if (depth > 5 || obj === null || obj === undefined) return [];
+      if (typeof obj === 'string') return [obj];
+      if (Array.isArray(obj)) return obj.flatMap(v => extractStrings(v, depth + 1));
+      if (typeof obj === 'object') return Object.values(obj).flatMap(v => extractStrings(v, depth + 1));
+      return [];
+    };
+
+    const stringValues = [
+      ...extractStrings(body),
+      ...extractStrings(query),
+    ].join(' ');
+
+    // SQL Injection: look for SQL keywords combined with injection chars — not standalone quotes
+    const sqlPatterns = /\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER|EXEC|CAST|CONVERT)\b.*(-{2}|;|\/\*)/gi;
+    const sqlChainPattern = /(--|;\s*(SELECT|INSERT|UPDATE|DELETE|DROP)|UNION\s+SELECT)/gi;
 
     // XSS patterns
-    const xssPatterns = /<script|javascript:|on\w+=/gi;
+    const xssPatterns = /<script[\s>]|javascript\s*:|on(?:load|click|error|focus|mouseover|submit)\s*=/gi;
 
-    // Path traversal
-    const pathPatterns = /\.\.\//g;
+    // Path traversal in query strings
+    const pathPatterns = /(?:\.\.\/){2,}|(?:\.\.\\){2,}/g;
 
-    const checkData = JSON.stringify({ body, query });
-
-    if (sqlPatterns.test(checkData)) {
+    if (sqlPatterns.test(stringValues) || sqlChainPattern.test(stringValues)) {
       threats.push({ type: 'SQL_INJECTION', severity: 'critical' });
     }
 
-    if (xssPatterns.test(checkData)) {
+    if (xssPatterns.test(stringValues)) {
       threats.push({ type: 'XSS', severity: 'high' });
     }
 
-    if (pathPatterns.test(checkData)) {
+    if (pathPatterns.test(stringValues)) {
       threats.push({ type: 'PATH_TRAVERSAL', severity: 'high' });
     }
 
-    // Check against known threat database
+    // Check against known threat IPs
     if (this.threatDatabase.has(ip)) {
       threats.push({ type: 'KNOWN_THREAT_IP', severity: 'critical' });
     }
@@ -1095,6 +1113,443 @@ app.get('/api/templates/app', (req, res) => {
       { id: 'ecommerce', name: 'E-Commerce', stack: 'Shopify/Custom' },
       { id: 'ai', name: 'AI Application', stack: 'Python/FastAPI' }
     ]
+  });
+});
+
+// ================================================
+// AUTH ROUTES
+// Updated: 2026-07-26
+// ================================================
+
+const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_REFRESH = process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET;
+const BCRYPT_ROUNDS = 12;
+
+// In-memory user store (replace with DB in production)
+const userStore = new Map();
+
+// Password validation: 13+ chars, uppercase, lowercase, digit, special
+function isStrongPassword(pw) {
+  return (
+    typeof pw === 'string' &&
+    pw.length >= 13 &&
+    /[A-Z]/.test(pw) &&
+    /[a-z]/.test(pw) &&
+    /[0-9]/.test(pw) &&
+    /[^A-Za-z0-9]/.test(pw)
+  );
+}
+
+// Username validation: 2-32 chars, no control characters
+function isValidUsername(u) {
+  return typeof u === 'string' &&
+    u.trim().length >= 2 &&
+    u.trim().length <= 32 &&
+    !/[\x00-\x1F\x7F]/.test(u);
+}
+
+function issueToken(userId, role) {
+  if (!JWT_SECRET) throw new Error('JWT_SECRET not configured');
+  return jwt.sign({ sub: userId, role }, JWT_SECRET, { expiresIn: '15m' });
+}
+
+function issueRefresh(userId) {
+  if (!JWT_REFRESH) throw new Error('JWT_REFRESH_SECRET not configured');
+  return jwt.sign({ sub: userId, type: 'refresh' }, JWT_REFRESH, { expiresIn: '30d' });
+}
+
+function verifyToken(token) {
+  if (!JWT_SECRET) throw new Error('JWT_SECRET not configured');
+  return jwt.verify(token, JWT_SECRET);
+}
+
+// Auth middleware
+function requireAuth(req, res, next) {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  if (!token) return res.status(401).json({ error: 'Authentication required' });
+  try {
+    req.user = verifyToken(token);
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+}
+
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+    if (!roles.includes(req.user.role)) return res.status(403).json({ error: 'Insufficient permissions' });
+    next();
+  };
+}
+
+app.post('/api/auth/register', authLimiter, async (req, res) => {
+  try {
+    const { username, email, password } = req.body || {};
+    if (!isValidUsername(username)) return res.status(400).json({ error: 'Invalid username (2-32 chars, no control chars)' });
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Valid email required' });
+    if (!isStrongPassword(password)) return res.status(400).json({ error: 'Password must be 13+ chars with uppercase, lowercase, number, and special character' });
+
+    const existingByEmail = [...userStore.values()].find(u => u.email === email);
+    const existingByName = [...userStore.values()].find(u => u.username === username.trim());
+    if (existingByEmail || existingByName) return res.status(409).json({ error: 'Username or email already registered' });
+
+    const id = uuidv4();
+    const hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    const role = userStore.size === 0 ? 'admin' : 'user';
+
+    userStore.set(id, {
+      id, username: username.trim(), email,
+      passwordHash: hash, role,
+      mfaEnabled: false, mfaSecret: null,
+      createdAt: Date.now(), lastLogin: null,
+    });
+
+    const token = issueToken(id, role);
+    const refresh = issueRefresh(id);
+    security.logAudit('USER_REGISTERED', { id, username: username.trim(), role });
+
+    res.status(201).json({
+      user: { id, username: username.trim(), email, role },
+      token, refresh,
+      mfaRequired: false,
+    });
+  } catch (err) {
+    security.logAudit('REGISTER_ERROR', { error: err.message });
+    res.status(500).json({ error: 'Registration failed' });
+  }
+});
+
+app.post('/api/auth/login', authLimiter, async (req, res) => {
+  try {
+    const { username, password } = req.body || {};
+    if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
+
+    const user = [...userStore.values()].find(
+      u => u.username === username.trim() || u.email === username.trim()
+    );
+    if (!user) {
+      await bcrypt.hash('dummy', 4);
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const valid = await bcrypt.compare(password, user.passwordHash);
+    if (!valid) {
+      security.logAudit('LOGIN_FAILED', { username });
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    user.lastLogin = Date.now();
+
+    if (user.mfaEnabled) {
+      return res.json({ mfaRequired: true, userId: user.id });
+    }
+
+    const token = issueToken(user.id, user.role);
+    const refresh = issueRefresh(user.id);
+    security.logAudit('USER_LOGIN', { id: user.id, username: user.username });
+
+    res.json({
+      user: { id: user.id, username: user.username, email: user.email, role: user.role },
+      token, refresh, mfaRequired: false,
+    });
+  } catch (err) {
+    security.logAudit('LOGIN_ERROR', { error: err.message });
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+app.post('/api/auth/refresh', async (req, res) => {
+  try {
+    const { refresh } = req.body || {};
+    if (!refresh) return res.status(400).json({ error: 'Refresh token required' });
+    if (!JWT_REFRESH) return res.status(500).json({ error: 'Token service misconfigured' });
+    const payload = jwt.verify(refresh, JWT_REFRESH);
+    if (payload.type !== 'refresh') return res.status(401).json({ error: 'Invalid token type' });
+    const user = userStore.get(payload.sub);
+    if (!user) return res.status(401).json({ error: 'User not found' });
+    const token = issueToken(user.id, user.role);
+    res.json({ token });
+  } catch {
+    res.status(401).json({ error: 'Invalid refresh token' });
+  }
+});
+
+app.post('/api/auth/mfa/setup', requireAuth, async (req, res) => {
+  try {
+    const user = userStore.get(req.user.sub);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const secret = speakeasy.generateSecret({ name: `NexusAIPro:${user.username}`, length: 20 });
+    user.mfaSecret = secret.base32;
+    const qrUrl = await QRCode.toDataURL(secret.otpauth_url);
+    res.json({ secret: secret.base32, qrUrl, otpauthUrl: secret.otpauth_url });
+  } catch (err) {
+    res.status(500).json({ error: 'MFA setup failed' });
+  }
+});
+
+app.post('/api/auth/mfa/verify', async (req, res) => {
+  try {
+    const { username, token: totpToken } = req.body || {};
+    const user = [...userStore.values()].find(
+      u => u.username === username?.trim() || u.id === username
+    );
+    if (!user || !user.mfaSecret) return res.status(400).json({ error: 'MFA not configured' });
+
+    const verified = speakeasy.totp.verify({
+      secret: user.mfaSecret,
+      encoding: 'base32',
+      token: String(totpToken),
+      window: 1,
+    });
+
+    if (!verified) return res.status(401).json({ error: 'Invalid MFA code' });
+
+    user.mfaEnabled = true;
+    const jwtToken = issueToken(user.id, user.role);
+    const refresh = issueRefresh(user.id);
+    security.logAudit('MFA_VERIFIED', { id: user.id });
+
+    res.json({
+      user: { id: user.id, username: user.username, email: user.email, role: user.role },
+      token: jwtToken, refresh,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'MFA verification failed' });
+  }
+});
+
+app.post('/api/auth/mfa/disable', requireAuth, async (req, res) => {
+  const user = userStore.get(req.user.sub);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  user.mfaEnabled = false;
+  user.mfaSecret = null;
+  security.logAudit('MFA_DISABLED', { id: user.id });
+  res.json({ success: true });
+});
+
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  const user = userStore.get(req.user.sub);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json({ id: user.id, username: user.username, email: user.email, role: user.role, mfaEnabled: user.mfaEnabled });
+});
+
+// Admin: list users
+app.get('/api/admin/users', requireAuth, requireRole('admin'), (req, res) => {
+  const users = [...userStore.values()].map(u => ({
+    id: u.id, username: u.username, email: u.email,
+    role: u.role, createdAt: u.createdAt, lastLogin: u.lastLogin,
+  }));
+  res.json({ users, total: users.length });
+});
+
+// Admin: update user role
+app.put('/api/admin/users/:id/role', requireAuth, requireRole('admin'), (req, res) => {
+  const user = userStore.get(req.params.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  const { role } = req.body;
+  const valid = ['admin', 'dev', 'moderator', 'user'];
+  if (!valid.includes(role)) return res.status(400).json({ error: 'Invalid role' });
+  user.role = role;
+  security.logAudit('ROLE_CHANGED', { targetId: user.id, newRole: role, by: req.user.sub });
+  res.json({ success: true, user: { id: user.id, role } });
+});
+
+// ================================================
+// PAYMENT ROUTES
+// Updated: 2026-07-26
+// ================================================
+
+const PLANS = {
+  free:       { name: 'Free', price: 0 },
+  pro:        { name: 'Pro', price: 9.99 },
+  enterprise: { name: 'Enterprise', price: 14.99 },
+};
+
+const subscriptions = new Map();
+
+app.post('/api/payments/subscribe', requireAuth, async (req, res) => {
+  try {
+    const { planId, payment } = req.body || {};
+    const plan = PLANS[planId];
+    if (!plan) return res.status(400).json({ error: 'Invalid plan' });
+    if (!payment || !payment.type) return res.status(400).json({ error: 'Payment method required' });
+
+    // Stripe integration: use process.env.STRIPE_SECRET_KEY — never hard-code
+    // In production: const stripe = new Stripe(process.env.STRIPE_SECRET_KEY)
+    // and create a PaymentIntent or Subscription via Stripe API.
+
+    const sub = {
+      id: uuidv4(),
+      userId: req.user.sub,
+      planId,
+      planName: plan.name,
+      paymentType: payment.type,
+      status: 'active',
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+    };
+    subscriptions.set(sub.id, sub);
+    security.logAudit('SUBSCRIPTION_CREATED', { userId: req.user.sub, planId });
+    res.json({ success: true, subscription: sub });
+  } catch (err) {
+    res.status(500).json({ error: 'Payment processing failed' });
+  }
+});
+
+app.get('/api/payments/subscription', requireAuth, (req, res) => {
+  const sub = [...subscriptions.values()].find(s => s.userId === req.user.sub);
+  res.json({ subscription: sub || null, plan: sub?.planId || 'free' });
+});
+
+app.post('/api/payments/giftcard/redeem', requireAuth, async (req, res) => {
+  const { code } = req.body || {};
+  if (!code || code.replace(/-/g, '').length < 16) return res.status(400).json({ error: 'Invalid gift card code' });
+  // Gift card validation logic would use a real DB in production
+  const sub = {
+    id: uuidv4(), userId: req.user.sub, planId: 'pro', planName: 'Pro',
+    paymentType: 'giftcard', status: 'active',
+    createdAt: Date.now(), expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+  };
+  subscriptions.set(sub.id, sub);
+  security.logAudit('GIFTCARD_REDEEMED', { userId: req.user.sub });
+  res.json({ success: true, subscription: sub });
+});
+
+// ================================================
+// ANALYTICS ROUTES
+// Updated: 2026-07-26
+// ================================================
+
+app.get('/api/analytics/social/:platform', (req, res) => {
+  const { platform } = req.params;
+  const { range = '24h' } = req.query;
+  const platforms = ['tiktok', 'instagram', 'facebook', 'twitch', 'discord', 'lemon8', 'reddit', 'redgifs'];
+  if (!platforms.includes(platform)) return res.status(400).json({ error: 'Unknown platform' });
+  // Real implementation: OAuth token per platform + respective API call
+  // Credentials loaded exclusively from env vars
+  res.json({
+    platform, range,
+    metrics: { views: 0, likes: 0, followers: 0, reach: 0 },
+    message: 'Connect platform OAuth in .env to stream live data',
+    timestamp: Date.now(),
+  });
+});
+
+app.get('/api/analytics/social/summary', (req, res) => {
+  res.json({
+    platforms: ['tiktok', 'instagram', 'facebook', 'twitch', 'discord', 'lemon8', 'reddit', 'redgifs'],
+    totalReach: 0,
+    totalEngagement: 0,
+    timestamp: Date.now(),
+    note: 'Connect platform OAuth credentials in .env for live data',
+  });
+});
+
+// ================================================
+// PROJECT TRACKING ROUTES
+// Updated: 2026-07-26
+// ================================================
+
+const projectStore = new Map();
+
+app.post('/api/projects', requireAuth, (req, res) => {
+  const { name, type, description, engine } = req.body || {};
+  if (!name?.trim()) return res.status(400).json({ error: 'Project name required' });
+  const project = {
+    id: uuidv4(), userId: req.user.sub,
+    name: name.trim(), type, description, engine,
+    status: 'planning', progress: 0, tasks: 0, done: 0,
+    commits: 0, linesOfCode: 0,
+    milestones: [], achievements: [], tags: [],
+    createdAt: Date.now(), updatedAt: Date.now(),
+  };
+  projectStore.set(project.id, project);
+  security.logAudit('PROJECT_CREATED', { id: project.id, userId: req.user.sub });
+  res.status(201).json(project);
+});
+
+app.get('/api/projects', requireAuth, (req, res) => {
+  const projects = [...projectStore.values()].filter(p => p.userId === req.user.sub);
+  res.json({ projects });
+});
+
+app.put('/api/projects/:id', requireAuth, (req, res) => {
+  const project = projectStore.get(req.params.id);
+  if (!project || project.userId !== req.user.sub) return res.status(404).json({ error: 'Project not found' });
+  Object.assign(project, req.body, { updatedAt: Date.now() });
+  res.json(project);
+});
+
+app.delete('/api/projects/:id', requireAuth, (req, res) => {
+  const project = projectStore.get(req.params.id);
+  if (!project || project.userId !== req.user.sub) return res.status(404).json({ error: 'Project not found' });
+  projectStore.delete(req.params.id);
+  res.json({ success: true });
+});
+
+// ================================================
+// GAME CONNECTOR ROUTES
+// Updated: 2026-07-26
+// ================================================
+
+app.get('/api/connectors/game', (req, res) => {
+  res.json({
+    connectors: [
+      { id: 'unreal', name: 'Unreal Engine', authType: 'oauth2', docsUrl: 'https://docs.unrealengine.com' },
+      { id: 'epic', name: 'Epic Games Store', authType: 'oauth2' },
+      { id: 'unity', name: 'Unity', authType: 'apikey' },
+      { id: 'playstation', name: 'PlayStation (Sony)', authType: 'oauth2' },
+      { id: 'xbox', name: 'Xbox (Microsoft)', authType: 'oauth2' },
+      { id: 'ubisoft', name: 'Ubisoft Connect', authType: 'oauth2' },
+      { id: 'steam', name: 'Steam', authType: 'apikey' },
+      { id: 'godot', name: 'Godot', authType: 'none' },
+    ],
+    note: 'OAuth client IDs/secrets stored in .env — never hard-coded',
+  });
+});
+
+app.get('/api/connectors/cloud', (req, res) => {
+  res.json({
+    connectors: [
+      { id: 'aws', name: 'AWS', services: ['S3', 'Lambda', 'RDS', 'CloudFront'] },
+      { id: 'azure', name: 'Azure', services: ['Blob Storage', 'Functions', 'AD'] },
+      { id: 'gcp', name: 'Google Cloud', services: ['Cloud Storage', 'BigQuery', 'Firebase'] },
+      { id: 'github', name: 'GitHub', services: ['Repos', 'Actions', 'Packages'] },
+      { id: 'bitbucket', name: 'Bitbucket', services: ['Repos', 'Pipelines'] },
+      { id: 'slack', name: 'Slack', services: ['Webhooks', 'Bot', 'Events'] },
+      { id: 'zoom', name: 'Zoom', services: ['Meetings', 'Webinars', 'Recordings'] },
+      { id: 'adobe', name: 'Adobe', services: ['Creative Cloud', 'Firefly'] },
+    ],
+    note: 'API credentials loaded exclusively from process.env',
+  });
+});
+
+// ================================================
+// I18N / TRANSLATION ROUTE
+// Updated: 2026-07-26
+// ================================================
+
+app.post('/api/i18n/translate', async (req, res) => {
+  try {
+    const { text, target, source = 'en' } = req.body || {};
+    if (!text || !target) return res.status(400).json({ error: 'text and target required' });
+    // Real implementation: call Google Translate / DeepL / LibreTranslate
+    // API key from process.env.TRANSLATE_API_KEY — never hard-coded
+    // Demo: return the original text
+    res.json({ translated: text, source, target, note: 'Set TRANSLATE_API_KEY in .env for live translation' });
+  } catch {
+    res.status(500).json({ error: 'Translation failed' });
+  }
+});
+
+app.get('/api/i18n/locales', (req, res) => {
+  res.json({
+    locales: [
+      'en','es','fr','de','pt','ja','ko','zh','ar','hi',
+      'ru','it','nl','pl','tr','sv','uk','th','vi','id',
+    ],
   });
 });
 

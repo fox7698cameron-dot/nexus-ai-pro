@@ -1,6 +1,8 @@
 // ================================================
 // NEXUS AI PRO - Enhanced Backend Server
+// 2026-07-27
 // Military-Grade Security & Multi-Model AI Platform
+// Multi-role auth | Analytics | Gaming | Subscriptions | Connectors
 // ================================================
 
 import express from 'express';
@@ -15,6 +17,14 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+
+// Feature routes
+import { authRouter } from './src/routes/auth.js';
+import { analyticsRouter } from './src/routes/analytics.js';
+import { gamingRouter } from './src/routes/gaming.js';
+import { subscriptionsRouter } from './src/routes/subscriptions.js';
+import { connectorsRouter } from './src/routes/connectors.js';
+import { autoTranslate, SUPPORTED_LANGUAGES, getStrings } from './src/i18n/index.js';
 
 dotenv.config();
 
@@ -441,8 +451,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-pro';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +825,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -834,12 +844,40 @@ const workflowEngine = new WorkflowEngine();
 // API ROUTES
 // ================================================
 
+// ─── Feature route modules ────────────────────────────────────────────────────
+app.use('/api/auth', authRouter);
+app.use('/api/analytics', analyticsRouter);
+app.use('/api/gaming', gamingRouter);
+app.use('/api/subscriptions', subscriptionsRouter);
+app.use('/api/connectors', connectorsRouter);
+
+// ─── i18n ─────────────────────────────────────────────────────────────────────
+app.get('/api/i18n/languages', (req, res) => {
+  res.json({ languages: SUPPORTED_LANGUAGES });
+});
+app.get('/api/i18n/strings', (req, res) => {
+  const lang = (req.query.lang || 'en').slice(0, 5);
+  res.json(getStrings(lang));
+});
+app.post('/api/i18n/translate', async (req, res) => {
+  const { text, targetLang, sourceLang = 'en' } = req.body;
+  if (!text || !targetLang) return res.status(400).json({ error: 'text and targetLang required' });
+  try {
+    const translated = await autoTranslate(text, targetLang, sourceLang);
+    res.json({ translated, targetLang, sourceLang });
+  } catch (err) {
+    res.status(500).json({ error: 'Translation failed' });
+  }
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'healthy',
     security: security.getSecurityStatus(),
-    timestamp: Date.now()
+    timestamp: Date.now(),
+    features: ['auth', 'analytics', 'gaming', 'subscriptions', 'connectors', 'i18n'],
+    platforms: ['linux', 'windows', 'macos', 'ios', 'android', 'electron', 'web'],
   });
 });
 

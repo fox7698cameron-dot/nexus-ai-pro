@@ -441,8 +441,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-pro';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +815,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -874,7 +874,7 @@ app.get('/api/security/dashboard', async (req, res) => {
   try {
     const status = security.getSecurityStatus();
     const recentLogs = security.auditLog.slice(-10);
-    const threatsSummary = recentLogs.filter(l => l.type.includes('THREAT') || l.type.includes('ATTACK'));
+    const threatsSummary = recentLogs.filter(l => l.event && (l.event.includes('THREAT') || l.event.includes('ATTACK')));
     
     res.json({
       overallScore: status.securityScore || 92,
@@ -901,7 +901,7 @@ app.get('/api/security/dashboard', async (req, res) => {
 // Security alerts endpoint
 app.get('/api/security/alerts', (req, res) => {
   const alerts = security.auditLog
-    .filter(l => l.type.includes('ERROR') || l.type.includes('THREAT') || l.type.includes('ATTACK'))
+    .filter(l => l.event && (l.event.includes('ERROR') || l.event.includes('THREAT') || l.event.includes('ATTACK')))
     .slice(-20);
   
   res.json({
@@ -1099,6 +1099,430 @@ app.get('/api/templates/app', (req, res) => {
 });
 
 // ================================================
+// AUTH ROUTES (lazy-loaded to avoid startup crash if module missing)
+// ================================================
+
+let authService = null;
+let paymentService = null;
+let analyticsService = null;
+let projectTracker = null;
+let i18nService = null;
+let connectorsService = null;
+let gameDevService = null;
+
+async function loadServices() {
+  try {
+    const { default: AuthService } = await import('./src/auth/auth-service.js');
+    authService = new AuthService();
+  } catch (e) { console.warn('AuthService not loaded:', e.message); }
+  try {
+    const { default: PaymentService } = await import('./src/payments/payment-service.js');
+    paymentService = new PaymentService();
+  } catch (e) { console.warn('PaymentService not loaded:', e.message); }
+  try {
+    const { default: SocialAnalytics } = await import('./src/analytics/social-analytics.js');
+    analyticsService = new SocialAnalytics();
+  } catch (e) { console.warn('AnalyticsService not loaded:', e.message); }
+  try {
+    const { default: ProjectTracker } = await import('./src/projects/project-tracker.js');
+    projectTracker = new ProjectTracker();
+  } catch (e) { console.warn('ProjectTracker not loaded:', e.message); }
+  try {
+    const { default: I18nService } = await import('./src/i18n/i18n-service.js');
+    i18nService = new I18nService();
+  } catch (e) { console.warn('I18nService not loaded:', e.message); }
+  try {
+    const { default: PlatformConnectors } = await import('./src/connectors/platform-connectors.js');
+    connectorsService = new PlatformConnectors();
+  } catch (e) { console.warn('ConnectorsService not loaded:', e.message); }
+  try {
+    const { default: GameDevIntegrations } = await import('./src/gamedev/gamedev-integrations.js');
+    gameDevService = new GameDevIntegrations();
+  } catch (e) { console.warn('GameDevService not loaded:', e.message); }
+}
+
+loadServices();
+
+// Auth endpoints
+app.post('/api/auth/register', authLimiter, async (req, res) => {
+  if (!authService) return res.status(503).json({ error: 'Auth service unavailable' });
+  try {
+    const { username, email, password, role } = req.body;
+    if (!username || !email || !password) return res.status(400).json({ error: 'username, email, password required' });
+    const strengthCheck = authService.validatePasswordStrength(password);
+    if (!strengthCheck.valid) return res.status(400).json({ error: 'Weak password', details: strengthCheck.errors });
+    const user = await authService.register(username, email, password, role);
+    res.status(201).json({ id: user.id, username: user.username, email: user.email, role: user.role });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/login', authLimiter, async (req, res) => {
+  if (!authService) return res.status(503).json({ error: 'Auth service unavailable' });
+  try {
+    const { email, password } = req.body;
+    const result = await authService.login(email, password);
+    res.json(result);
+  } catch (err) {
+    res.status(401).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/logout', async (req, res) => {
+  if (!authService) return res.status(503).json({ error: 'Auth service unavailable' });
+  try {
+    const { userId, refreshToken } = req.body;
+    authService.logout(userId, refreshToken);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/refresh', async (req, res) => {
+  if (!authService) return res.status(503).json({ error: 'Auth service unavailable' });
+  try {
+    const { token } = req.body;
+    const result = authService.refreshToken(token);
+    res.json(result);
+  } catch (err) {
+    res.status(401).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/mfa/setup', async (req, res) => {
+  if (!authService) return res.status(503).json({ error: 'Auth service unavailable' });
+  try {
+    const { userId } = req.body;
+    const result = authService.generateMFASecret(userId);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/mfa/enable', async (req, res) => {
+  if (!authService) return res.status(503).json({ error: 'Auth service unavailable' });
+  try {
+    const { userId, code } = req.body;
+    const verified = authService.verifyMFA(userId, code);
+    if (verified) {
+      authService.enableMFA(userId);
+      res.json({ enabled: true });
+    } else {
+      res.status(400).json({ error: 'Invalid MFA code' });
+    }
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/mfa/verify', async (req, res) => {
+  if (!authService) return res.status(503).json({ error: 'Auth service unavailable' });
+  try {
+    const { userId, code } = req.body;
+    const valid = authService.verifyMFA(userId, code);
+    res.json({ valid });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/auth/users', async (req, res) => {
+  if (!authService) return res.status(503).json({ error: 'Auth service unavailable' });
+  const users = authService.listUsers({}).map(u => ({
+    id: u.id, username: u.username, email: u.email, role: u.role,
+    mfaEnabled: u.mfaEnabled, createdAt: u.createdAt, lastLogin: u.lastLogin, isActive: u.isActive
+  }));
+  res.json(users);
+});
+
+app.get('/api/auth/user/:id', async (req, res) => {
+  if (!authService) return res.status(503).json({ error: 'Auth service unavailable' });
+  const user = authService.getUserById(req.params.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  const { passwordHash, mfaSecret, refreshTokens, ...safe } = user;
+  res.json(safe);
+});
+
+app.put('/api/auth/user/:id', async (req, res) => {
+  if (!authService) return res.status(503).json({ error: 'Auth service unavailable' });
+  try {
+    const updated = authService.updateUser(req.params.id, req.body);
+    const { passwordHash, mfaSecret, refreshTokens, ...safe } = updated;
+    res.json(safe);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Analytics endpoints
+app.get('/api/analytics/snapshot/:platform', (req, res) => {
+  if (!analyticsService) return res.status(503).json({ error: 'Analytics service unavailable' });
+  try {
+    res.json(analyticsService.getSnapshot(req.params.platform));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/analytics/timeseries/:platform/:metric', (req, res) => {
+  if (!analyticsService) return res.status(503).json({ error: 'Analytics service unavailable' });
+  const { periods } = req.query;
+  res.json(analyticsService.getTimeSeries(req.params.platform, req.params.metric, parseInt(periods) || 24));
+});
+
+app.get('/api/analytics/aggregated', (req, res) => {
+  if (!analyticsService) return res.status(503).json({ error: 'Analytics service unavailable' });
+  res.json(analyticsService.getAggregatedStats());
+});
+
+app.get('/api/analytics/retention/:platform', (req, res) => {
+  if (!analyticsService) return res.status(503).json({ error: 'Analytics service unavailable' });
+  res.json(analyticsService.getRetentionData(req.params.platform));
+});
+
+app.get('/api/analytics/summary', (req, res) => {
+  if (!analyticsService) return res.status(503).json({ error: 'Analytics service unavailable' });
+  res.json(analyticsService.getLikeAndReachSummary());
+});
+
+app.get('/api/analytics/realtime', (req, res) => {
+  if (!analyticsService) return res.status(503).json({ error: 'Analytics service unavailable' });
+  res.json(analyticsService.getRealTimeUpdate());
+});
+
+// Project tracking endpoints
+app.post('/api/projects', (req, res) => {
+  if (!projectTracker) return res.status(503).json({ error: 'Project tracker unavailable' });
+  try {
+    const { userId, ...data } = req.body;
+    res.status(201).json(projectTracker.createProject(userId, data));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/projects/user/:userId', (req, res) => {
+  if (!projectTracker) return res.status(503).json({ error: 'Project tracker unavailable' });
+  const { type, status } = req.query;
+  res.json(projectTracker.listProjects(req.params.userId, { ...(type && { type }), ...(status && { status }) }));
+});
+
+app.get('/api/projects/:id', (req, res) => {
+  if (!projectTracker) return res.status(503).json({ error: 'Project tracker unavailable' });
+  const project = projectTracker.getProject(req.params.id);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  res.json(project);
+});
+
+app.put('/api/projects/:id', (req, res) => {
+  if (!projectTracker) return res.status(503).json({ error: 'Project tracker unavailable' });
+  try {
+    res.json(projectTracker.updateProject(req.params.id, req.body));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/projects/:id', (req, res) => {
+  if (!projectTracker) return res.status(503).json({ error: 'Project tracker unavailable' });
+  res.json({ success: projectTracker.deleteProject(req.params.id) });
+});
+
+app.post('/api/projects/:id/milestones', (req, res) => {
+  if (!projectTracker) return res.status(503).json({ error: 'Project tracker unavailable' });
+  try {
+    res.json(projectTracker.addMilestone(req.params.id, req.body));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.patch('/api/projects/:id/milestones/:milestoneId/complete', (req, res) => {
+  if (!projectTracker) return res.status(503).json({ error: 'Project tracker unavailable' });
+  try {
+    res.json(projectTracker.completeMilestone(req.params.id, req.params.milestoneId));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/projects/:id/tasks', (req, res) => {
+  if (!projectTracker) return res.status(503).json({ error: 'Project tracker unavailable' });
+  try {
+    res.json(projectTracker.addTask(req.params.id, req.body));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/projects/:id/commits', (req, res) => {
+  if (!projectTracker) return res.status(503).json({ error: 'Project tracker unavailable' });
+  try {
+    res.json(projectTracker.logCommit(req.params.id, req.body));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/projects/:id/achievements', (req, res) => {
+  if (!projectTracker) return res.status(503).json({ error: 'Project tracker unavailable' });
+  try {
+    res.json(projectTracker.addAchievement(req.params.id, req.body));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/projects/:id/connect-platform', (req, res) => {
+  if (!projectTracker) return res.status(503).json({ error: 'Project tracker unavailable' });
+  try {
+    const { platform, credentials } = req.body;
+    res.json(projectTracker.connectPlatform(req.params.id, platform, credentials));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/projects/:id/stats', (req, res) => {
+  if (!projectTracker) return res.status(503).json({ error: 'Project tracker unavailable' });
+  try {
+    res.json(projectTracker.getProjectStats(req.params.id));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Payment endpoints
+app.get('/api/payments/subscription/:userId', (req, res) => {
+  if (!paymentService) return res.status(503).json({ error: 'Payment service unavailable' });
+  res.json(paymentService.getUserSubscription(req.params.userId));
+});
+
+app.post('/api/payments/create-payment-intent', async (req, res) => {
+  if (!paymentService) return res.status(503).json({ error: 'Payment service unavailable' });
+  try {
+    const { amount, currency, metadata } = req.body;
+    res.json(await paymentService.createPaymentIntent(amount, currency || 'usd', metadata || {}));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/payments/checkout', async (req, res) => {
+  if (!paymentService) return res.status(503).json({ error: 'Payment service unavailable' });
+  try {
+    const { lineItems, successUrl, cancelUrl, metadata } = req.body;
+    res.json(await paymentService.createCheckoutSession(lineItems, successUrl, cancelUrl, metadata || {}));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/payments/crypto/invoice', async (req, res) => {
+  if (!paymentService) return res.status(503).json({ error: 'Payment service unavailable' });
+  try {
+    const { amount, currency, userId } = req.body;
+    res.json(await paymentService.createCryptoInvoice(amount, currency, userId));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/payments/gift-card/create', (req, res) => {
+  if (!paymentService) return res.status(503).json({ error: 'Payment service unavailable' });
+  const { amount, currency } = req.body;
+  res.json(paymentService.createGiftCard(amount, currency || 'usd'));
+});
+
+app.post('/api/payments/gift-card/redeem', (req, res) => {
+  if (!paymentService) return res.status(503).json({ error: 'Payment service unavailable' });
+  try {
+    const { code, userId } = req.body;
+    res.json(paymentService.redeemGiftCard(code, userId));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/payments/validate-card', (req, res) => {
+  if (!paymentService) return res.status(503).json({ error: 'Payment service unavailable' });
+  const { number } = req.body;
+  res.json({ cardType: paymentService.detectCardType(number), luhnValid: paymentService.luhnCheck ? paymentService.luhnCheck(number) : null });
+});
+
+// i18n endpoints
+app.get('/api/i18n/locales', (req, res) => {
+  if (!i18nService) return res.status(503).json({ error: 'i18n service unavailable' });
+  res.json(i18nService.getSupportedLocales());
+});
+
+app.get('/api/i18n/translations/:locale', (req, res) => {
+  if (!i18nService) return res.status(503).json({ error: 'i18n service unavailable' });
+  res.json(i18nService.getTranslations(req.params.locale));
+});
+
+app.post('/api/i18n/detect', (req, res) => {
+  if (!i18nService) return res.status(503).json({ error: 'i18n service unavailable' });
+  const acceptLang = req.headers['accept-language'] || req.body.acceptLanguage || 'en';
+  res.json({ locale: i18nService.autoDetectLocale(acceptLang) });
+});
+
+// Connector status endpoints
+app.get('/api/connectors/status', async (req, res) => {
+  if (!connectorsService) return res.status(503).json({ error: 'Connectors service unavailable' });
+  res.json(connectorsService.getConnectorStatus());
+});
+
+app.post('/api/connectors/:name/test', async (req, res) => {
+  if (!connectorsService) return res.status(503).json({ error: 'Connectors service unavailable' });
+  try {
+    const connector = connectorsService.getConnector(req.params.name);
+    if (!connector) return res.status(404).json({ error: 'Connector not found' });
+    const result = await connector.testConnection();
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Game dev endpoints
+app.get('/api/gamedev/achievements/:userId', (req, res) => {
+  if (!gameDevService) return res.status(503).json({ error: 'GameDev service unavailable' });
+  const { platform } = req.query;
+  res.json(gameDevService.getUserAchievements(req.params.userId, platform));
+});
+
+app.post('/api/gamedev/achievements/:userId', (req, res) => {
+  if (!gameDevService) return res.status(503).json({ error: 'GameDev service unavailable' });
+  res.json(gameDevService.grantAchievement(req.params.userId, req.body));
+});
+
+app.get('/api/gamedev/progress/:userId/:gameId', (req, res) => {
+  if (!gameDevService) return res.status(503).json({ error: 'GameDev service unavailable' });
+  res.json(gameDevService.getGameProgress(req.params.userId, req.params.gameId));
+});
+
+app.post('/api/gamedev/progress/:userId/:gameId', (req, res) => {
+  if (!gameDevService) return res.status(503).json({ error: 'GameDev service unavailable' });
+  res.json(gameDevService.updateGameProgress(req.params.userId, req.params.gameId, req.body));
+});
+
+app.get('/api/gamedev/leaderboard/:gameId', (req, res) => {
+  if (!gameDevService) return res.status(503).json({ error: 'GameDev service unavailable' });
+  const { platform, limit } = req.query;
+  res.json(gameDevService.getLeaderboard(req.params.gameId, platform, parseInt(limit) || 10));
+});
+
+app.post('/api/gamedev/score/:userId/:gameId', (req, res) => {
+  if (!gameDevService) return res.status(503).json({ error: 'GameDev service unavailable' });
+  const { score, platform } = req.body;
+  res.json(gameDevService.submitScore(req.params.userId, req.params.gameId, score, platform));
+});
+
+// ================================================
 // WEBSOCKET HANDLING
 // ================================================
 
@@ -1145,24 +1569,62 @@ io.on('connection', (socket) => {
     socket.broadcast.emit('workflow:updated', data);
   });
 
+  // Subscribe to real-time analytics feed
+  socket.on('analytics:subscribe', () => {
+    socket.join('analytics-feed');
+  });
+
+  socket.on('analytics:unsubscribe', () => {
+    socket.leave('analytics-feed');
+  });
+
+  // Subscribe to security feed
+  socket.on('security:subscribe', () => {
+    socket.join('security-feed');
+  });
+
+  socket.on('security:unsubscribe', () => {
+    socket.leave('security-feed');
+  });
+
+  // Subscribe to project updates
+  socket.on('projects:subscribe', ({ projectId }) => {
+    if (projectId) socket.join(`project-${projectId}`);
+  });
+
   socket.on('disconnect', () => {
     security.logAudit('SOCKET_DISCONNECT', { socketId: socket.id });
   });
 });
 
 // ================================================
-// AUTO-PATCHING SCHEDULER
+// SCHEDULED BROADCASTS
 // ================================================
 
-setInterval(async () => {
-  console.log('Running automated security scan...');
-  const scan = await security.scanVulnerabilities();
+// Real-time analytics push every 10 seconds
+setInterval(() => {
+  if (!analyticsService) return;
+  const update = analyticsService.getRealTimeUpdate();
+  io.to('analytics-feed').emit('analytics:update', update);
+}, 10000);
 
+// Security status push every 30 seconds
+setInterval(async () => {
+  const status = security.getSecurityStatus();
+  io.to('security-feed').emit('security:update', {
+    ...status,
+    timestamp: Date.now()
+  });
+}, 30000);
+
+// Hourly security scan
+setInterval(async () => {
+  const scan = await security.scanVulnerabilities();
   if (scan.vulnerabilities.length > 0) {
-    console.log('Vulnerabilities detected, auto-patching...');
     await security.autoPatch();
   }
-}, 60 * 60 * 1000); // Every hour
+  io.to('security-feed').emit('security:scan', scan);
+}, 60 * 60 * 1000);
 
 // ================================================
 // ERROR HANDLING

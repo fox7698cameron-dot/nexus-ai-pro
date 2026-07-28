@@ -1,8 +1,15 @@
 /* app.jsx
-   Updated: make UI more responsive for mobile/desktop, persist model selection, chats, memories, settings,
-   ensure AES-256 label present, and small responsive CSS tweaks.
+   Updated: 2026-07-28 — added analytics, project tracker, payments, connectors, auth dashboards,
+   socket.io real-time feeds, multi-platform routing.
 */
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { io } from 'socket.io-client';
+import AnalyticsDashboard from './src/analytics/AnalyticsDashboard.jsx';
+import ProjectTracker from './src/projects/ProjectTracker.jsx';
+import SecurityDashboardEnhanced from './src/security/SecurityDashboardEnhanced.jsx';
+import AuthDashboard from './src/auth/AuthDashboard.jsx';
+import SubscriptionDashboard from './src/payments/SubscriptionDashboard.jsx';
+import ConnectorsDashboard from './src/connectors/ConnectorsDashboard.jsx';
 import { securityService } from './src/security-service.js';
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
@@ -462,7 +469,12 @@ const TOOLS = {
   automation: { name: 'Automation', icon: Workflow, description: 'N8N-style workflows' },
   deploy: { name: 'Deploy', icon: Rocket, description: 'App deployment' },
   security: { name: 'Security', icon: Shield, description: 'Security analysis' },
-  schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' }
+  schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' },
+  analytics: { name: 'Analytics', icon: BarChart3, description: 'Social media analytics' },
+  projects: { name: 'Projects', icon: GitBranch, description: 'Project & game dev tracker' },
+  payments: { name: 'Payments', icon: Star, description: 'Subscriptions & billing' },
+  connectors: { name: 'Connectors', icon: Network, description: 'Platform integrations' },
+  users: { name: 'Users', icon: Users, description: 'Auth & user management' },
 };
 
 // ============================================
@@ -651,6 +663,15 @@ export default function NexusAI() {
 
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
+  const socketRef = useRef(null);
+
+  // Socket.io connection for real-time feeds
+  useEffect(() => {
+    const serverUrl = import.meta.env.VITE_API_URL || '';
+    const socket = io(serverUrl, { path: '/socket.io', transports: ['websocket', 'polling'] });
+    socketRef.current = socket;
+    return () => socket.disconnect();
+  }, []);
 
   // Auto scroll
   useEffect(() => {
@@ -946,7 +967,7 @@ export default function NexusAI() {
             {Object.entries(TOOLS).map(([key, tool]) => {
               const Icon = tool.icon;
               return (
-                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security'].includes(key)) setShowToolContent(true); }}>
+                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security', 'analytics', 'projects', 'payments', 'connectors', 'users'].includes(key)) setShowToolContent(true); else setShowToolContent(false); }}>
                   <Icon size={18} />
                   <span>{tool.name}</span>
                 </button>
@@ -1101,6 +1122,48 @@ export default function NexusAI() {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Enhanced Security Dashboard */}
+          {showToolContent && activeTool === 'security-enhanced' && (
+            <div className="tool-content" style={{ padding: 0, overflow: 'auto', maxHeight: '80vh' }}>
+              <SecurityDashboardEnhanced socket={socketRef.current}/>
+            </div>
+          )}
+
+          {/* Analytics Dashboard */}
+          {showToolContent && activeTool === 'analytics' && (
+            <div className="tool-content" style={{ padding: 0, overflow: 'auto', maxHeight: '80vh' }}>
+              <AnalyticsDashboard socket={socketRef.current}/>
+            </div>
+          )}
+
+          {/* Project Tracker */}
+          {showToolContent && activeTool === 'projects' && (
+            <div className="tool-content" style={{ padding: 0, overflow: 'auto', maxHeight: '80vh' }}>
+              <ProjectTracker socket={socketRef.current}/>
+            </div>
+          )}
+
+          {/* Subscription & Payments */}
+          {showToolContent && activeTool === 'payments' && (
+            <div className="tool-content" style={{ padding: 0, overflow: 'auto', maxHeight: '80vh' }}>
+              <SubscriptionDashboard/>
+            </div>
+          )}
+
+          {/* Platform Connectors */}
+          {showToolContent && activeTool === 'connectors' && (
+            <div className="tool-content" style={{ padding: 0, overflow: 'auto', maxHeight: '80vh' }}>
+              <ConnectorsDashboard/>
+            </div>
+          )}
+
+          {/* Auth & User Management */}
+          {showToolContent && activeTool === 'users' && (
+            <div className="tool-content" style={{ padding: 0, overflow: 'auto', maxHeight: '80vh' }}>
+              <AuthDashboard/>
             </div>
           )}
 

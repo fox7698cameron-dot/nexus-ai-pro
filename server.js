@@ -14,7 +14,13 @@ import { Server } from 'socket.io';
 import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
-import Jexl from 'jexl';
+import * as authModule from './src/auth/index.js';
+import { requireAuth, requireRole, optionalAuth } from './src/middleware/auth.js';
+import * as analyticsModule from './src/analytics/index.js';
+import * as projectsModule from './src/projects/index.js';
+import * as paymentsModule from './src/payments/index.js';
+import * as connectorsModule from './src/connectors/index.js';
+import * as i18nModule from './src/i18n/index.js';
 
 dotenv.config();
 
@@ -441,8 +447,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-pro';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -787,44 +792,59 @@ class WorkflowEngine {
     return { httpResponse: await response.json() };
   }
 
-  async executeCodeNode(node, context) {
-    // Execute code node as a Jexl expression instead of raw JavaScript
+  executeCodeNode(node, context) {
+    // Safe expression evaluator: supports basic math and string operations
     const { code } = node.config || {};
     if (typeof code !== 'string' || !code.trim()) {
       return { codeError: 'Invalid code expression' };
     }
     try {
-      const result = await Jexl.eval(code, context);
+      const result = this._safeEval(code, context);
       return { codeResult: result };
     } catch (error) {
       return { codeError: error.message };
     }
   }
 
-  async executeConditionNode(node, context) {
+  executeConditionNode(node, context) {
     const { condition } = node.config || {};
     if (typeof condition !== 'string' || !condition.trim()) {
       return { conditionResult: false };
     }
-    const { transform } = node.config || {};
     try {
-      const result = await Jexl.eval(condition, context);
+      const result = this._safeEval(condition, context);
       return { conditionResult: !!result };
     } catch (error) {
       return { conditionResult: false };
     }
   }
 
-  async executeTransformNode(node, context) {
+  executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
     try {
-      const result = await Jexl.eval(transform, context);
+      const result = this._safeEval(transform, context);
       return { transformResult: result };
     } catch (error) {
       return { transformError: error.message };
     }
+  }
+
+  _safeEval(expr, ctx) {
+    // Whitelist: only allow safe JSON-path-like lookups via dot notation
+    const cleaned = expr.trim();
+    if (/^[\w.[\]'"]+$/.test(cleaned)) {
+      const parts = cleaned.replace(/\[(\d+)\]/g, '.$1').split('.');
+      let val = ctx;
+      for (const p of parts) {
+        if (val == null || !Object.prototype.hasOwnProperty.call(val, p)) return undefined;
+        val = val[p];
+      }
+      return val;
+    }
+    throw new Error('Expression not allowed');
   }
 }
 
@@ -1099,20 +1119,385 @@ app.get('/api/templates/app', (req, res) => {
 });
 
 // ================================================
+// AUTH ROUTES
+// ================================================
+
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const result = await authModule.register(req.body);
+    const { status, ...body } = result;
+    res.status(status).json(body);
+  } catch (err) {
+    res.status(500).json({ error: 'Registration failed' });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const result = await authModule.login(req.body, req.ip);
+    const { status, ...body } = result;
+    res.status(status).json(body);
+  } catch (err) {
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+app.post('/api/auth/mfa/verify-session', async (req, res) => {
+  const { sessionId, mfaToken } = req.body;
+  const result = await authModule.verifyMfaSession(sessionId, mfaToken);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.post('/api/auth/refresh', (req, res) => {
+  const { refreshToken } = req.body;
+  const result = authModule.refreshAccessToken(refreshToken);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.post('/api/auth/logout', requireAuth, (req, res) => {
+  const { refreshToken } = req.body;
+  const result = authModule.logout(refreshToken, req.user.id);
+  res.status(result.status).json({ ok: true });
+});
+
+app.post('/api/auth/mfa/setup', requireAuth, async (req, res) => {
+  const result = await authModule.setupMFA(req.user.id);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.post('/api/auth/mfa/confirm', requireAuth, (req, res) => {
+  const result = authModule.confirmMFA(req.user.id, req.body.token);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.post('/api/auth/mfa/disable', requireAuth, (req, res) => {
+  const result = authModule.disableMFA(req.user.id, req.body.token);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.post('/api/auth/biometric/register', requireAuth, (req, res) => {
+  const result = authModule.registerBiometric(req.user.id, req.body.publicKeyCredential);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  const result = authModule.getProfile(req.user.id);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.put('/api/auth/profile', requireAuth, (req, res) => {
+  const result = authModule.updateProfile(req.user.id, req.body);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.get('/api/admin/users', requireAuth, requireRole('admin', 'moderator'), (req, res) => {
+  const result = authModule.listUsers(req.user.role);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.get('/api/admin/audit', requireAuth, requireRole('admin'), (req, res) => {
+  const result = authModule.getAuditLog(req.user.role);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+// ================================================
+// ANALYTICS ROUTES
+// ================================================
+
+app.get('/api/analytics/metrics', requireAuth, (req, res) => {
+  const { platform, range } = req.query;
+  const result = analyticsModule.getMetrics(req.user.id, platform, range);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.get('/api/analytics/snapshot', requireAuth, (req, res) => {
+  const result = analyticsModule.getCurrentSnapshot(req.user.id);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.get('/api/analytics/reach', requireAuth, (req, res) => {
+  const result = analyticsModule.getReachSummary(req.user.id);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.get('/api/analytics/retention', requireAuth, (req, res) => {
+  const result = analyticsModule.getRetentionData(req.user.id, req.query.platform);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.post('/api/analytics/ingest', requireAuth, (req, res) => {
+  const { platform, metric, value } = req.body;
+  const result = analyticsModule.ingestMetric(req.user.id, platform, metric, value);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.get('/api/analytics/platforms', (_req, res) => {
+  res.json({ platforms: analyticsModule.PLATFORMS });
+});
+
+// ================================================
+// PROJECT ROUTES
+// ================================================
+
+app.post('/api/projects', requireAuth, (req, res) => {
+  const result = projectsModule.createProject(req.user.id, req.body);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.get('/api/projects', requireAuth, (req, res) => {
+  const result = projectsModule.listProjects(req.user.id, req.query);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.get('/api/projects/summary', requireAuth, (req, res) => {
+  const result = projectsModule.getDashboardSummary(req.user.id);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.get('/api/projects/:id', requireAuth, (req, res) => {
+  const result = projectsModule.getProject(req.user.id, req.params.id);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.put('/api/projects/:id', requireAuth, (req, res) => {
+  const result = projectsModule.updateProject(req.user.id, req.params.id, req.body);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.delete('/api/projects/:id', requireAuth, (req, res) => {
+  const result = projectsModule.deleteProject(req.user.id, req.params.id);
+  res.status(result.status).json({ ok: true });
+});
+
+app.post('/api/projects/:id/milestones', requireAuth, (req, res) => {
+  const result = projectsModule.addMilestone(req.user.id, req.params.id, req.body);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.post('/api/projects/:id/milestones/:mid/complete', requireAuth, (req, res) => {
+  const result = projectsModule.completeMilestone(req.user.id, req.params.id, req.params.mid);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.put('/api/projects/:id/metrics', requireAuth, (req, res) => {
+  const result = projectsModule.updateMetrics(req.user.id, req.params.id, req.body);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.post('/api/projects/:id/hours', requireAuth, (req, res) => {
+  const { hours, note } = req.body;
+  const result = projectsModule.logHours(req.user.id, req.params.id, hours, note);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.get('/api/projects/types', (_req, res) => {
+  res.json({ types: projectsModule.PROJECT_TYPES, stacks: projectsModule.TECH_STACKS, gamePlatforms: projectsModule.GAME_PLATFORMS });
+});
+
+// ================================================
+// PAYMENT ROUTES
+// ================================================
+
+app.get('/api/payments/plans', (_req, res) => {
+  const result = paymentsModule.getPlans();
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.get('/api/payments/subscription', requireAuth, (req, res) => {
+  const sub = paymentsModule.getSubscription(req.user.id);
+  res.json(sub);
+});
+
+app.post('/api/payments/intent', requireAuth, async (req, res) => {
+  try {
+    const { amount, currency, metadata } = req.body;
+    const result = await paymentsModule.createPaymentIntent(req.user.id, amount, currency, metadata);
+    const { status, ...body } = result;
+    res.status(status).json(body);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/payments/subscribe', requireAuth, async (req, res) => {
+  try {
+    const { planId, paymentMethodId, email } = req.body;
+    const result = await paymentsModule.createSubscription(req.user.id, planId, paymentMethodId, email);
+    const { status_code, ...body } = result;
+    res.status(status_code || 200).json(body);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/payments/subscription', requireAuth, async (req, res) => {
+  try {
+    const result = await paymentsModule.cancelSubscription(req.user.id);
+    res.status(result.status_code || 200).json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/payments/gift-card/redeem', requireAuth, (req, res) => {
+  const result = paymentsModule.redeemGiftCard(req.user.id, req.body.code);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.post('/api/payments/crypto', requireAuth, (req, res) => {
+  const { txHash, amount, currency, network } = req.body;
+  const result = paymentsModule.registerCryptoPayment(req.user.id, txHash, amount, currency, network);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.get('/api/payments/history', requireAuth, (req, res) => {
+  const result = paymentsModule.getPaymentHistory(req.user.id);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+// Stripe webhook (raw body needed)
+app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), (req, res) => {
+  try {
+    const sig = req.headers['stripe-signature'];
+    const event = paymentsModule.verifyStripeWebhook(req.body, sig);
+    security.logAudit('STRIPE_WEBHOOK', { type: event.type });
+    res.json({ received: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ================================================
+// CONNECTOR ROUTES
+// ================================================
+
+app.get('/api/connectors/catalog', (_req, res) => {
+  const result = connectorsModule.getCatalog(null);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.get('/api/connectors/catalog/:category', (_req, res) => {
+  const result = connectorsModule.getCatalog(_req.params.category);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.get('/api/connectors', requireAuth, (req, res) => {
+  const result = connectorsModule.listConnections(req.user.id);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.post('/api/connectors/:connectorId', requireAuth, (req, res) => {
+  const result = connectorsModule.connect(req.user.id, req.params.connectorId, req.body.credentials || {});
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.delete('/api/connectors/:connectorId', requireAuth, (req, res) => {
+  const result = connectorsModule.disconnect(req.user.id, req.params.connectorId);
+  res.status(result.status).json({ ok: true });
+});
+
+app.get('/api/connectors/:connectorId/status', requireAuth, (req, res) => {
+  const result = connectorsModule.getConnectionStatus(req.user.id, req.params.connectorId);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+// Game progress & achievements
+app.post('/api/games/:gameId/progress', requireAuth, (req, res) => {
+  const result = connectorsModule.updateGameProgress(req.user.id, req.params.gameId, req.body);
+  res.status(result.status).json({ ok: true });
+});
+
+app.get('/api/games/:gameId/progress', requireAuth, (req, res) => {
+  const result = connectorsModule.getGameProgress(req.user.id, req.params.gameId);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+app.post('/api/games/:gameId/achievements/:achievementId', requireAuth, (req, res) => {
+  const result = connectorsModule.upsertAchievement(req.user.id, req.params.gameId, req.params.achievementId, req.body);
+  res.status(result.status).json({ ok: true });
+});
+
+app.get('/api/games/:gameId/achievements', requireAuth, (req, res) => {
+  const result = connectorsModule.getAchievements(req.user.id, req.params.gameId);
+  const { status, ...body } = result;
+  res.status(status).json(body);
+});
+
+// ================================================
+// I18N ROUTES
+// ================================================
+
+app.get('/api/i18n/locales', (_req, res) => {
+  res.json({ locales: i18nModule.SUPPORTED_LOCALES });
+});
+
+app.post('/api/i18n/translate', async (req, res) => {
+  try {
+    const { text, targetLocale, sourceLocale } = req.body;
+    const result = await i18nModule.autoTranslate(text, targetLocale, sourceLocale);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/i18n/detect', (req, res) => {
+  const locale = i18nModule.detectLocaleFromHeader(req.headers['accept-language']);
+  res.json({ locale });
+});
+
+// ================================================
 // WEBSOCKET HANDLING
 // ================================================
 
 io.use((socket, next) => {
-  // Authenticate socket connection
   const token = socket.handshake.auth.token;
   if (token) {
-    // Verify token
-    socket.userId = security.hash(token);
-    next();
+    const payload = authModule.verifyAccessToken(token);
+    if (payload) {
+      socket.userId = payload.sub;
+      socket.userRole = payload.role;
+    } else {
+      socket.userId = uuidv4();
+    }
   } else {
     socket.userId = uuidv4();
-    next();
   }
+  next();
 });
 
 io.on('connection', (socket) => {
@@ -1145,7 +1530,32 @@ io.on('connection', (socket) => {
     socket.broadcast.emit('workflow:updated', data);
   });
 
+  // Real-time analytics subscription
+  let analyticsSubId = null;
+  socket.on('analytics:subscribe', () => {
+    if (socket.userId && analyticsSubId === null) {
+      analyticsSubId = analyticsModule.subscribe(socket.userId, (update) => {
+        socket.emit('analytics:update', update);
+      });
+    }
+  });
+
+  socket.on('analytics:unsubscribe', () => {
+    if (analyticsSubId !== null) {
+      analyticsModule.unsubscribe(socket.userId, analyticsSubId);
+      analyticsSubId = null;
+    }
+  });
+
+  // Security real-time notifications
+  socket.on('security:subscribe', () => {
+    if (socket.userRole === 'admin' || socket.userRole === 'dev') {
+      socket.join('security:alerts');
+    }
+  });
+
   socket.on('disconnect', () => {
+    if (analyticsSubId !== null) analyticsModule.unsubscribe(socket.userId, analyticsSubId);
     security.logAudit('SOCKET_DISCONNECT', { socketId: socket.id });
   });
 });

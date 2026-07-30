@@ -1,9 +1,17 @@
-/* app.jsx
-   Updated: make UI more responsive for mobile/desktop, persist model selection, chats, memories, settings,
-   ensure AES-256 label present, and small responsive CSS tweaks.
-*/
+// app.jsx - Updated: 2026-07-30
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { securityService } from './src/security-service.js';
+import { initI18n } from './src/i18n/config.js';
+
+// Initialize i18n (reads saved language preference from storage)
+try {
+  const savedLang = (() => {
+    try { return JSON.parse(localStorage.getItem('nexus:settings') || '{}').language || 'en'; } catch { return 'en'; }
+  })();
+  initI18n(savedLang);
+} catch {
+  // i18n init failure is non-fatal
+}
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
   Settings, Menu, X, Plus, Trash2, Download, Upload,

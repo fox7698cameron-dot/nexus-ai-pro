@@ -1,6 +1,16 @@
+// main.jsx - Updated: 2026-07-30
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import NexusAI from './app.jsx';
+import RoleRouter from './src/auth/RoleRouter.jsx';
+
+// Check if we should render the new role-based UI
+const USE_ROLE_ROUTER = new URLSearchParams(window.location.search).has('dashboard') ||
+  window.location.pathname.startsWith('/dashboard') ||
+  window.location.pathname.startsWith('/admin') ||
+  window.location.pathname.startsWith('/analytics') ||
+  window.location.pathname.startsWith('/security') ||
+  window.location.pathname.startsWith('/projects');
 
 // Security: Disable React DevTools in production
 if (typeof window.__REACT_DEVTOOLS_GLOBAL_HOOK__ === 'object') {
@@ -84,7 +94,7 @@ const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
     <ErrorBoundary>
-      <NexusAI />
+      {USE_ROLE_ROUTER ? <RoleRouter /> : <NexusAI />}
     </ErrorBoundary>
   </React.StrictMode>
 );

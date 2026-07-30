@@ -3,6 +3,7 @@
 // Military-Grade Security & Multi-Model AI Platform
 // ================================================
 
+// server.js - Updated: 2026-07-30
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -15,6 +16,13 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+
+// Feature routers
+import authRouter from './src/auth/auth-routes.js';
+import analyticsRouter from './src/analytics/analytics-routes.js';
+import projectsRouter from './src/projects/project-routes.js';
+import connectorsRouter from './src/connectors/cloud-connectors.js';
+import paymentsRouter from './src/payments/stripe-routes.js';
 
 dotenv.config();
 
@@ -441,8 +449,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-pro-latest';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +823,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -1064,6 +1072,39 @@ app.post('/api/upload', upload.array('files', 10), (req, res) => {
     };
   });
   res.json({ files });
+});
+
+// ================================================
+// FEATURE ROUTES — Auth, Analytics, Projects, Connectors, Payments
+// ================================================
+app.use('/api/auth', authRouter);
+app.use('/api/analytics', analyticsRouter);
+app.use('/api/projects', projectsRouter);
+app.use('/api/connectors', connectorsRouter);
+app.use('/api/payments', paymentsRouter);
+
+// Auto-translate endpoint
+app.post('/api/i18n/translate', async (req, res) => {
+  const { text, target, source } = req.body;
+  if (!text || !target) return res.status(400).json({ error: 'text and target required.' });
+  const googleKey = process.env.GOOGLE_TRANSLATE_API_KEY;
+  if (!googleKey) {
+    return res.json({ translated: text, target, note: 'Set GOOGLE_TRANSLATE_API_KEY to enable auto-translate.' });
+  }
+  try {
+    const url = new URL('https://translation.googleapis.com/language/translate/v2');
+    url.searchParams.set('key', googleKey);
+    const response = await fetch(url.toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: text, target, ...(source ? { source } : {}) })
+    });
+    const data = await response.json();
+    const translated = data?.data?.translations?.[0]?.translatedText || text;
+    return res.json({ translated, source: data?.data?.translations?.[0]?.detectedSourceLanguage || source, target });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // Game dev templates

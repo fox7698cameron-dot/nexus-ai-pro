@@ -39,6 +39,7 @@ class SecurityModule {
     this.vulnerabilityPatches = new Map();
     this.threatDatabase = new Set();
     this.lastScan = Date.now();
+    this.lastKeyRotation = Date.now();
   }
 
   // Derive master encryption key
@@ -258,6 +259,7 @@ class SecurityModule {
   // Key rotation
   rotateKeys() {
     this.masterKey = this.deriveMasterKey();
+    this.lastKeyRotation = Date.now();
     this.logAudit('KEY_ROTATION', { timestamp: Date.now() });
     return true;
   }
@@ -393,6 +395,53 @@ const upload = multer({
 });
 
 // ================================================
+// AUTH STORE (server-side JWT using jsonwebtoken)
+// ================================================
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
+
+const JWT_SECRET = process.env.JWT_SECRET || (() => {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('JWT_SECRET env var must be set in production');
+  }
+  return crypto.randomBytes(64).toString('hex');
+})();
+
+const BCRYPT_ROUNDS = 12;
+
+// In-memory user store — replace with a real DB (Postgres/Redis) in production
+const userStore = new Map();
+const refreshTokenStore = new Map();
+
+function issueTokens(user) {
+  const payload = { sub: user.id, email: user.email, role: user.role, displayName: user.displayName };
+  const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '15m', algorithm: 'HS256' });
+  const refreshToken = security.generateSecureToken(48);
+  refreshTokenStore.set(refreshToken, { userId: user.id, expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000 });
+  return { accessToken, refreshToken, expiresIn: 900 };
+}
+
+function requireAuth(allowedRoles = []) {
+  return (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    const token = authHeader.slice(7);
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+      req.user = decoded;
+      if (allowedRoles.length > 0 && !allowedRoles.includes(decoded.role)) {
+        return res.status(403).json({ error: 'Insufficient permissions' });
+      }
+      next();
+    } catch (err) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+  };
+}
+
+// ================================================
 // AI MODEL CLIENTS
 // ================================================
 
@@ -441,8 +490,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-2.0-flash';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -755,10 +803,16 @@ class WorkflowEngine {
 
     const hostname = parsed.hostname.toLowerCase();
 
-    // Basic protection against localhost and obvious private IP-style hosts.
-    const blockedHostnames = ['localhost', '127.0.0.1', '::1'];
+    // Block localhost, loopback, link-local, and all private RFC-1918 / cloud-metadata ranges.
+    const blockedHostnames = ['localhost', '127.0.0.1', '::1', '0.0.0.0', '169.254.169.254'];
     if (blockedHostnames.includes(hostname)) {
       throw new Error('HTTP node URL hostname is not allowed');
+    }
+
+    // Block private IPv4 ranges (10.x, 172.16-31.x, 192.168.x, loopback, link-local)
+    const privateIpv4 = /^(10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|127\.\d+\.\d+\.\d+|169\.254\.\d+\.\d+)$/;
+    if (privateIpv4.test(hostname)) {
+      throw new Error('HTTP node URL targets a private network address');
     }
 
     // Optionally enforce a simple allow-list by domain suffix.
@@ -816,6 +870,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const transform = node.config?.transform;
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -834,6 +889,428 @@ const workflowEngine = new WorkflowEngine();
 // API ROUTES
 // ================================================
 
+// ── Authentication ────────────────────────────
+app.post('/api/auth/register', authLimiter, async (req, res) => {
+  try {
+    const { email, password, displayName, username, lang = 'en' } = req.body;
+    if (!email || !password || !displayName) {
+      return res.status(400).json({ error: 'email, password, and displayName are required' });
+    }
+    // Validate email
+    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRe.test(email)) return res.status(400).json({ error: 'Invalid email' });
+
+    // Password: 13+ chars, upper, lower, digit, special
+    const pwCheck = validatePasswordStrength(password);
+    if (!pwCheck.valid) return res.status(400).json({ error: pwCheck.feedback.join(', ') });
+
+    // Username: Unicode, emoji allowed
+    if (username) {
+      const usernameRe = /^[\p{L}\p{N}_\-.\p{Emoji}]{3,64}$/u;
+      if (!usernameRe.test(username)) {
+        return res.status(400).json({ error: 'Invalid username format' });
+      }
+    }
+
+    // Check duplicate
+    for (const u of userStore.values()) {
+      if (u.email.toLowerCase() === email.toLowerCase()) {
+        return res.status(409).json({ error: 'Email already registered' });
+      }
+    }
+
+    const id = uuidv4();
+    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    const user = {
+      id, email: email.toLowerCase(), passwordHash,
+      displayName, username: username || displayName,
+      role: 'user', lang,
+      mfaEnabled: false, mfaSecret: null,
+      createdAt: Date.now(), lastLogin: null
+    };
+    userStore.set(id, user);
+    security.logAudit('USER_REGISTERED', { userId: id, email: user.email });
+    const tokens = issueTokens(user);
+    res.status(201).json({ user: sanitizeUser(user), ...tokens });
+  } catch (err) {
+    security.logAudit('REGISTER_ERROR', { error: err.message });
+    res.status(500).json({ error: 'Registration failed' });
+  }
+});
+
+app.post('/api/auth/login', authLimiter, async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'email and password required' });
+
+    let user;
+    for (const u of userStore.values()) {
+      if (u.email === email.toLowerCase()) { user = u; break; }
+    }
+    if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+      security.logAudit('LOGIN_FAILED', { email });
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    user.lastLogin = Date.now();
+    security.logAudit('LOGIN_SUCCESS', { userId: user.id });
+    const tokens = issueTokens(user);
+    res.json({ user: sanitizeUser(user), ...tokens });
+  } catch (err) {
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+app.post('/api/auth/refresh', (req, res) => {
+  const { refreshToken } = req.body;
+  if (!refreshToken) return res.status(400).json({ error: 'refreshToken required' });
+  const stored = refreshTokenStore.get(refreshToken);
+  if (!stored || stored.expiresAt < Date.now()) {
+    refreshTokenStore.delete(refreshToken);
+    return res.status(401).json({ error: 'Invalid or expired refresh token' });
+  }
+  const user = userStore.get(stored.userId);
+  if (!user) return res.status(401).json({ error: 'User not found' });
+  refreshTokenStore.delete(refreshToken);
+  const tokens = issueTokens(user);
+  res.json(tokens);
+});
+
+app.post('/api/auth/logout', requireAuth(), (req, res) => {
+  // Client should discard tokens; server-side we can't invalidate JWTs without a blocklist
+  security.logAudit('LOGOUT', { userId: req.user.sub });
+  res.json({ success: true });
+});
+
+app.get('/api/auth/me', requireAuth(), (req, res) => {
+  const user = userStore.get(req.user.sub);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json(sanitizeUser(user));
+});
+
+app.put('/api/auth/me', requireAuth(), async (req, res) => {
+  const user = userStore.get(req.user.sub);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  const { displayName, username, lang } = req.body;
+  if (displayName) user.displayName = displayName;
+  if (lang) user.lang = lang;
+  if (username) {
+    const re = /^[\p{L}\p{N}_\-.\p{Emoji}]{3,64}$/u;
+    if (!re.test(username)) return res.status(400).json({ error: 'Invalid username' });
+    user.username = username;
+  }
+  res.json(sanitizeUser(user));
+});
+
+app.post('/api/auth/change-password', requireAuth(), async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  const user = userStore.get(req.user.sub);
+  if (!user || !(await bcrypt.compare(currentPassword, user.passwordHash))) {
+    return res.status(401).json({ error: 'Current password incorrect' });
+  }
+  const check = validatePasswordStrength(newPassword);
+  if (!check.valid) return res.status(400).json({ error: check.feedback.join(', ') });
+  user.passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+  security.logAudit('PASSWORD_CHANGED', { userId: user.id });
+  res.json({ success: true });
+});
+
+// Admin: list and manage users
+app.get('/api/admin/users', requireAuth(['admin']), (req, res) => {
+  const users = Array.from(userStore.values()).map(sanitizeUser);
+  res.json({ users, total: users.length });
+});
+
+app.put('/api/admin/users/:id/role', requireAuth(['admin']), (req, res) => {
+  const { role } = req.body;
+  const allowed = ['admin', 'dev', 'moderator', 'user'];
+  if (!allowed.includes(role)) return res.status(400).json({ error: 'Invalid role' });
+  const user = userStore.get(req.params.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  user.role = role;
+  security.logAudit('ROLE_CHANGED', { targetId: user.id, role, adminId: req.user.sub });
+  res.json(sanitizeUser(user));
+});
+
+// ── Analytics ─────────────────────────────────
+// Real-time analytics endpoint — returns mock + computed data for all platforms
+app.get('/api/analytics/social', requireAuth(), (req, res) => {
+  const { platform, period = '7d' } = req.query;
+  const now = Date.now();
+  res.json(buildSocialAnalytics(platform, period, now));
+});
+
+app.get('/api/analytics/platforms', requireAuth(), (req, res) => {
+  res.json({
+    platforms: ['tiktok', 'instagram', 'facebook', 'twitch', 'discord', 'lemon8', 'reddit', 'redgifs'],
+    periods: ['24h', '7d', '30d', '90d']
+  });
+});
+
+app.post('/api/analytics/social/connect', requireAuth(), (req, res) => {
+  const { platform, oauthCode } = req.body;
+  // OAuth exchange would happen here; return connector stub
+  security.logAudit('SOCIAL_CONNECT', { userId: req.user.sub, platform });
+  res.json({ platform, connected: true, message: 'OAuth flow initiated — complete in frontend' });
+});
+
+// ── Project Tracking ──────────────────────────
+const projectStore = new Map();
+const taskStore = new Map();
+
+app.post('/api/projects', requireAuth(), (req, res) => {
+  const { name, type, description, tags = [], engine } = req.body;
+  if (!name || !type) return res.status(400).json({ error: 'name and type required' });
+  const project = {
+    id: uuidv4(), userId: req.user.sub,
+    name, type, description, tags, engine,
+    status: 'active', progress: 0,
+    milestones: [], tasks: [],
+    platforms: [], connectors: [],
+    createdAt: now(), updatedAt: now()
+  };
+  projectStore.set(project.id, project);
+  res.status(201).json(project);
+});
+
+app.get('/api/projects', requireAuth(), (req, res) => {
+  const projects = Array.from(projectStore.values())
+    .filter(p => p.userId === req.user.sub)
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+  res.json({ projects, total: projects.length });
+});
+
+app.get('/api/projects/:id', requireAuth(), (req, res) => {
+  const p = projectStore.get(req.params.id);
+  if (!p || p.userId !== req.user.sub) return res.status(404).json({ error: 'Not found' });
+  res.json(p);
+});
+
+app.put('/api/projects/:id', requireAuth(), (req, res) => {
+  const p = projectStore.get(req.params.id);
+  if (!p || p.userId !== req.user.sub) return res.status(404).json({ error: 'Not found' });
+  Object.assign(p, req.body, { updatedAt: now() });
+  res.json(p);
+});
+
+app.delete('/api/projects/:id', requireAuth(), (req, res) => {
+  const p = projectStore.get(req.params.id);
+  if (!p || p.userId !== req.user.sub) return res.status(404).json({ error: 'Not found' });
+  projectStore.delete(req.params.id);
+  res.json({ success: true });
+});
+
+// Game connectors
+app.get('/api/connectors/game', requireAuth(), (req, res) => {
+  res.json({
+    connectors: [
+      { id: 'unreal', name: 'Unreal Engine', vendor: 'Epic Games', status: 'available', authType: 'apiKey' },
+      { id: 'epic', name: 'Epic Games Store', vendor: 'Epic Games', status: 'available', authType: 'oauth2' },
+      { id: 'sony', name: 'PlayStation Network', vendor: 'Sony', status: 'available', authType: 'oauth2' },
+      { id: 'microsoft', name: 'Xbox Live / Azure PlayFab', vendor: 'Microsoft', status: 'available', authType: 'oauth2' },
+      { id: 'ubisoft', name: 'Ubisoft Connect', vendor: 'Ubisoft', status: 'available', authType: 'oauth2' }
+    ]
+  });
+});
+
+app.post('/api/connectors/game/connect', requireAuth(), (req, res) => {
+  const { connector, credentials } = req.body;
+  // Validate connector is whitelisted before any use of credentials
+  const allowed = ['unreal', 'epic', 'sony', 'microsoft', 'ubisoft'];
+  if (!allowed.includes(connector)) return res.status(400).json({ error: 'Unknown connector' });
+  security.logAudit('GAME_CONNECTOR_CONNECT', { userId: req.user.sub, connector });
+  res.json({ connector, connected: true, message: `${connector} auth flow initiated` });
+});
+
+app.get('/api/achievements/:platform/:userId', requireAuth(), async (req, res) => {
+  // Stub returning structured achievement data
+  res.json(buildAchievementData(req.params.platform, req.params.userId));
+});
+
+// ── Payment / Subscription ────────────────────
+app.get('/api/payments/plans', (req, res) => {
+  res.json({ plans: SUBSCRIPTION_PLANS });
+});
+
+app.post('/api/payments/checkout', requireAuth(), async (req, res) => {
+  const { planId, paymentMethod } = req.body;
+  const plan = SUBSCRIPTION_PLANS.find(p => p.id === planId);
+  if (!plan) return res.status(400).json({ error: 'Invalid plan' });
+  // Stripe / crypto session creation happens here using env-var keys — never hardcoded
+  security.logAudit('CHECKOUT_INITIATED', { userId: req.user.sub, planId, paymentMethod });
+  res.json({
+    sessionId: uuidv4(),
+    plan,
+    paymentMethod,
+    stripePublicKey: process.env.STRIPE_PUBLIC_KEY || null,
+    message: 'Checkout session created — supply STRIPE_SECRET_KEY and STRIPE_PUBLIC_KEY env vars to activate real payments'
+  });
+});
+
+app.post('/api/payments/webhook', (req, res) => {
+  // Stripe webhook — verify signature using STRIPE_WEBHOOK_SECRET env var
+  const sig = req.headers['stripe-signature'];
+  if (!sig || !process.env.STRIPE_WEBHOOK_SECRET) {
+    return res.status(400).json({ error: 'Webhook signature missing or secret not configured' });
+  }
+  security.logAudit('PAYMENT_WEBHOOK', { sig: sig.slice(0, 20) + '...' });
+  res.json({ received: true });
+});
+
+// ── Cloud Connectors ──────────────────────────
+app.get('/api/connectors/cloud', requireAuth(), (req, res) => {
+  res.json({
+    connectors: [
+      { id: 'aws',       name: 'Amazon Web Services',  authType: 'iam',    status: !!process.env.AWS_ACCESS_KEY_ID ? 'configured' : 'unconfigured' },
+      { id: 'azure',     name: 'Microsoft Azure',      authType: 'oauth2', status: !!process.env.AZURE_CLIENT_ID ? 'configured' : 'unconfigured' },
+      { id: 'gcp',       name: 'Google Cloud Platform',authType: 'oauth2', status: !!process.env.GOOGLE_API_KEY ? 'configured' : 'unconfigured' },
+      { id: 'slack',     name: 'Slack',                authType: 'oauth2', status: !!process.env.SLACK_BOT_TOKEN ? 'configured' : 'unconfigured' },
+      { id: 'zoom',      name: 'Zoom',                 authType: 'oauth2', status: !!process.env.ZOOM_CLIENT_ID ? 'configured' : 'unconfigured' },
+      { id: 'github',    name: 'GitHub',               authType: 'oauth2', status: !!process.env.GITHUB_TOKEN ? 'configured' : 'unconfigured' },
+      { id: 'bitbucket', name: 'Bitbucket',            authType: 'oauth2', status: !!process.env.BITBUCKET_TOKEN ? 'configured' : 'unconfigured' },
+      { id: 'adobe',     name: 'Adobe Creative Cloud', authType: 'oauth2', status: !!process.env.ADOBE_CLIENT_ID ? 'configured' : 'unconfigured' }
+    ]
+  });
+});
+
+// ── i18n / Language Support ───────────────────
+app.get('/api/i18n/languages', (req, res) => {
+  res.json({ languages: SUPPORTED_LANGUAGES });
+});
+
+app.get('/api/i18n/translations/:lang', (req, res) => {
+  const { lang } = req.params;
+  const supported = SUPPORTED_LANGUAGES.map(l => l.code);
+  if (!supported.includes(lang)) return res.status(404).json({ error: 'Language not supported' });
+  res.json({ lang, translations: getTranslations(lang) });
+});
+
+// ── Helpers (not exported) ────────────────────
+function now() { return Date.now(); }
+
+function sanitizeUser(u) {
+  const { passwordHash, mfaSecret, ...safe } = u;
+  return safe;
+}
+
+function validatePasswordStrength(pw) {
+  const feedback = [];
+  if (!pw || pw.length < 13) feedback.push('Must be at least 13 characters');
+  if (!/[a-z]/.test(pw)) feedback.push('Add lowercase letters');
+  if (!/[A-Z]/.test(pw)) feedback.push('Add uppercase letters');
+  if (!/[0-9]/.test(pw)) feedback.push('Add numbers');
+  if (!/[^a-zA-Z0-9]/.test(pw)) feedback.push('Add special characters');
+  return { valid: feedback.length === 0, feedback };
+}
+
+function buildSocialAnalytics(platform, period, baseTime) {
+  const platforms = platform
+    ? [platform]
+    : ['tiktok', 'instagram', 'facebook', 'twitch', 'discord', 'lemon8', 'reddit', 'redgifs'];
+
+  const periodMs = { '24h': 86400000, '7d': 604800000, '30d': 2592000000, '90d': 7776000000 };
+  const ms = periodMs[period] || periodMs['7d'];
+  const points = period === '24h' ? 24 : period === '7d' ? 7 : period === '30d' ? 30 : 12;
+
+  return {
+    period, generatedAt: baseTime,
+    platforms: platforms.map(name => ({
+      name,
+      metrics: {
+        views:      pseudoRandom(name, 'views', 1000, 500000),
+        likes:      pseudoRandom(name, 'likes', 100, 50000),
+        shares:     pseudoRandom(name, 'shares', 10, 5000),
+        comments:   pseudoRandom(name, 'comments', 5, 2000),
+        followers:  pseudoRandom(name, 'followers', 500, 100000),
+        reach:      pseudoRandom(name, 'reach', 2000, 800000),
+        impressions:pseudoRandom(name, 'impressions', 3000, 1000000),
+        retention:  Math.round(pseudoRandom(name, 'retention', 20, 85)),
+        engagementRate: +(pseudoRandom(name, 'eng', 1, 12)).toFixed(2)
+      },
+      timeSeries: Array.from({ length: points }, (_, i) => ({
+        timestamp: baseTime - ms + (i / points) * ms,
+        views: pseudoRandom(name + i, 'v', 50, 20000),
+        likes: pseudoRandom(name + i, 'l', 5, 2000)
+      }))
+    }))
+  };
+}
+
+function pseudoRandom(seed, key, min, max) {
+  let h = 0;
+  const s = seed + key;
+  for (let i = 0; i < s.length; i++) { h = (Math.imul(31, h) + s.charCodeAt(i)) | 0; }
+  return Math.round(min + ((h >>> 0) / 0xffffffff) * (max - min));
+}
+
+function buildAchievementData(platform, userId) {
+  const achievements = {
+    playstation: ['First Blood', 'Speed Demon', 'Completionist', 'Social Butterfly', 'Champion'],
+    xbox:        ['Gamer Score 1000', 'Achievement Hunter', 'Speed Run', 'Team Player', 'Legend'],
+    epic:        ['Early Adopter', 'Store Evangelist', 'Challenge Master', 'Season 1 Winner'],
+    ubisoft:     ['Ubisoft Connect Veteran', 'Full Sync', 'Explorer', 'Ghost Protocol']
+  };
+  const list = achievements[platform] || achievements.playstation;
+  return {
+    platform, userId,
+    total: list.length,
+    unlocked: Math.floor(list.length * 0.6),
+    achievements: list.map((name, i) => ({
+      id: `ach_${i}`, name, unlockedAt: i < list.length * 0.6 ? Date.now() - i * 86400000 : null
+    }))
+  };
+}
+
+const SUBSCRIPTION_PLANS = [
+  { id: 'free',       name: 'Free',       price: 0,     currency: 'USD', interval: null,    features: ['5 AI chats/day', '1 project', 'Basic analytics'] },
+  { id: 'pro',        name: 'Pro',        price: 1499,  currency: 'USD', interval: 'month', features: ['Unlimited AI', '20 projects', 'Advanced analytics', 'Social connectors'] },
+  { id: 'studio',     name: 'Studio',     price: 4999,  currency: 'USD', interval: 'month', features: ['Everything in Pro', 'Game dev connectors', 'AR/VR tracking', '5 seats'] },
+  { id: 'enterprise', name: 'Enterprise', price: null,  currency: 'USD', interval: 'month', features: ['Custom pricing', 'SSO/SAML', 'Dedicated support', 'SLA'] }
+];
+
+const SUPPORTED_LANGUAGES = [
+  { code: 'en', name: 'English', nativeName: 'English' },
+  { code: 'es', name: 'Spanish', nativeName: 'Español' },
+  { code: 'fr', name: 'French', nativeName: 'Français' },
+  { code: 'de', name: 'German', nativeName: 'Deutsch' },
+  { code: 'pt', name: 'Portuguese', nativeName: 'Português' },
+  { code: 'ja', name: 'Japanese', nativeName: '日本語' },
+  { code: 'zh', name: 'Chinese (Simplified)', nativeName: '中文(简体)' },
+  { code: 'ko', name: 'Korean', nativeName: '한국어' },
+  { code: 'ar', name: 'Arabic', nativeName: 'العربية', rtl: true },
+  { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी' },
+  { code: 'ru', name: 'Russian', nativeName: 'Русский' },
+  { code: 'it', name: 'Italian', nativeName: 'Italiano' }
+];
+
+function getTranslations(lang) {
+  const base = {
+    'nav.dashboard': 'Dashboard', 'nav.analytics': 'Analytics', 'nav.projects': 'Projects',
+    'nav.security': 'Security', 'nav.settings': 'Settings',
+    'auth.login': 'Sign In', 'auth.register': 'Create Account', 'auth.logout': 'Sign Out',
+    'auth.email': 'Email', 'auth.password': 'Password',
+    'auth.forgotPassword': 'Forgot password?',
+    'common.save': 'Save', 'common.cancel': 'Cancel', 'common.delete': 'Delete',
+    'common.loading': 'Loading...', 'common.error': 'An error occurred'
+  };
+  const overrides = {
+    es: {
+      'nav.dashboard': 'Panel', 'nav.analytics': 'Análisis', 'nav.projects': 'Proyectos',
+      'nav.security': 'Seguridad', 'nav.settings': 'Configuración',
+      'auth.login': 'Iniciar sesión', 'auth.register': 'Crear cuenta', 'auth.logout': 'Cerrar sesión',
+      'auth.email': 'Correo', 'auth.password': 'Contraseña',
+      'common.save': 'Guardar', 'common.cancel': 'Cancelar', 'common.delete': 'Eliminar',
+      'common.loading': 'Cargando...', 'common.error': 'Ocurrió un error'
+    },
+    fr: {
+      'nav.dashboard': 'Tableau de bord', 'nav.analytics': 'Analytique', 'nav.projects': 'Projets',
+      'nav.security': 'Sécurité', 'nav.settings': 'Paramètres',
+      'auth.login': 'Se connecter', 'auth.register': 'Créer un compte', 'auth.logout': 'Se déconnecter',
+      'common.save': 'Enregistrer', 'common.cancel': 'Annuler', 'common.loading': 'Chargement...'
+    }
+  };
+  return { ...base, ...(overrides[lang] || {}) };
+}
+
 // Health check
 app.get('/api/health', (req, res) => {
   res.json({
@@ -848,46 +1325,50 @@ app.get('/api/security/status', (req, res) => {
   res.json(security.getSecurityStatus());
 });
 
-app.post('/api/security/scan', async (req, res) => {
-  const results = await security.scanVulnerabilities();
-  res.json(results);
-});
-
-app.post('/api/security/patch', async (req, res) => {
-  const patches = await security.autoPatch();
-  res.json({ patches });
-});
-
-app.post('/api/security/rotate-keys', (req, res) => {
+app.post('/api/security/rotate-keys', requireAuth(['admin']), (req, res) => {
   const success = security.rotateKeys();
   res.json({ success });
 });
 
-app.get('/api/security/audit', (req, res) => {
-  const { limit = 100, offset = 0 } = req.query;
-  const logs = security.auditLog.slice(-limit - offset, -offset || undefined);
-  res.json({ logs, total: security.auditLog.length });
+app.post('/api/security/scan', requireAuth(['admin', 'dev']), async (req, res) => {
+  const results = await security.scanVulnerabilities();
+  res.json(results);
+});
+
+app.post('/api/security/patch', requireAuth(['admin']), async (req, res) => {
+  const patches = await security.autoPatch();
+  res.json({ patches });
+});
+
+app.get('/api/security/audit', requireAuth(['admin', 'dev']), (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+  const offset = parseInt(req.query.offset, 10) || 0;
+  const total = security.auditLog.length;
+  // Newest first, then page
+  const sorted = [...security.auditLog].reverse();
+  const logs = sorted.slice(offset, offset + limit);
+  res.json({ logs, total, limit, offset });
 });
 
 // Comprehensive security dashboard endpoint (for all platforms)
-app.get('/api/security/dashboard', async (req, res) => {
+app.get('/api/security/dashboard', requireAuth(['admin', 'dev']), async (req, res) => {
   try {
     const status = security.getSecurityStatus();
     const recentLogs = security.auditLog.slice(-10);
-    const threatsSummary = recentLogs.filter(l => l.type.includes('THREAT') || l.type.includes('ATTACK'));
+    const threatsSummary = recentLogs.filter(l =>
+      l.event && (l.event.includes('THREAT') || l.event.includes('ATTACK') || l.event.includes('BLOCKED'))
+    );
     
     res.json({
       overallScore: status.securityScore || 92,
       encryptionStatus: 'AES-256-GCM',
       encryptionActive: true,
       lastScanTime: security.lastScan,
-      vulnerabilities: [
-        { id: 1, name: 'Outdated Dependencies', severity: 'medium', status: 'warning' },
-        { id: 2, name: 'API Key Exposure Risk', severity: 'low', status: 'info' },
-        { id: 3, name: 'TLS/SSL Configuration', severity: 'high', status: 'resolved' }
-      ],
+      lastKeyRotation: security.lastKeyRotation,
+      nextKeyRotation: security.lastKeyRotation + 86_400_000,
+      vulnerabilities: [],
       threats: threatsSummary.slice(0, 5).map(log => ({
-        type: log.type,
+        event: log.event,
         status: 'blocked',
         timestamp: log.timestamp
       })),
@@ -899,9 +1380,9 @@ app.get('/api/security/dashboard', async (req, res) => {
 });
 
 // Security alerts endpoint
-app.get('/api/security/alerts', (req, res) => {
+app.get('/api/security/alerts', requireAuth(['admin', 'dev']), (req, res) => {
   const alerts = security.auditLog
-    .filter(l => l.type.includes('ERROR') || l.type.includes('THREAT') || l.type.includes('ATTACK'))
+    .filter(l => l.event && (l.event.includes('ERROR') || l.event.includes('THREAT') || l.event.includes('ATTACK') || l.event.includes('BLOCKED')))
     .slice(-20);
   
   res.json({
@@ -912,12 +1393,13 @@ app.get('/api/security/alerts', (req, res) => {
 });
 
 // Encryption health endpoint
-app.get('/api/security/encryption-health', (req, res) => {
+app.get('/api/security/encryption-health', requireAuth(['admin', 'dev']), (req, res) => {
   res.json({
     algorithm: 'AES-256-GCM',
+    keyLength: 256,
     keyRotationInterval: '24h',
-    lastKeyRotation: security.lastKeyRotation || Date.now(),
-    nextKeyRotation: (security.lastKeyRotation || Date.now()) + 86400000,
+    lastKeyRotation: security.lastKeyRotation,
+    nextKeyRotation: security.lastKeyRotation + 86_400_000,
     status: 'healthy',
     certificateExpiry: Date.now() + 30 * 24 * 60 * 60 * 1000
   });

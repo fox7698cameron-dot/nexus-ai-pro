@@ -1,13 +1,38 @@
 /**
- * Security Module - Barrel export for all security utilities and services
- * Provides centralized access to encryption, hashing, authentication, and authorization
+ * Security Module — Barrel export for all security utilities and services
+ * @date 2026-08-03
  */
+
+// ============ Type Definitions ============
+
+export interface TokenData {
+  userId: string;
+  role: UserRole;
+  scope: string[];
+  issuedAt: number;
+  expiresAt: number;
+}
+
+export interface AuditEntry {
+  id: string;
+  timestamp: Date;
+  userId: string;
+  action: string;
+  resource: string;
+  result: 'success' | 'failure';
+  details: Record<string, unknown>;
+}
+
+export type UserRole = 'admin' | 'dev' | 'moderator' | 'user';
+
+export interface PasswordStrengthResult {
+  valid: boolean;
+  score: number;
+  feedback: string[];
+}
 
 // ============ Cryptography & Hashing ============
 export class CryptoService {
-  /**
-   * Generate secure hash using SHA-256
-   */
   static async hashData(data: string): Promise<string> {
     const encoder = new TextEncoder();
     const dataBuffer = encoder.encode(data);
@@ -16,23 +41,18 @@ export class CryptoService {
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   }
 
-  /**
-   * Generate cryptographic nonce
-   */
-  static generateNonce(length: number = 32): string {
+  static generateNonce(length = 32): string {
     const array = new Uint8Array(length);
     crypto.getRandomValues(array);
     return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
   }
 
-  /**
-   * Encrypt data using AES-GCM
-   */
-  static async encryptData(data: string, password: string): Promise<string> {
+  static async encryptData(data: string, password: string, salt?: string): Promise<string> {
     const encoder = new TextEncoder();
     const dataBuffer = encoder.encode(data);
-    const passwordKey = await this.deriveKey(password);
-    
+    const derivedSalt = salt ?? this.generateNonce(16);
+    const passwordKey = await this.deriveKey(password, derivedSalt);
+
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const encryptedData = await crypto.subtle.encrypt(
       { name: 'AES-GCM', iv },
@@ -40,43 +60,42 @@ export class CryptoService {
       dataBuffer
     );
 
-    const combined = new Uint8Array(iv.length + new Uint8Array(encryptedData).length);
-    combined.set(iv);
-    combined.set(new Uint8Array(encryptedData), iv.length);
+    const saltBytes = encoder.encode(derivedSalt);
+    const combined = new Uint8Array(
+      2 + saltBytes.length + iv.length + new Uint8Array(encryptedData).length
+    );
+    combined[0] = saltBytes.length >> 8;
+    combined[1] = saltBytes.length & 0xff;
+    combined.set(saltBytes, 2);
+    combined.set(iv, 2 + saltBytes.length);
+    combined.set(new Uint8Array(encryptedData), 2 + saltBytes.length + iv.length);
 
     return btoa(String.fromCharCode(...combined));
   }
 
-  /**
-   * Decrypt data using AES-GCM
-   */
-  static async decryptData(encryptedData: string, password: string): Promise<string> {
-    const combined = Uint8Array.from(atob(encryptedData), c => c.charCodeAt(0));
-    const iv = combined.slice(0, 12);
-    const encrypted = combined.slice(12);
-    
-    const passwordKey = await this.deriveKey(password);
-    
+  static async decryptData(encryptedStr: string, password: string): Promise<string> {
+    const combined = Uint8Array.from(atob(encryptedStr), c => c.charCodeAt(0));
+    const saltLen = (combined[0] << 8) | combined[1];
+    const saltBytes = combined.slice(2, 2 + saltLen);
+    const salt = new TextDecoder().decode(saltBytes);
+    const iv = combined.slice(2 + saltLen, 2 + saltLen + 12);
+    const encrypted = combined.slice(2 + saltLen + 12);
+
+    const passwordKey = await this.deriveKey(password, salt);
     const decryptedData = await crypto.subtle.decrypt(
       { name: 'AES-GCM', iv },
       passwordKey,
       encrypted
     );
 
-    const decoder = new TextDecoder();
-    return decoder.decode(decryptedData);
+    return new TextDecoder().decode(decryptedData);
   }
 
-  /**
-   * Derive encryption key from password
-   */
-  private static async deriveKey(password: string): Promise<CryptoKey> {
+  private static async deriveKey(password: string, salt: string): Promise<CryptoKey> {
     const encoder = new TextEncoder();
-    const passwordBuffer = encoder.encode(password);
-    
     const importedKey = await crypto.subtle.importKey(
       'raw',
-      passwordBuffer,
+      encoder.encode(password),
       { name: 'PBKDF2' },
       false,
       ['deriveKey']
@@ -86,8 +105,8 @@ export class CryptoService {
       {
         name: 'PBKDF2',
         hash: 'SHA-256',
-        salt: new TextEncoder().encode('nexus-ai-salt'),
-        iterations: 100000
+        salt: encoder.encode(salt),
+        iterations: 210000
       },
       importedKey,
       { name: 'AES-GCM', length: 256 },
@@ -96,9 +115,6 @@ export class CryptoService {
     );
   }
 
-  /**
-   * Generate HMAC signature
-   */
   static async generateHMAC(data: string, secret: string): Promise<string> {
     const encoder = new TextEncoder();
     const key = await crypto.subtle.importKey(
@@ -108,23 +124,21 @@ export class CryptoService {
       false,
       ['sign']
     );
-
-    const signature = await crypto.subtle.sign(
-      'HMAC',
-      key,
-      encoder.encode(data)
-    );
-
-    const hashArray = Array.from(new Uint8Array(signature));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
+    return Array.from(new Uint8Array(signature))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
   }
 
-  /**
-   * Verify HMAC signature
-   */
   static async verifyHMAC(data: string, signature: string, secret: string): Promise<boolean> {
-    const expectedSignature = await this.generateHMAC(data, secret);
-    return expectedSignature === signature;
+    const expected = await this.generateHMAC(data, secret);
+    // Constant-time comparison
+    if (expected.length !== signature.length) return false;
+    let diff = 0;
+    for (let i = 0; i < expected.length; i++) {
+      diff |= expected.charCodeAt(i) ^ signature.charCodeAt(i);
+    }
+    return diff === 0;
   }
 }
 
@@ -132,126 +146,96 @@ export class CryptoService {
 export class AuthService {
   private static tokens = new Map<string, TokenData>();
 
-  interface TokenData {
-    userId: string;
-    scope: string[];
-    issuedAt: number;
-    expiresAt: number;
-    refreshToken?: string;
-  }
-
-  /**
-   * Generate JWT token
-   */
-  static generateToken(userId: string, scope: string[] = [], expiresIn: number = 3600): string {
-    const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-    const payload = btoa(JSON.stringify({
-      sub: userId,
-      scope,
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + expiresIn
-    }));
-
-    const tokenId = `token_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    this.tokens.set(tokenId, {
+  static generateToken(
+    userId: string,
+    role: UserRole = 'user',
+    scope: string[] = [],
+    expiresIn = 3600
+  ): string {
+    const tokenId = CryptoService.generateNonce(32);
+    const now = Date.now();
+    const data: TokenData = {
       userId,
+      role,
       scope,
-      issuedAt: Date.now(),
-      expiresAt: Date.now() + expiresIn * 1000
-    });
-
-    return `${header}.${payload}.${tokenId}`;
+      issuedAt: now,
+      expiresAt: now + expiresIn * 1000
+    };
+    this.tokens.set(tokenId, data);
+    // Format: tokenId.base64(payload) — tokenId is the opaque handle, never decodeable without map
+    const payload = btoa(JSON.stringify({ sub: userId, role, scope, exp: data.expiresAt }));
+    return `${tokenId}.${payload}`;
   }
 
-  /**
-   * Verify and decode JWT token
-   */
   static verifyToken(token: string): TokenData | null {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-
-    const tokenId = parts[2];
-    const tokenData = this.tokens.get(tokenId);
-
-    if (!tokenData || tokenData.expiresAt < Date.now()) {
+    if (!token || typeof token !== 'string') return null;
+    const tokenId = token.split('.')[0];
+    const data = this.tokens.get(tokenId);
+    if (!data || data.expiresAt < Date.now()) {
+      this.tokens.delete(tokenId);
       return null;
     }
-
-    return tokenData;
+    return data;
   }
 
-  /**
-   * Refresh token
-   */
   static refreshToken(token: string): string | null {
-    const tokenData = this.verifyToken(token);
-    if (!tokenData) return null;
-
-    return this.generateToken(tokenData.userId, tokenData.scope);
+    const data = this.verifyToken(token);
+    if (!data) return null;
+    this.revokeToken(token);
+    return this.generateToken(data.userId, data.role, data.scope);
   }
 
-  /**
-   * Revoke token
-   */
   static revokeToken(token: string): void {
-    const parts = token.split('.');
-    if (parts.length === 3) {
-      this.tokens.delete(parts[2]);
-    }
+    const tokenId = token.split('.')[0];
+    this.tokens.delete(tokenId);
   }
 }
 
 // ============ Authorization ============
 export class AuthorizationService {
-  private static permissions = new Map<string, string[]>();
+  private static permissions = new Map<string, Set<string>>();
 
-  /**
-   * Grant permissions to user
-   */
+  private static ROLE_DEFAULTS: Record<UserRole, string[]> = {
+    admin:     ['*'],
+    dev:       ['read:all', 'write:projects', 'write:code', 'read:analytics', 'read:security'],
+    moderator: ['read:all', 'write:content', 'delete:content'],
+    user:      ['read:own', 'write:own']
+  };
+
+  static initRole(userId: string, role: UserRole): void {
+    const perms = new Set(this.ROLE_DEFAULTS[role] ?? this.ROLE_DEFAULTS.user);
+    this.permissions.set(userId, perms);
+  }
+
   static grantPermissions(userId: string, permissions: string[]): void {
-    const current = this.permissions.get(userId) || [];
-    this.permissions.set(userId, [...new Set([...current, ...permissions])]);
+    const current = this.permissions.get(userId) ?? new Set<string>();
+    permissions.forEach(p => current.add(p));
+    this.permissions.set(userId, current);
   }
 
-  /**
-   * Check if user has permission
-   */
   static hasPermission(userId: string, permission: string): boolean {
-    const userPermissions = this.permissions.get(userId) || [];
-    return userPermissions.includes(permission) || userPermissions.includes('admin');
+    const perms = this.permissions.get(userId) ?? new Set<string>();
+    return perms.has('*') || perms.has(permission);
   }
 
-  /**
-   * Check multiple permissions (AND logic)
-   */
   static hasAllPermissions(userId: string, permissions: string[]): boolean {
     return permissions.every(p => this.hasPermission(userId, p));
   }
 
-  /**
-   * Check multiple permissions (OR logic)
-   */
   static hasAnyPermission(userId: string, permissions: string[]): boolean {
     return permissions.some(p => this.hasPermission(userId, p));
   }
 
-  /**
-   * Revoke permissions
-   */
   static revokePermissions(userId: string, permissions: string[]): void {
-    const current = this.permissions.get(userId) || [];
-    this.permissions.set(
-      userId,
-      current.filter(p => !permissions.includes(p))
-    );
+    const current = this.permissions.get(userId);
+    if (current) permissions.forEach(p => current.delete(p));
   }
 }
 
 // ============ Input Validation & Sanitization ============
 export class ValidationService {
-  /**
-   * Sanitize user input
-   */
+  private static readonly EMOJI_RE = /\p{Emoji}/u;
+
   static sanitizeInput(input: string): string {
     return input
       .replace(/&/g, '&amp;')
@@ -259,20 +243,13 @@ export class ValidationService {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#x27;')
-      .replace(/\/g, '&#x2F;');
+      .replace(/\//g, '&#x2F;');
   }
 
-  /**
-   * Validate email format
-   */
   static isValidEmail(email: string): boolean {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   }
 
-  /**
-   * Validate URL format
-   */
   static isValidUrl(url: string): boolean {
     try {
       new URL(url);
@@ -282,9 +259,6 @@ export class ValidationService {
     }
   }
 
-  /**
-   * Validate JSON structure
-   */
   static isValidJSON(json: string): boolean {
     try {
       JSON.parse(json);
@@ -295,16 +269,30 @@ export class ValidationService {
   }
 
   /**
-   * Validate password strength
+   * Validates username allowing Unicode letters, numbers, underscores, hyphens, dots, and emoji.
+   * Min 3 chars, max 64 chars.
    */
-  static isStrongPassword(password: string): { valid: boolean; score: number; feedback: string[] } {
+  static isValidUsername(username: string): { valid: boolean; feedback: string[] } {
+    const feedback: string[] = [];
+    if (!username || username.length < 3) feedback.push('Username must be at least 3 characters');
+    if (username.length > 64) feedback.push('Username must be 64 characters or fewer');
+    // Allow Unicode letters, digits, underscores, hyphens, dots, and emoji
+    if (!/^[\p{L}\p{N}_\-.\p{Emoji}]+$/u.test(username)) {
+      feedback.push('Username contains invalid characters');
+    }
+    return { valid: feedback.length === 0, feedback };
+  }
+
+  /** Minimum 13 characters, uppercase, lowercase, digit, special character required. */
+  static isStrongPassword(password: string): PasswordStrengthResult {
     const feedback: string[] = [];
     let score = 0;
 
-    if (password.length >= 8) score += 1;
-    else feedback.push('Password should be at least 8 characters');
+    if (password.length >= 13) score += 2;
+    else feedback.push('Password must be at least 13 characters');
 
-    if (password.length >= 12) score += 1;
+    if (password.length >= 20) score += 1;
+
     if (/[a-z]/.test(password)) score += 1;
     else feedback.push('Add lowercase letters');
 
@@ -314,35 +302,39 @@ export class ValidationService {
     if (/[0-9]/.test(password)) score += 1;
     else feedback.push('Add numbers');
 
-    if (/[^a-zA-Z0-9]/.test(password)) score += 1;
-    else feedback.push('Add special characters');
+    if (/[^a-zA-Z0-9]/.test(password)) score += 2;
+    else feedback.push('Add special characters (e.g. !@#$%^&*)');
 
-    return {
-      valid: score >= 4,
-      score,
-      feedback
-    };
+    // Penalise common patterns
+    if (/(.)\1{3,}/.test(password)) {
+      score -= 1;
+      feedback.push('Avoid repeated characters');
+    }
+
+    const valid = password.length >= 13 &&
+      /[a-z]/.test(password) &&
+      /[A-Z]/.test(password) &&
+      /[0-9]/.test(password) &&
+      /[^a-zA-Z0-9]/.test(password);
+
+    return { valid, score: Math.max(0, score), feedback };
   }
 }
 
 // ============ Security Audit & Logging ============
 export class SecurityAudit {
   private static auditLog: AuditEntry[] = [];
+  private static readonly MAX_LOG_SIZE = 5000;
 
-  interface AuditEntry {
-    timestamp: Date;
-    userId: string;
-    action: string;
-    resource: string;
-    result: 'success' | 'failure';
-    details: Record<string, any>;
-  }
-
-  /**
-   * Log security event
-   */
-  static logEvent(userId: string, action: string, resource: string, result: 'success' | 'failure', details: Record<string, any> = {}): void {
+  static logEvent(
+    userId: string,
+    action: string,
+    resource: string,
+    result: 'success' | 'failure',
+    details: Record<string, unknown> = {}
+  ): void {
     this.auditLog.push({
+      id: CryptoService.generateNonce(8),
       timestamp: new Date(),
       userId,
       action,
@@ -350,70 +342,59 @@ export class SecurityAudit {
       result,
       details
     });
+    if (this.auditLog.length > this.MAX_LOG_SIZE) {
+      this.auditLog = this.auditLog.slice(-this.MAX_LOG_SIZE);
+    }
   }
 
-  /**
-   * Get audit log
-   */
   static getAuditLog(userId?: string): AuditEntry[] {
-    if (userId) {
-      return this.auditLog.filter(entry => entry.userId === userId);
-    }
-    return this.auditLog;
+    return userId
+      ? this.auditLog.filter(e => e.userId === userId)
+      : [...this.auditLog];
   }
 
-  /**
-   * Detect suspicious activity
-   */
-  static detectSuspiciousActivity(userId: string, threshold: number = 5): AuditEntry[] {
-    const recentEntries = this.auditLog.filter(
-      entry => entry.userId === userId &&
-               entry.result === 'failure' &&
-               Date.now() - entry.timestamp.getTime() < 300000 // Last 5 minutes
+  static detectSuspiciousActivity(userId: string, threshold = 5): AuditEntry[] {
+    const windowStart = Date.now() - 300_000;
+    const recent = this.auditLog.filter(
+      e =>
+        e.userId === userId &&
+        e.result === 'failure' &&
+        e.timestamp.getTime() >= windowStart
     );
-    
-    if (recentEntries.length >= threshold) {
-      console.warn(`Suspicious activity detected for user: ${userId}`);
-      return recentEntries;
+    if (recent.length >= threshold) {
+      this.logEvent(userId, 'SUSPICIOUS_ACTIVITY_DETECTED', 'auth', 'failure', {
+        failureCount: recent.length
+      });
     }
-    
-    return [];
+    return recent.length >= threshold ? recent : [];
   }
 }
 
-// ============ Rate Limiting ============
+// ============ Rate Limiting (sliding window) ============
 export class RateLimiter {
-  private static requestCounts = new Map<string, { count: number; resetTime: number }>();
+  private static windows = new Map<string, number[]>();
 
-  /**
-   * Check if request is allowed
-   */
-  static isAllowed(userId: string, limit: number = 100, windowMs: number = 60000): boolean {
+  static isAllowed(key: string, limit = 100, windowMs = 60_000): boolean {
     const now = Date.now();
-    const record = this.requestCounts.get(userId);
-
-    if (!record || now > record.resetTime) {
-      this.requestCounts.set(userId, { count: 1, resetTime: now + windowMs });
-      return true;
-    }
-
-    record.count++;
-    if (record.count > limit) {
-      return false;
-    }
-
-    return true;
+    const windowStart = now - windowMs;
+    const timestamps = (this.windows.get(key) ?? []).filter(t => t > windowStart);
+    timestamps.push(now);
+    this.windows.set(key, timestamps);
+    return timestamps.length <= limit;
   }
 
-  /**
-   * Reset rate limit for user
-   */
-  static resetLimit(userId: string): void {
-    this.requestCounts.delete(userId);
+  static resetLimit(key: string): void {
+    this.windows.delete(key);
+  }
+
+  static getRemainingRequests(key: string, limit = 100, windowMs = 60_000): number {
+    const now = Date.now();
+    const timestamps = (this.windows.get(key) ?? []).filter(t => t > now - windowMs);
+    return Math.max(0, limit - timestamps.length);
   }
 }
 
-// ============ Export All Security Services ============
+// ============ Export ============
 export default {
   CryptoService,
   AuthService,

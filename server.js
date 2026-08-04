@@ -1,6 +1,7 @@
 // ================================================
 // NEXUS AI PRO - Enhanced Backend Server
 // Military-Grade Security & Multi-Model AI Platform
+// Version: 2.0.0 | Updated: 2026-08-04
 // ================================================
 
 import express from 'express';
@@ -15,6 +16,16 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+
+// ── New modular routes (2026-08-04) ──────────────────────────────────────────
+import authRouter from './src/server/routes/auth.js';
+import paymentsRouter from './src/server/routes/payments.js';
+import analyticsRouter from './src/server/routes/analytics.js';
+import gamingRouter from './src/server/routes/gaming.js';
+import projectsRouter from './src/server/routes/projects.js';
+import connectorsRouter from './src/server/routes/connectors.js';
+import { createI18nRouter, i18nMiddleware } from './src/server/i18n/i18nService.js';
+// ─────────────────────────────────────────────────────────────────────────────
 
 dotenv.config();
 
@@ -326,6 +337,12 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID']
 }));
+
+// i18n — locale detection and response helper (before body parsing)
+app.use(i18nMiddleware);
+
+// Stripe webhook needs raw body — must be before express.json()
+app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
 
 // Body parsing with size limits
 app.use(express.json({ limit: '10mb' }));
@@ -833,6 +850,19 @@ const workflowEngine = new WorkflowEngine();
 // ================================================
 // API ROUTES
 // ================================================
+
+// ── Modular feature routers (2026-08-04) ────────────────────────────────────
+// Share socket.io instance with routers that need real-time emission
+app.set('io', io);
+
+app.use('/api/auth',       authRouter);
+app.use('/api/payments',   paymentsRouter);
+app.use('/api/analytics',  analyticsRouter);
+app.use('/api/gaming',     gamingRouter);
+app.use('/api/projects',   projectsRouter);
+app.use('/api/connectors', connectorsRouter);
+app.use('/api/i18n',       createI18nRouter());
+// ────────────────────────────────────────────────────────────────────────────
 
 // Health check
 app.get('/api/health', (req, res) => {

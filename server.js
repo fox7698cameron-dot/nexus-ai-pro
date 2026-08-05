@@ -441,8 +441,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-2.0-flash';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +815,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -1099,33 +1099,545 @@ app.get('/api/templates/app', (req, res) => {
 });
 
 // ================================================
+// AUTHENTICATION ROUTES
+// ================================================
+
+import { AuthService, InMemoryUserStore, validatePasswordStrength, validateUsername } from './src/auth/AuthService.js';
+import { SocialAnalyticsService } from './src/analytics/SocialAnalyticsService.js';
+import { ProjectTrackingService } from './src/projects/ProjectTrackingService.js';
+import { I18nService } from './src/i18n/I18nService.js';
+import { ConnectorRegistry } from './src/connectors/PlatformConnectors.js';
+import { PaymentService, SubscriptionTier } from './src/payments/PaymentService.js';
+
+// Initialise services (Redis lazy-connected from env)
+let redisClient = null;
+if (process.env.REDIS_URL) {
+  const { default: Redis } = await import('ioredis');
+  redisClient = new Redis(process.env.REDIS_URL, { lazyConnect: true, enableReadyCheck: false });
+  redisClient.on('error', () => {}); // Silently degrade if Redis unavailable
+}
+
+const userStore       = new InMemoryUserStore();
+const authService     = new AuthService(userStore, redisClient);
+const analyticsService= new SocialAnalyticsService(redisClient);
+const projectService  = new ProjectTrackingService(redisClient);
+const i18nService     = new I18nService(redisClient);
+const connectorRegistry = new ConnectorRegistry();
+const paymentService  = new PaymentService({ userStore, redisClient });
+
+// Apply i18n middleware globally
+app.use(i18nService.middleware());
+
+// ---- AUTH: Register -------------------------------------------------------
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { username, email, password, role, language, region } = req.body;
+    const user = await authService.register({ username, email, password, role, language, region });
+    const tokens = await authService.login({ email, password });
+    res.status(201).json(tokens);
+  } catch (err) {
+    const status = err.message.includes('already') ? 409 : 400;
+    res.status(status).json({ error: err.message, fields: err.fields });
+  }
+});
+
+// ---- AUTH: Login ----------------------------------------------------------
+app.post('/api/auth/login', authLimiter, async (req, res) => {
+  try {
+    const { email, password, mfaCode } = req.body;
+    const result = await authService.login({ email, password, mfaCode });
+    res.json(result);
+  } catch (err) {
+    if (err.mfaRequired) return res.status(202).json({ mfaRequired: true });
+    res.status(401).json({ error: err.message });
+  }
+});
+
+// ---- AUTH: Refresh token --------------------------------------------------
+app.post('/api/auth/refresh', async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    if (!refreshToken) throw new Error('Refresh token required.');
+    const tokens = await authService.refreshTokens(refreshToken);
+    res.json(tokens);
+  } catch (err) {
+    res.status(401).json({ error: err.message });
+  }
+});
+
+// ---- AUTH: Logout (revoke refresh token) ----------------------------------
+app.post('/api/auth/logout', async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    if (refreshToken) await authService.revokeRefreshToken(refreshToken);
+    res.json({ loggedOut: true });
+  } catch {
+    res.json({ loggedOut: true });
+  }
+});
+
+// ---- AUTH: Forgot password ------------------------------------------------
+app.post('/api/auth/forgot-password', async (req, res) => {
+  // Always return 200 to prevent email enumeration
+  try {
+    const { email } = req.body;
+    if (email) authService.generatePasswordResetToken(email); // Token would be emailed in production
+  } catch { /* noop */ }
+  res.json({ sent: true });
+});
+
+// ---- AUTH: Reset password -------------------------------------------------
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+    const result = await authService.resetPassword(token, newPassword);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---- AUTH: Change password ------------------------------------------------
+app.post('/api/auth/change-password', authService.requireRole('user'), async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const result = await authService.changePassword(req.user.sub, currentPassword, newPassword);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---- AUTH: Setup TOTP 2FA -------------------------------------------------
+app.post('/api/auth/mfa/setup', authService.requireRole('user'), async (req, res) => {
+  try {
+    const setup = await authService.setupTOTP(req.user.sub);
+    res.json(setup);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---- AUTH: Confirm TOTP ---------------------------------------------------
+app.post('/api/auth/mfa/confirm', authService.requireRole('user'), async (req, res) => {
+  try {
+    const result = await authService.confirmTOTP(req.user.sub, req.body.code);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---- AUTH: Disable MFA ----------------------------------------------------
+app.post('/api/auth/mfa/disable', authService.requireRole('user'), async (req, res) => {
+  try {
+    const result = await authService.disableMFA(req.user.sub, req.body.password);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---- AUTH: Register biometric credential ----------------------------------
+app.post('/api/auth/biometric/register', authService.requireRole('user'), async (req, res) => {
+  try {
+    const { credentialId, type } = req.body;
+    const result = await authService.registerBiometric(req.user.sub, { credentialId, type });
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ---- AUTH: Verify biometric (called by AuthUI after WebAuthn assertion) ---
+app.post('/api/auth/biometric/verify', async (req, res) => {
+  try {
+    const { credentialId } = req.body;
+    // In production, verify the WebAuthn assertion signature cryptographically.
+    // Here we look up user by credential ID and issue tokens.
+    const allUsers = await userStore.listAll();
+    const hexId    = Buffer.from(credentialId).toString('hex');
+    const user     = allUsers.find(u => (u.biometrics?.credentialIds ?? []).includes(hexId));
+    if (!user) throw new Error('Biometric credential not found.');
+    const tokens = authService._issueTokenPair(user);
+    res.json(tokens);
+  } catch (err) {
+    res.status(401).json({ error: err.message });
+  }
+});
+
+// ---- AUTH: Get current user profile ---------------------------------------
+app.get('/api/auth/me', authService.requireRole('user'), async (req, res) => {
+  try {
+    const user = await userStore.get(req.user.sub);
+    res.json(authService._publicUser(user));
+  } catch {
+    res.status(404).json({ error: 'User not found.' });
+  }
+});
+
+// ---- AUTH: Validate password strength (public utility) -------------------
+app.post('/api/auth/validate-password', (req, res) => {
+  const result = validatePasswordStrength(req.body.password ?? '');
+  res.json(result);
+});
+
+// ---- AUTH: Validate username (public utility) ----------------------------
+app.post('/api/auth/validate-username', (req, res) => {
+  const result = validateUsername(req.body.username ?? '');
+  res.json(result);
+});
+
+// ---- AUTH: Admin — list users --------------------------------------------
+app.get('/api/admin/users', authService.requireRole('admin'), async (req, res) => {
+  const users = await userStore.listAll();
+  res.json(users.map(u => authService._publicUser(u)));
+});
+
+// ================================================
+// ANALYTICS ROUTES
+// ================================================
+
+app.get('/api/analytics/summary', authService.requireRole('user'), async (req, res) => {
+  try {
+    // Read connected accounts from user profile
+    const user     = await userStore.get(req.user.sub);
+    const accounts = user?.socialAccounts ?? [];
+    if (!accounts.length) {
+      return res.json({ platforms: [], errors: [], totals: { views: 0, likes: 0, followers: 0, reach: 0 } });
+    }
+    const summary = await analyticsService.getDashboardSummary(accounts);
+    res.json(summary);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/analytics/:platform/:accountId', authService.requireRole('user'), async (req, res) => {
+  try {
+    const metrics = await analyticsService.getAccountMetrics(
+      req.params.platform.toUpperCase(),
+      req.params.accountId
+    );
+    res.json(metrics);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/analytics/:platform/post/:postId', authService.requireRole('user'), async (req, res) => {
+  try {
+    const metrics = await analyticsService.getPostMetrics(
+      req.params.platform.toUpperCase(),
+      req.params.postId
+    );
+    res.json(metrics);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================================================
+// PROJECT TRACKING ROUTES
+// ================================================
+
+app.get('/api/projects', authService.requireRole('user'), async (req, res) => {
+  try {
+    const projects = await projectService.listProjectsForUser(req.query.userId ?? req.user.sub);
+    res.json(projects);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/projects', authService.requireRole('user'), async (req, res) => {
+  try {
+    const project = await projectService.createProject({ ...req.body, ownerId: req.user.sub });
+    res.status(201).json(project);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/projects/:projectId', authService.requireRole('user'), async (req, res) => {
+  try {
+    const project = await projectService.getProject(req.params.projectId);
+    res.json(project);
+  } catch (err) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
+app.patch('/api/projects/:projectId', authService.requireRole('user'), async (req, res) => {
+  try {
+    const project = await projectService.updateProject(req.params.projectId, req.body);
+    res.json(project);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/projects/:projectId/milestones', authService.requireRole('user'), async (req, res) => {
+  try {
+    const ms = await projectService.addMilestone(req.params.projectId, req.body);
+    res.status(201).json(ms);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/projects/:projectId/sync', authService.requireRole('user'), async (req, res) => {
+  try {
+    const { connector, config } = req.body ?? {};
+    if (connector && config) {
+      const result = await projectService.syncFromConnector(req.params.projectId, connector, config);
+      res.json(result);
+    } else {
+      res.json({ synced: true, timestamp: new Date().toISOString() });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/achievements', authService.requireRole('developer'), async (req, res) => {
+  try {
+    const ach = await projectService.registerAchievement(req.body.projectId, req.body);
+    res.status(201).json(ach);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/achievements', authService.requireRole('user'), async (req, res) => {
+  try {
+    const userId = req.query.userId ?? req.user.sub;
+    const achs   = await projectService.getUserAchievements(userId);
+    res.json(achs);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/achievements/:achievementId/unlock', authService.requireRole('user'), async (req, res) => {
+  try {
+    const result = await projectService.unlockAchievement(
+      req.params.achievementId,
+      req.body.userId ?? req.user.sub
+    );
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ================================================
+// PAYMENT ROUTES
+// ================================================
+
+app.post('/api/payments/checkout', authService.requireRole('user'), async (req, res) => {
+  try {
+    const { tier, successUrl, cancelUrl, currency } = req.body;
+    const result = await paymentService.createCheckoutSession({
+      userId: req.user.sub, tier, successUrl, cancelUrl, currency,
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Stripe webhook — no auth middleware, uses signature verification
+app.post('/api/payments/webhook',
+  express.raw({ type: 'application/json' }),
+  async (req, res) => {
+    try {
+      const sig    = req.headers['stripe-signature'];
+      const result = await paymentService.handleStripeWebhook(req.body, sig);
+      res.json(result);
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  }
+);
+
+app.post('/api/payments/crypto/initiate', authService.requireRole('user'), async (req, res) => {
+  try {
+    const { tier, currency } = req.body;
+    const result = await paymentService.initiateCryptoPayment({ userId: req.user.sub, tier, currency });
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/payments/gift-card/redeem', authService.requireRole('user'), async (req, res) => {
+  try {
+    const { code } = req.body;
+    const result   = await paymentService.redeemGiftCard(req.user.sub, code);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/payments/subscription', authService.requireRole('user'), async (req, res) => {
+  try {
+    const status = await paymentService.getSubscriptionStatus(req.user.sub);
+    res.json(status);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/payments/subscription/cancel', authService.requireRole('user'), async (req, res) => {
+  try {
+    const result = await paymentService.cancelSubscription(req.user.sub);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Admin: generate gift card
+app.post('/api/admin/gift-cards', authService.requireRole('admin'), (req, res) => {
+  try {
+    const { value, currency, expiryDays } = req.body;
+    const card = paymentService.generateGiftCard({ value: Number(value), currency, expiryDays });
+    security.logAudit('GIFT_CARD_GENERATED', { id: card.id, value, currency });
+    res.status(201).json(card);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ================================================
+// INTERNATIONALISATION ROUTES
+// ================================================
+
+app.get('/api/i18n/locales', (req, res) => {
+  res.json(i18nService.listLocales());
+});
+
+app.post('/api/i18n/translate', authService.requireRole('user'), async (req, res) => {
+  try {
+    const { text, targetLocale, sourceLocale } = req.body;
+    const translated = await i18nService.translate(text, targetLocale, sourceLocale);
+    res.json({ translated, targetLocale });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/i18n/translate/batch', authService.requireRole('user'), async (req, res) => {
+  try {
+    const { texts, targetLocale, sourceLocale } = req.body;
+    const translated = await i18nService.translateBatch(texts, targetLocale, sourceLocale);
+    res.json({ translated, targetLocale });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ================================================
+// CONNECTOR ROUTES
+// ================================================
+
+app.get('/api/connectors', authService.requireRole('user'), (req, res) => {
+  res.json({ types: connectorRegistry.listTypes() });
+});
+
+app.get('/api/connectors/health', authService.requireRole('admin'), async (req, res) => {
+  try {
+    const results = await connectorRegistry.healthCheckAll();
+    res.json({ connectors: results });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/connectors/:type/ping', authService.requireRole('developer'), async (req, res) => {
+  try {
+    const result = await connectorRegistry.get(req.params.type.toUpperCase()).healthCheck();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/connectors/slack/message', authService.requireRole('developer'), async (req, res) => {
+  try {
+    const { channel, text } = req.body;
+    const slack  = connectorRegistry.get('SLACK');
+    const result = await slack.sendMessage(channel, text);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/connectors/zoom/meeting', authService.requireRole('developer'), async (req, res) => {
+  try {
+    const zoom   = connectorRegistry.get('ZOOM');
+    const result = await zoom.createMeeting(req.body);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/connectors/github/repos/:owner', authService.requireRole('developer'), async (req, res) => {
+  try {
+    const github = connectorRegistry.get('GITHUB');
+    const repos  = await github.listRepos(req.params.owner);
+    res.json(repos);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/connectors/github/stats/:owner/:repo', authService.requireRole('developer'), async (req, res) => {
+  try {
+    const github = connectorRegistry.get('GITHUB');
+    const stats  = await github.getRepoStats(req.params.owner, req.params.repo);
+    res.json(stats);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================================================
 // WEBSOCKET HANDLING
 // ================================================
 
 io.use((socket, next) => {
-  // Authenticate socket connection
+  // Authenticate socket connection via JWT
   const token = socket.handshake.auth.token;
   if (token) {
-    // Verify token
-    socket.userId = security.hash(token);
-    next();
+    try {
+      const decoded = authService.verifyAccessToken(token);
+      socket.userId   = decoded.sub;
+      socket.userRole = decoded.role;
+    } catch {
+      socket.userId   = uuidv4();
+      socket.userRole = 'guest';
+    }
   } else {
-    socket.userId = uuidv4();
-    next();
+    socket.userId   = uuidv4();
+    socket.userRole = 'guest';
   }
+  next();
 });
 
 io.on('connection', (socket) => {
-  console.log(`Client connected: ${socket.id}`);
-  security.logAudit('SOCKET_CONNECT', { socketId: socket.id, userId: socket.userId });
+  security.logAudit('SOCKET_CONNECT', { socketId: socket.id, userId: socket.userId, role: socket.userRole });
 
   // Voice call handling
-  socket.on('voice:start', (data) => {
+  socket.on('voice:start', () => {
     socket.broadcast.emit('voice:started', { userId: socket.userId });
   });
 
   socket.on('voice:data', (data) => {
-    // Encrypt voice data
     const encrypted = security.encrypt(JSON.stringify(data));
     socket.broadcast.emit('voice:data', encrypted);
   });
@@ -1134,7 +1646,7 @@ io.on('connection', (socket) => {
     socket.broadcast.emit('voice:ended', { userId: socket.userId });
   });
 
-  // Real-time chat
+  // Real-time chat (encrypted)
   socket.on('chat:message', (data) => {
     const encrypted = security.encrypt(JSON.stringify(data));
     socket.broadcast.emit('chat:message', encrypted);
@@ -1145,10 +1657,39 @@ io.on('connection', (socket) => {
     socket.broadcast.emit('workflow:updated', data);
   });
 
+  // Real-time analytics subscription
+  socket.on('analytics:subscribe', () => {
+    socket.join(`analytics:${socket.userId}`);
+  });
+
+  // Real-time project metrics
+  socket.on('project:subscribe', ({ projectId }) => {
+    if (typeof projectId === 'string' && /^[\w-]{1,64}$/.test(projectId)) {
+      socket.join(`project:${projectId}`);
+    }
+  });
+
+  socket.on('project:unsubscribe', ({ projectId }) => {
+    socket.leave(`project:${projectId}`);
+  });
+
+  // Security dashboard real-time scan request
+  socket.on('security:scan', async () => {
+    if (socket.userRole === 'admin' || socket.userRole === 'developer') {
+      const result = await security.scanVulnerabilities();
+      socket.emit('security:scan:result', result);
+    }
+  });
+
   socket.on('disconnect', () => {
     security.logAudit('SOCKET_DISCONNECT', { socketId: socket.id });
   });
 });
+
+// Broadcast real-time security events to admin sockets
+function broadcastSecurityEvent(event) {
+  io.emit('security:event', event);
+}
 
 // ================================================
 // AUTO-PATCHING SCHEDULER

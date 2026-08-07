@@ -47,5 +47,14 @@ export default defineConfig({
   },
   optimizeDeps: {
     include: ['react', 'react-dom', 'lucide-react']
+  },
+  // Ensure emoji & Unicode pass through correctly
+  esbuild: {
+    charset: 'utf8',
+  },
+  define: {
+    // Prevent process.env leaking — env vars accessed via import.meta.env only
+    'process.env.VITE_STRIPE_PRO_PRICE_ID': JSON.stringify(''),
+    'process.env.VITE_STRIPE_ENT_PRICE_ID': JSON.stringify(''),
   }
 });

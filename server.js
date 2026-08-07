@@ -1,6 +1,9 @@
 // ================================================
 // NEXUS AI PRO - Enhanced Backend Server
 // Military-Grade Security & Multi-Model AI Platform
+// Copyright © 2025-2026 Cameron Fox. All rights reserved.
+// Licensed under Apache License 2.0
+// Updated: 2026-08-07
 // ================================================
 
 import express from 'express';
@@ -15,6 +18,8 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import acceptLanguage from 'accept-language-parser';
+import { installRoutes } from './src/server-routes.js';
 
 dotenv.config();
 
@@ -206,26 +211,35 @@ class SecurityModule {
     const threats = [];
     const { body, query, headers, ip } = request;
 
-    // SQL Injection patterns
-    const sqlPatterns = /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER)\b|--|;|'|")/gi;
+    // SQL Injection — match only SQL keywords and comment syntax (not quotes which appear in all JSON)
+    const sqlPatterns = /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER|EXEC|EXECUTE|XP_)\b|--\s|;\s*DROP|;\s*DELETE)/gi;
 
-    // XSS patterns
-    const xssPatterns = /<script|javascript:|on\w+=/gi;
+    // XSS patterns — match script tags and event handlers in string VALUES only
+    const xssPatterns = /<script[\s>]|javascript\s*:|on\w+\s*=/gi;
 
     // Path traversal
-    const pathPatterns = /\.\.\//g;
+    const pathPatterns = /\.\.[\\/]/g;
 
-    const checkData = JSON.stringify({ body, query });
+    // Flatten values (not keys) from body and query for safe inspection
+    const flattenValues = (obj, acc = []) => {
+      if (!obj || typeof obj !== 'object') return acc;
+      for (const v of Object.values(obj)) {
+        if (typeof v === 'string') acc.push(v);
+        else if (v && typeof v === 'object') flattenValues(v, acc);
+      }
+      return acc;
+    };
+    const checkValues = [...flattenValues(body), ...flattenValues(query)].join('\n');
 
-    if (sqlPatterns.test(checkData)) {
+    if (sqlPatterns.test(checkValues)) {
       threats.push({ type: 'SQL_INJECTION', severity: 'critical' });
     }
 
-    if (xssPatterns.test(checkData)) {
+    if (xssPatterns.test(checkValues)) {
       threats.push({ type: 'XSS', severity: 'high' });
     }
 
-    if (pathPatterns.test(checkData)) {
+    if (pathPatterns.test(checkValues)) {
       threats.push({ type: 'PATH_TRAVERSAL', severity: 'high' });
     }
 
@@ -353,17 +367,18 @@ app.use((req, res, next) => {
   next();
 });
 
-// Logging middleware
+// Logging middleware — only log errors and security events, not every request (minimal audit)
 app.use((req, res, next) => {
   res.on('finish', () => {
-    security.logAudit('REQUEST', {
-      requestId: req.requestId,
-      method: req.method,
-      path: req.path,
-      status: res.statusCode,
-      duration: Date.now() - req.startTime,
-      ip: req.ip
-    });
+    if (res.statusCode >= 400) {
+      security.logAudit('REQUEST_ERROR', {
+        requestId: req.requestId,
+        method: req.method,
+        path: req.path,
+        status: res.statusCode,
+        ip: req.ip
+      });
+    }
   });
   next();
 });
@@ -441,8 +456,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-2.0-flash-exp';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +830,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -1148,6 +1163,18 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     security.logAudit('SOCKET_DISCONNECT', { socketId: socket.id });
   });
+});
+
+// ================================================
+// EXTENDED ROUTES (Auth, Payments, Analytics, Projects)
+// ================================================
+installRoutes(app, security);
+
+// i18n — detect language from Accept-Language header
+app.use((req, res, next) => {
+  const lang = acceptLanguage.parse(req.headers['accept-language'] ?? 'en');
+  req.locale = lang[0]?.code ?? 'en';
+  next();
 });
 
 // ================================================

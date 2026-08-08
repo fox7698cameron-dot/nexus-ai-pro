@@ -8,7 +8,12 @@ import globals from 'globals';
 
 export default [
   {
-    ignores: ['dist/**', 'node_modules/**', 'build/**', '.git/**', 'nexus-ai-pro/**', 'capacitor/**', 'desktop/**', 'multiplatform/**']
+    ignores: [
+      'dist/**', 'node_modules/**', 'build/**', '.git/**',
+      'nexus-ai-pro/**', 'capacitor/**', 'desktop/**', 'multiplatform/**',
+      'dev-dist/**',            // generated service worker build
+      'src/security/index.ts',  // TypeScript file — lint via tsc not eslint
+    ]
   },
   {
     files: ['**/*.js', '**/*.jsx'],

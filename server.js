@@ -441,8 +441,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-pro';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +815,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -1096,6 +1096,671 @@ app.get('/api/templates/app', (req, res) => {
       { id: 'ai', name: 'AI Application', stack: 'Python/FastAPI' }
     ]
   });
+});
+
+// ================================================
+// LAZY-LOADED SERVICE MODULES
+// ================================================
+let _authService = null;
+let _paymentService = null;
+let _analyticsService = null;
+let _gameConnector = null;
+let _projectTracker = null;
+let _i18nService = null;
+
+async function getAuthService() {
+  if (_authService) return _authService;
+  const { AuthService } = await import('./src/auth/AuthService.js');
+  _authService = new AuthService();
+  return _authService;
+}
+async function getPaymentService() {
+  if (_paymentService) return _paymentService;
+  const { PaymentService } = await import('./src/payments/PaymentService.js');
+  _paymentService = new PaymentService();
+  return _paymentService;
+}
+async function getAnalyticsService() {
+  if (_analyticsService) return _analyticsService;
+  const { SocialAnalyticsService } = await import('./src/analytics/SocialAnalyticsService.js');
+  _analyticsService = new SocialAnalyticsService();
+  return _analyticsService;
+}
+async function getGameConnector() {
+  if (_gameConnector) return _gameConnector;
+  const { GameConnectorService } = await import('./src/gaming/GameConnectorService.js');
+  _gameConnector = new GameConnectorService();
+  return _gameConnector;
+}
+async function getProjectTracker() {
+  if (_projectTracker) return _projectTracker;
+  const { ProjectTrackerService } = await import('./src/projects/ProjectTrackerService.js');
+  _projectTracker = new ProjectTrackerService();
+  _projectTracker.setEmitCallback((event, data) => io.emit(event, data));
+  return _projectTracker;
+}
+async function getI18nService() {
+  if (_i18nService) return _i18nService;
+  const { I18nService } = await import('./src/i18n/i18nService.js');
+  _i18nService = new I18nService();
+  return _i18nService;
+}
+
+// Middleware: bearer-token auth helper (lightweight — full auth in AuthService)
+function bearerAuth(req) {
+  const h = req.headers.authorization || '';
+  return h.startsWith('Bearer ') ? h.slice(7) : null;
+}
+
+// ================================================
+// AUTHENTICATION ROUTES
+// ================================================
+
+app.use('/api/auth/', authLimiter);
+
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const auth = await getAuthService();
+    const user = await auth.register(req.body);
+    res.status(201).json({ user });
+  } catch (err) {
+    security.logAudit('REGISTER_ERROR', { error: err.message });
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const auth = await getAuthService();
+    const result = await auth.login(email, password);
+    res.json(result);
+  } catch (err) {
+    security.logAudit('LOGIN_ERROR', { error: err.message });
+    res.status(401).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/logout', async (req, res) => {
+  try {
+    const token = bearerAuth(req);
+    const auth = await getAuthService();
+    auth.logout(token);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/refresh', async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    const auth = await getAuthService();
+    const result = await auth.refreshAccessToken(refreshToken);
+    res.json(result);
+  } catch (err) {
+    res.status(401).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/mfa/setup', async (req, res) => {
+  try {
+    const token = bearerAuth(req);
+    const auth = await getAuthService();
+    const payload = auth.verifyToken(token);
+    const setup = await auth.setupMFA(payload.sub);
+    res.json(setup);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/mfa/confirm', async (req, res) => {
+  try {
+    const { totpCode } = req.body;
+    const token = bearerAuth(req);
+    const auth = await getAuthService();
+    const payload = auth.verifyToken(token);
+    const result = await auth.confirmMFA(payload.sub, totpCode);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/mfa/verify', async (req, res) => {
+  try {
+    const { partialToken, totpCode } = req.body;
+    const auth = await getAuthService();
+    const result = await auth.verifyMFA(partialToken, totpCode);
+    res.json(result);
+  } catch (err) {
+    res.status(401).json({ error: err.message });
+  }
+});
+
+app.get('/api/auth/biometric/challenge', async (req, res) => {
+  try {
+    const token = bearerAuth(req);
+    const auth = await getAuthService();
+    const payload = auth.verifyToken(token);
+    const challenge = auth.generateBiometricChallenge(payload.sub);
+    res.json(challenge);
+  } catch (err) {
+    res.status(401).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/biometric/register', async (req, res) => {
+  try {
+    const { publicKey } = req.body;
+    const token = bearerAuth(req);
+    const auth = await getAuthService();
+    const payload = auth.verifyToken(token);
+    const result = auth.registerBiometricKey(payload.sub, publicKey);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/biometric/verify', async (req, res) => {
+  try {
+    const { challenge, signature, clientData } = req.body;
+    const auth = await getAuthService();
+    const result = auth.verifyBiometricSignature(challenge, signature, clientData);
+    res.json(result);
+  } catch (err) {
+    res.status(401).json({ error: err.message });
+  }
+});
+
+app.get('/api/auth/health', (req, res) => {
+  res.json({ status: 'ok', service: 'auth', timestamp: Date.now() });
+});
+
+// ================================================
+// USER MANAGEMENT ROUTES
+// ================================================
+
+app.get('/api/users', async (req, res) => {
+  try {
+    const token = bearerAuth(req);
+    const auth = await getAuthService();
+    const payload = auth.verifyToken(token);
+    const users = auth.listUsers(payload.role);
+    res.json({ users });
+  } catch (err) {
+    res.status(403).json({ error: err.message });
+  }
+});
+
+app.get('/api/users/:id', async (req, res) => {
+  try {
+    const token = bearerAuth(req);
+    const auth = await getAuthService();
+    const payload = auth.verifyToken(token);
+    // Users can only read themselves; admins/devs can read anyone
+    if (payload.sub !== req.params.id && !['admin', 'dev'].includes(payload.role))
+      return res.status(403).json({ error: 'Forbidden' });
+    const user = auth.getUserById(req.params.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json({ user });
+  } catch (err) {
+    res.status(401).json({ error: err.message });
+  }
+});
+
+app.post('/api/users/:id/deactivate', async (req, res) => {
+  try {
+    const token = bearerAuth(req);
+    const auth = await getAuthService();
+    const payload = auth.verifyToken(token);
+    if (payload.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+    const result = auth.deactivateUser(payload.sub, req.params.id);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/auth/audit', async (req, res) => {
+  try {
+    const token = bearerAuth(req);
+    const auth = await getAuthService();
+    const payload = auth.verifyToken(token);
+    if (!['admin', 'dev'].includes(payload.role)) return res.status(403).json({ error: 'Forbidden' });
+    const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+    res.json({ logs: auth.getAuditLog(limit) });
+  } catch (err) {
+    res.status(401).json({ error: err.message });
+  }
+});
+
+// ================================================
+// PAYMENT ROUTES (Stripe)
+// ================================================
+
+app.post('/api/payments/setup-intent', async (req, res) => {
+  try {
+    const { userId, email, name } = req.body;
+    const payments = await getPaymentService();
+    const result = await payments.createSetupIntent(userId, email, name);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/payments/subscribe', async (req, res) => {
+  try {
+    const { userId, plan, paymentMethodId, email, name, couponCode } = req.body;
+    const payments = await getPaymentService();
+    const subscription = await payments.createSubscription(userId, plan, paymentMethodId, email, name, couponCode);
+    security.logAudit('SUBSCRIPTION_CREATED', { userId, plan });
+    res.json({ subscription });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/payments/cancel', async (req, res) => {
+  try {
+    const { subscriptionId, immediately } = req.body;
+    const payments = await getPaymentService();
+    const result = await payments.cancelSubscription(subscriptionId, immediately);
+    res.json({ result });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/payments/payment-intent', async (req, res) => {
+  try {
+    const { amountCents, currency, userId, email, name } = req.body;
+    const payments = await getPaymentService();
+    const result = await payments.createPaymentIntent(amountCents, currency, userId, email, name);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/payments/gift-code/redeem', async (req, res) => {
+  try {
+    const { code, userId, email, name } = req.body;
+    const payments = await getPaymentService();
+    const result = await payments.redeemGiftCode(code, userId, email, name);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/payments/gift-code/create', async (req, res) => {
+  try {
+    const token = bearerAuth(req);
+    const auth = await getAuthService();
+    const payload = auth.verifyToken(token);
+    if (payload.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+    const { valueUSD, currency } = req.body;
+    const payments = await getPaymentService();
+    const code = payments.createGiftCode(valueUSD, currency, payload.sub);
+    res.json(code);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/payments/portal', async (req, res) => {
+  try {
+    const { userId, email, name, returnUrl } = req.body;
+    const payments = await getPaymentService();
+    const result = await payments.createPortalSession(userId, email, name, returnUrl);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
+  try {
+    const payments = await getPaymentService();
+    const event = payments.parseWebhook(req.body, req.headers['stripe-signature']);
+    const result = await payments.handleWebhookEvent(event);
+    security.logAudit('STRIPE_WEBHOOK', { type: event.type, action: result.action });
+    res.json({ received: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ================================================
+// ANALYTICS ROUTES
+// ================================================
+
+app.get('/api/analytics/social', async (req, res) => {
+  try {
+    const token = bearerAuth(req);
+    const auth = await getAuthService();
+    const payload = auth.verifyToken(token);
+    const analytics = await getAnalyticsService();
+    const [platforms, totals] = await Promise.all([
+      analytics.fetchAll(payload.sub),
+      analytics.aggregateTotals(payload.sub),
+    ]);
+    res.json({ platforms, totals });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/analytics/social/:platform', async (req, res) => {
+  try {
+    const token = bearerAuth(req);
+    const auth = await getAuthService();
+    const payload = auth.verifyToken(token);
+    const analytics = await getAnalyticsService();
+    const data = await analytics.fetch(req.params.platform, payload.sub);
+    res.json(data);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/analytics/credentials', async (req, res) => {
+  try {
+    const token = bearerAuth(req);
+    const auth = await getAuthService();
+    const payload = auth.verifyToken(token);
+    const { platform, credentials } = req.body;
+    const analytics = await getAnalyticsService();
+    analytics.setCredentials(payload.sub, platform, credentials);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ================================================
+// GAMING ROUTES
+// ================================================
+
+app.get('/api/gaming/achievements/:platform', async (req, res) => {
+  try {
+    const token = bearerAuth(req);
+    const auth = await getAuthService();
+    const payload = auth.verifyToken(token);
+    const gaming = await getGameConnector();
+    const data = await gaming.getAchievements(req.params.platform, { ...req.query, userId: payload.sub });
+    res.json({ achievements: data });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/gaming/progress', async (req, res) => {
+  try {
+    const token = bearerAuth(req);
+    const auth = await getAuthService();
+    const payload = auth.verifyToken(token);
+    const { gameId, progress } = req.body;
+    const gaming = await getGameConnector();
+    const saved = gaming.saveProgress(payload.sub, gameId, progress);
+    res.json({ progress: saved });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/gaming/progress', async (req, res) => {
+  try {
+    const token = bearerAuth(req);
+    const auth = await getAuthService();
+    const payload = auth.verifyToken(token);
+    const gaming = await getGameConnector();
+    const list = gaming.listProgress(payload.sub);
+    res.json({ progress: list });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/gaming/stats/:platform', async (req, res) => {
+  try {
+    const token = bearerAuth(req);
+    const auth = await getAuthService();
+    const payload = auth.verifyToken(token);
+    const gaming = await getGameConnector();
+    const data = await gaming.getPlatformStats(req.params.platform, { ...req.query, userId: payload.sub });
+    res.json(data);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ================================================
+// PROJECT TRACKER ROUTES
+// ================================================
+
+app.post('/api/projects', async (req, res) => {
+  try {
+    const token = bearerAuth(req);
+    const auth = await getAuthService();
+    const payload = auth.verifyToken(token);
+    const tracker = await getProjectTracker();
+    const project = tracker.createProject(payload.sub, req.body);
+    res.status(201).json({ project });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/projects', async (req, res) => {
+  try {
+    const token = bearerAuth(req);
+    const auth = await getAuthService();
+    const payload = auth.verifyToken(token);
+    const tracker = await getProjectTracker();
+    const projects = tracker.listProjects(payload.sub, req.query);
+    const summary = tracker.getDashboardSummary(payload.sub);
+    res.json({ projects, summary });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/projects/:id', async (req, res) => {
+  try {
+    const tracker = await getProjectTracker();
+    const project = tracker.getProject(req.params.id);
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+    res.json({ project });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/projects/:id', async (req, res) => {
+  try {
+    const token = bearerAuth(req);
+    const auth = await getAuthService();
+    const payload = auth.verifyToken(token);
+    const tracker = await getProjectTracker();
+    const project = tracker.updateProject(req.params.id, req.body, payload.sub);
+    res.json({ project });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/projects/:id', async (req, res) => {
+  try {
+    const token = bearerAuth(req);
+    const auth = await getAuthService();
+    const payload = auth.verifyToken(token);
+    const tracker = await getProjectTracker();
+    const result = tracker.deleteProject(req.params.id, payload.sub);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/projects/:id/tasks', async (req, res) => {
+  try {
+    const token = bearerAuth(req);
+    const auth = await getAuthService();
+    const payload = auth.verifyToken(token);
+    const tracker = await getProjectTracker();
+    const task = tracker.createTask(req.params.id, payload.sub, req.body);
+    res.status(201).json({ task });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/projects/:id/tasks', async (req, res) => {
+  try {
+    const tracker = await getProjectTracker();
+    const tasks = tracker.getTasksForProject(req.params.id);
+    res.json({ tasks });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/tasks/:id', async (req, res) => {
+  try {
+    const token = bearerAuth(req);
+    const auth = await getAuthService();
+    const payload = auth.verifyToken(token);
+    const tracker = await getProjectTracker();
+    const task = tracker.updateTask(req.params.id, req.body, payload.sub);
+    res.json({ task });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/projects/:id/milestones', async (req, res) => {
+  try {
+    const tracker = await getProjectTracker();
+    const milestone = tracker.createMilestone(req.params.id, req.body);
+    res.status(201).json({ milestone });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/projects/:id/milestones', async (req, res) => {
+  try {
+    const tracker = await getProjectTracker();
+    const milestones = tracker.getMilestonesForProject(req.params.id);
+    res.json({ milestones });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/projects/:id/builds', async (req, res) => {
+  try {
+    const tracker = await getProjectTracker();
+    const build = tracker.recordBuild(req.params.id, req.body);
+    res.status(201).json({ build });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/projects/:id/builds', async (req, res) => {
+  try {
+    const tracker = await getProjectTracker();
+    const builds = tracker.getBuildsForProject(req.params.id);
+    res.json({ builds });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.put('/api/builds/:id/status', async (req, res) => {
+  try {
+    const { status, ...extra } = req.body;
+    const tracker = await getProjectTracker();
+    const build = tracker.updateBuildStatus(req.params.id, status, extra);
+    res.json({ build });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/projects/:id/commits', async (req, res) => {
+  try {
+    const tracker = await getProjectTracker();
+    const commit = tracker.recordCommit(req.params.id, req.body);
+    res.status(201).json({ commit });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/projects/:id/commits', async (req, res) => {
+  try {
+    const tracker = await getProjectTracker();
+    const commits = tracker.getCommitsForProject(req.params.id);
+    res.json({ commits });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.get('/api/projects/:id/metrics', async (req, res) => {
+  try {
+    const tracker = await getProjectTracker();
+    const metrics = tracker.getMetrics(req.params.id, req.query.key);
+    res.json({ metrics });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ================================================
+// i18n ROUTES
+// ================================================
+
+app.get('/api/i18n/locales', async (req, res) => {
+  const i18n = await getI18nService();
+  res.json({ locales: i18n.listSupportedLocales() });
+});
+
+app.get('/api/i18n/detect', async (req, res) => {
+  const i18n = await getI18nService();
+  const locale = i18n.detect(req.headers['accept-language'] || '');
+  res.json({ locale, ...i18n.getLocaleInfo(locale) });
+});
+
+app.get('/api/i18n/strings/:locale', async (req, res) => {
+  try {
+    const i18n = await getI18nService();
+    const { locale } = req.params;
+    if (!i18n.isSupported(locale)) return res.status(400).json({ error: 'Unsupported locale' });
+    // Populate if not already done (best-effort, falls back to en-US)
+    const catalog = {};
+    const keys = ['app.name', 'auth.login', 'auth.register', 'nav.home', 'nav.analytics',
+                  'nav.security', 'nav.projects', 'nav.gaming', 'nav.settings', 'nav.admin',
+                  'dashboard.greeting', 'project.create', 'analytics.title', 'security.status.secure'];
+    for (const k of keys) catalog[k] = i18n.t(locale, k);
+    res.json({ locale, strings: catalog, direction: i18n.getTextDirection(locale) });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ================================================
+// DB HEALTH
+// ================================================
+app.get('/api/db/health', (req, res) => {
+  res.json({ status: 'ok', service: 'database', timestamp: Date.now() });
 });
 
 // ================================================

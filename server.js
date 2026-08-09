@@ -13,8 +13,19 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import multer from 'multer';
 import crypto from 'crypto';
+import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+
+// New module routes and middleware
+import authRoutes from './src/server/routes/auth.js';
+import analyticsRoutes from './src/server/routes/analytics.js';
+import securityRoutes from './src/server/routes/security.js';
+import paymentsRoutes from './src/server/routes/payments.js';
+import gamedevRoutes from './src/server/routes/gamedev.js';
+import connectorRoutes from './src/server/routes/connectors.js';
+import { sanitizeBody, requestId as attachRequestId } from './src/server/middleware/security.js';
+import { connectRedis } from './src/server/db/redis.js';
 
 dotenv.config();
 
@@ -829,6 +840,47 @@ class WorkflowEngine {
 }
 
 const workflowEngine = new WorkflowEngine();
+
+// ================================================
+// NEW MODULE ROUTES — auth, analytics, security v2, payments, gamedev, connectors
+// ================================================
+
+// Attach request IDs & sanitize before rate limiter
+app.use(attachRequestId);
+app.use(sanitizeBody);
+
+// Connect Redis (non-blocking — features degrade gracefully if unavailable)
+connectRedis().catch(() => {});
+
+// Mount new route modules
+app.use('/api/auth', authRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/security', securityRoutes);
+app.use('/api/payments', paymentsRoutes);
+app.use('/api/gamedev', gamedevRoutes);
+app.use('/api/connectors', connectorRoutes);
+
+// Translation proxy — forwards to Google/DeepL using server-side env key
+app.post('/api/translate', async (req, res) => {
+  const { text, targetLang } = req.body;
+  if (!text || !targetLang) return res.status(400).json({ error: 'text and targetLang required' });
+
+  const googleKey = process.env.GOOGLE_TRANSLATE_API_KEY;
+  if (!googleKey) return res.json({ translated: text }); // Graceful fallback
+
+  try {
+    const resp = await fetch(`https://translation.googleapis.com/language/translate/v2?key=${googleKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: text, target: targetLang, format: 'text' }),
+    });
+    const data = await resp.json();
+    const translated = data?.data?.translations?.[0]?.translatedText ?? text;
+    return res.json({ translated });
+  } catch {
+    return res.json({ translated: text });
+  }
+});
 
 // ================================================
 // API ROUTES

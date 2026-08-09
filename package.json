@@ -68,7 +68,9 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "express-rate-limit": "^7.5.0",
+    "express-validator": "^7.3.2",
     "helmet": "^8.0.0",
+    "jexl": "^2.3.0",
     "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.469.0",
     "multer": "^2.0.2",
@@ -76,11 +78,14 @@
     "openai": "^4.77.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-router-dom": "^7.18.2",
+    "redis": "^6.2.0",
     "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.3",
+    "stripe": "^22.4.0",
     "uuid": "^11.0.4",
     "winston": "^3.17.0",
-    "zod": "^3.24.1",
-    "jexl": "^2.3.0"
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "@capacitor/cli": "^6.2.0",

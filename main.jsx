@@ -1,15 +1,27 @@
+/**
+ * Copyright © 2025-2026 Cameron Fox. All rights reserved.
+ * Licensed under the Apache License, Version 2.0
+ *
+ * Entry point — mounts React app with providers
+ * Date: 2026-08-09
+ */
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import NexusAI from './app.jsx';
+import { BrowserRouter } from 'react-router-dom';
+import { AuthProvider } from './src/contexts/AuthContext.jsx';
+import { LanguageProvider } from './src/contexts/LanguageContext.jsx';
+import NexusRouter from './app.jsx';
 
 // Security: Disable React DevTools in production
-if (typeof window.__REACT_DEVTOOLS_GLOBAL_HOOK__ === 'object') {
+if (import.meta.env.PROD && typeof window.__REACT_DEVTOOLS_GLOBAL_HOOK__ === 'object') {
   for (const [key, value] of Object.entries(window.__REACT_DEVTOOLS_GLOBAL_HOOK__)) {
     window.__REACT_DEVTOOLS_GLOBAL_HOOK__[key] = typeof value === 'function' ? () => {} : null;
   }
 }
 
-// Error boundary for production
+// ─── Global Error Boundary ────────────────────────────────────────────────────
+
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -20,8 +32,9 @@ class ErrorBoundary extends React.Component {
     return { hasError: true, error };
   }
 
-  componentDidCatch(error, errorInfo) {
-    console.error('Application error:', error, errorInfo);
+  componentDidCatch(error, info) {
+    // In prod: send to error monitoring service via server-side proxy (no key in client)
+    console.error('[NexusAI] Unhandled error:', error, info);
   }
 
   render() {
@@ -29,44 +42,28 @@ class ErrorBoundary extends React.Component {
       return (
         <div style={{
           minHeight: '100vh',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: '#0a0a0c',
-          color: '#ffffff',
-          fontFamily: 'Inter, sans-serif',
-          padding: '20px',
-          textAlign: 'center'
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center',
+          background: '#0a0a0c', color: '#fff',
+          fontFamily: 'Inter, sans-serif', padding: '20px', textAlign: 'center',
         }}>
           <div style={{
-            width: '80px',
-            height: '80px',
-            background: 'linear-gradient(135deg, #ef4444 0%, #f87171 100%)',
-            borderRadius: '20px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '2rem',
-            marginBottom: '24px'
-          }}>
-            ⚠️
-          </div>
+            width: '80px', height: '80px',
+            background: 'linear-gradient(135deg, #ef4444, #f87171)',
+            borderRadius: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '2rem', marginBottom: '24px',
+          }}>⚠️</div>
           <h1 style={{ fontSize: '1.5rem', marginBottom: '8px' }}>Something went wrong</h1>
           <p style={{ color: '#6b7280', marginBottom: '24px' }}>
-            The application encountered an error. Please refresh the page.
+            The application encountered an unexpected error. Please refresh to continue.
           </p>
           <button
             onClick={() => window.location.reload()}
             style={{
               padding: '12px 24px',
-              background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-              border: 'none',
-              borderRadius: '10px',
-              color: 'white',
-              fontSize: '1rem',
-              fontWeight: '500',
-              cursor: 'pointer'
+              background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+              border: 'none', borderRadius: '10px',
+              color: '#fff', fontSize: '1rem', fontWeight: 500, cursor: 'pointer',
             }}
           >
             Refresh Page
@@ -74,17 +71,23 @@ class ErrorBoundary extends React.Component {
         </div>
       );
     }
-
     return this.props.children;
   }
 }
 
-// Mount application
+// ─── Mount ────────────────────────────────────────────────────────────────────
+
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
     <ErrorBoundary>
-      <NexusAI />
+      <BrowserRouter>
+        <AuthProvider>
+          <LanguageProvider>
+            <NexusRouter />
+          </LanguageProvider>
+        </AuthProvider>
+      </BrowserRouter>
     </ErrorBoundary>
   </React.StrictMode>
 );

@@ -1,9 +1,103 @@
-/* app.jsx
-   Updated: make UI more responsive for mobile/desktop, persist model selection, chats, memories, settings,
-   ensure AES-256 label present, and small responsive CSS tweaks.
-*/
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+/**
+ * Copyright © 2025-2026 Cameron Fox. All rights reserved.
+ * Licensed under the Apache License, Version 2.0
+ *
+ * app.jsx — Root router + NexusAI chat UI
+ * Auth-gated: unauthenticated users see Login/Register; authenticated users
+ * are routed to their role-specific dashboard. The chat UI is the default
+ * view for 'user' role; other roles get specialized dashboards.
+ * Date: 2026-08-09
+ */
+
+import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense, lazy } from 'react';
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { securityService } from './src/security-service.js';
+import { useAuth } from './src/contexts/AuthContext.jsx';
+
+// Lazy-load role dashboards to keep initial bundle small
+const LoginPage       = lazy(() => import('./src/components/auth/LoginPage.jsx'));
+const RegisterPage    = lazy(() => import('./src/components/auth/RegisterPage.jsx'));
+const AdminDashboard  = lazy(() => import('./src/components/dashboards/AdminDashboard.jsx'));
+const DevDashboard    = lazy(() => import('./src/components/dashboards/DevDashboard.jsx'));
+const ModeratorDashboard = lazy(() => import('./src/components/dashboards/ModeratorDashboard.jsx'));
+const UserDashboard   = lazy(() => import('./src/components/dashboards/UserDashboard.jsx'));
+
+// ─── Auth-Gating Helpers ──────────────────────────────────────────────────────
+
+function PrivateRoute({ children }) {
+  const { isAuthenticated, loading } = useAuth();
+  if (loading) return <LoadingSpinner />;
+  return isAuthenticated ? children : <Navigate to="/login" replace />;
+}
+
+function RoleRoute({ roles, children }) {
+  const { isAuthenticated, loading, role } = useAuth();
+  if (loading) return <LoadingSpinner />;
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (roles && !roles.includes(role)) return <Navigate to={`/dashboard/${role}`} replace />;
+  return children;
+}
+
+function LoadingSpinner() {
+  return (
+    <div style={{
+      minHeight: '100vh', display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center',
+      background: '#0a0a0c', color: '#fff',
+    }}>
+      <div style={{
+        width: '48px', height: '48px', borderRadius: '14px',
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f472b6 100%)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem',
+        animation: 'pulse 2s infinite', marginBottom: '16px',
+      }}>✨</div>
+      <div style={{ fontSize: '0.85rem', color: '#6b7280' }}>Loading...</div>
+      <style>{`@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}`}</style>
+    </div>
+  );
+}
+
+// ─── Root Router ──────────────────────────────────────────────────────────────
+
+export default function NexusRouter() {
+  const { isAuthenticated, loading, role } = useAuth();
+
+  if (loading) return <LoadingSpinner />;
+
+  return (
+    <Suspense fallback={<LoadingSpinner />}>
+      <Routes>
+        {/* Public auth routes */}
+        <Route path="/login"    element={isAuthenticated ? <Navigate to={`/dashboard/${role}`} replace /> : <LoginPage />} />
+        <Route path="/register" element={isAuthenticated ? <Navigate to={`/dashboard/${role}`} replace /> : <RegisterPage />} />
+
+        {/* Role dashboards */}
+        <Route path="/dashboard/admin" element={<RoleRoute roles={['admin']}><AdminDashboard /></RoleRoute>} />
+        <Route path="/dashboard/dev"   element={<RoleRoute roles={['admin','dev']}><DevDashboard /></RoleRoute>} />
+        <Route path="/dashboard/moderator" element={<RoleRoute roles={['admin','moderator']}><ModeratorDashboard /></RoleRoute>} />
+        <Route path="/dashboard/user"  element={<PrivateRoute><UserDashboard /></PrivateRoute>} />
+
+        {/* Chat (core app) — for user and pro roles, or as fallback */}
+        <Route path="/chat" element={<PrivateRoute><NexusAI /></PrivateRoute>} />
+
+        {/* Default redirect */}
+        <Route
+          path="/"
+          element={
+            isAuthenticated
+              ? <Navigate to={`/dashboard/${role}`} replace />
+              : <Navigate to="/login" replace />
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
+  );
+}
+
+// ─── NexusAI Chat App (original) ──────────────────────────────────────────────
+// The existing monolithic chat UI is preserved below as `NexusAI` and rendered
+// at /chat and as the UserDashboard fallback.
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
   Settings, Menu, X, Plus, Trash2, Download, Upload,
@@ -597,7 +691,7 @@ const WORKFLOW_NODES = {
 // ============================================
 // MAIN APP COMPONENT
 // ============================================
-export default function NexusAI() {
+function NexusAI() {
   // State
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');

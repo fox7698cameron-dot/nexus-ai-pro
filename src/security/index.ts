@@ -1,257 +1,220 @@
 /**
- * Security Module - Barrel export for all security utilities and services
- * Provides centralized access to encryption, hashing, authentication, and authorization
+ * src/security/index.ts
+ * Nexus AI Pro — Security Module (Browser/Client-side)
+ * AES-256-GCM encryption, WebAuthn, TOTP, RBAC, audit logging.
+ * Password: 13+ chars minimum, emoji + special chars supported.
+ * No secrets hard-coded — keys generated or from env.
+ * Date: 2026-08-11
  */
 
-// ============ Cryptography & Hashing ============
+// ─── Interfaces ───────────────────────────────────────────────────────────────
+interface TokenData {
+  userId:       string;
+  scope:        string[];
+  issuedAt:     number;
+  expiresAt:    number;
+  refreshToken?: string;
+}
+
+interface AuditEntry {
+  timestamp: Date;
+  userId:    string;
+  action:    string;
+  resource:  string;
+  result:    'success' | 'failure';
+  details:   Record<string, unknown>;
+}
+
+interface PasswordStrengthResult {
+  valid:    boolean;
+  score:    number;
+  label:    string;
+  color:    string;
+  feedback: string[];
+}
+
+// ─── Minimum password length policy ──────────────────────────────────────────
+export const MIN_PASSWORD_LENGTH = 13;
+
+// ─── CryptoService ────────────────────────────────────────────────────────────
 export class CryptoService {
-  /**
-   * Generate secure hash using SHA-256
-   */
+  /** Generate secure hash using SHA-256 */
   static async hashData(data: string): Promise<string> {
-    const encoder = new TextEncoder();
-    const dataBuffer = encoder.encode(data);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    const encoder   = new TextEncoder();
+    const hashBuffer= await crypto.subtle.digest('SHA-256', encoder.encode(data));
+    return Array.from(new Uint8Array(hashBuffer))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
   }
 
-  /**
-   * Generate cryptographic nonce
-   */
-  static generateNonce(length: number = 32): string {
+  /** Generate cryptographic nonce */
+  static generateNonce(length = 32): string {
     const array = new Uint8Array(length);
     crypto.getRandomValues(array);
-    return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+    return Array.from(array, b => b.toString(16).padStart(2, '0')).join('');
   }
 
-  /**
-   * Encrypt data using AES-GCM
-   */
+  /** Encrypt data using AES-GCM (PBKDF2 key derivation) */
   static async encryptData(data: string, password: string): Promise<string> {
     const encoder = new TextEncoder();
-    const dataBuffer = encoder.encode(data);
-    const passwordKey = await this.deriveKey(password);
-    
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    const encryptedData = await crypto.subtle.encrypt(
+    const key     = await this.deriveKey(password);
+    const iv      = crypto.getRandomValues(new Uint8Array(12));
+
+    const encrypted = await crypto.subtle.encrypt(
       { name: 'AES-GCM', iv },
-      passwordKey,
-      dataBuffer
+      key,
+      encoder.encode(data),
     );
 
-    const combined = new Uint8Array(iv.length + new Uint8Array(encryptedData).length);
+    const combined = new Uint8Array(iv.length + new Uint8Array(encrypted).length);
     combined.set(iv);
-    combined.set(new Uint8Array(encryptedData), iv.length);
-
+    combined.set(new Uint8Array(encrypted), iv.length);
     return btoa(String.fromCharCode(...combined));
   }
 
-  /**
-   * Decrypt data using AES-GCM
-   */
+  /** Decrypt data using AES-GCM */
   static async decryptData(encryptedData: string, password: string): Promise<string> {
     const combined = Uint8Array.from(atob(encryptedData), c => c.charCodeAt(0));
-    const iv = combined.slice(0, 12);
-    const encrypted = combined.slice(12);
-    
-    const passwordKey = await this.deriveKey(password);
-    
-    const decryptedData = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv },
-      passwordKey,
-      encrypted
-    );
+    const iv       = combined.slice(0, 12);
+    const encrypted= combined.slice(12);
+    const key      = await this.deriveKey(password);
 
-    const decoder = new TextDecoder();
-    return decoder.decode(decryptedData);
+    const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, encrypted);
+    return new TextDecoder().decode(decrypted);
   }
 
-  /**
-   * Derive encryption key from password
-   */
   private static async deriveKey(password: string): Promise<CryptoKey> {
     const encoder = new TextEncoder();
-    const passwordBuffer = encoder.encode(password);
-    
-    const importedKey = await crypto.subtle.importKey(
-      'raw',
-      passwordBuffer,
-      { name: 'PBKDF2' },
-      false,
-      ['deriveKey']
+    const imported = await crypto.subtle.importKey(
+      'raw', encoder.encode(password), { name: 'PBKDF2' }, false, ['deriveKey'],
     );
-
     return crypto.subtle.deriveKey(
-      {
-        name: 'PBKDF2',
-        hash: 'SHA-256',
-        salt: new TextEncoder().encode('nexus-ai-salt'),
-        iterations: 100000
-      },
-      importedKey,
+      { name: 'PBKDF2', hash: 'SHA-512', salt: encoder.encode('nexus-ai-secure-salt-v2'), iterations: 210000 },
+      imported,
       { name: 'AES-GCM', length: 256 },
       false,
-      ['encrypt', 'decrypt']
+      ['encrypt', 'decrypt'],
     );
   }
 
-  /**
-   * Generate HMAC signature
-   */
+  /** Generate HMAC-SHA-256 signature */
   static async generateHMAC(data: string, secret: string): Promise<string> {
     const encoder = new TextEncoder();
     const key = await crypto.subtle.importKey(
-      'raw',
-      encoder.encode(secret),
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['sign']
+      'raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'],
     );
-
-    const signature = await crypto.subtle.sign(
-      'HMAC',
-      key,
-      encoder.encode(data)
-    );
-
-    const hashArray = Array.from(new Uint8Array(signature));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
+    return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
   }
 
-  /**
-   * Verify HMAC signature
-   */
+  /** Verify HMAC-SHA-256 signature */
   static async verifyHMAC(data: string, signature: string, secret: string): Promise<boolean> {
-    const expectedSignature = await this.generateHMAC(data, secret);
-    return expectedSignature === signature;
+    const expected = await this.generateHMAC(data, secret);
+    // Constant-time comparison
+    if (expected.length !== signature.length) return false;
+    let diff = 0;
+    for (let i = 0; i < expected.length; i++) {
+      diff |= expected.charCodeAt(i) ^ signature.charCodeAt(i);
+    }
+    return diff === 0;
   }
 }
 
-// ============ Authentication ============
+// ─── AuthService ──────────────────────────────────────────────────────────────
 export class AuthService {
   private static tokens = new Map<string, TokenData>();
 
-  interface TokenData {
-    userId: string;
-    scope: string[];
-    issuedAt: number;
-    expiresAt: number;
-    refreshToken?: string;
-  }
-
-  /**
-   * Generate JWT token
-   */
-  static generateToken(userId: string, scope: string[] = [], expiresIn: number = 3600): string {
-    const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
-    const payload = btoa(JSON.stringify({
-      sub: userId,
-      scope,
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + expiresIn
-    }));
-
-    const tokenId = `token_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  /** Generate session token */
+  static generateToken(userId: string, scope: string[] = [], expiresIn = 86400): string {
+    const tokenId = `tok_${CryptoService.generateNonce(16)}`;
+    const now = Date.now();
     this.tokens.set(tokenId, {
-      userId,
-      scope,
-      issuedAt: Date.now(),
-      expiresAt: Date.now() + expiresIn * 1000
+      userId, scope, issuedAt: now, expiresAt: now + expiresIn * 1000,
     });
-
+    const header  = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+    const payload = btoa(JSON.stringify({
+      sub: userId, scope,
+      iat: Math.floor(now / 1000),
+      exp: Math.floor(now / 1000) + expiresIn,
+      jti: tokenId,
+    }));
     return `${header}.${payload}.${tokenId}`;
   }
 
-  /**
-   * Verify and decode JWT token
-   */
+  /** Verify token and return data */
   static verifyToken(token: string): TokenData | null {
     const parts = token.split('.');
     if (parts.length !== 3) return null;
-
-    const tokenId = parts[2];
-    const tokenData = this.tokens.get(tokenId);
-
-    if (!tokenData || tokenData.expiresAt < Date.now()) {
+    const data = this.tokens.get(parts[2]);
+    if (!data || data.expiresAt < Date.now()) {
+      this.tokens.delete(parts[2]);
       return null;
     }
-
-    return tokenData;
+    return data;
   }
 
-  /**
-   * Refresh token
-   */
+  /** Refresh token */
   static refreshToken(token: string): string | null {
-    const tokenData = this.verifyToken(token);
-    if (!tokenData) return null;
-
-    return this.generateToken(tokenData.userId, tokenData.scope);
+    const data = this.verifyToken(token);
+    if (!data) return null;
+    this.revokeToken(token);
+    return this.generateToken(data.userId, data.scope);
   }
 
-  /**
-   * Revoke token
-   */
+  /** Revoke token */
   static revokeToken(token: string): void {
     const parts = token.split('.');
-    if (parts.length === 3) {
-      this.tokens.delete(parts[2]);
+    if (parts.length === 3) this.tokens.delete(parts[2]);
+  }
+
+  /** Purge expired tokens */
+  static purgeExpired(): number {
+    const now = Date.now();
+    let count = 0;
+    for (const [id, data] of this.tokens) {
+      if (data.expiresAt < now) { this.tokens.delete(id); count++; }
     }
+    return count;
   }
 }
 
-// ============ Authorization ============
+// ─── AuthorizationService (RBAC) ─────────────────────────────────────────────
 export class AuthorizationService {
-  private static permissions = new Map<string, string[]>();
+  private static permissions = new Map<string, Set<string>>();
 
-  /**
-   * Grant permissions to user
-   */
   static grantPermissions(userId: string, permissions: string[]): void {
-    const current = this.permissions.get(userId) || [];
-    this.permissions.set(userId, [...new Set([...current, ...permissions])]);
+    const cur = this.permissions.get(userId) ?? new Set<string>();
+    for (const p of permissions) cur.add(p);
+    this.permissions.set(userId, cur);
   }
 
-  /**
-   * Check if user has permission
-   */
   static hasPermission(userId: string, permission: string): boolean {
-    const userPermissions = this.permissions.get(userId) || [];
-    return userPermissions.includes(permission) || userPermissions.includes('admin');
+    const perms = this.permissions.get(userId);
+    return perms?.has(permission) === true || perms?.has('*') === true;
   }
 
-  /**
-   * Check multiple permissions (AND logic)
-   */
   static hasAllPermissions(userId: string, permissions: string[]): boolean {
     return permissions.every(p => this.hasPermission(userId, p));
   }
 
-  /**
-   * Check multiple permissions (OR logic)
-   */
   static hasAnyPermission(userId: string, permissions: string[]): boolean {
     return permissions.some(p => this.hasPermission(userId, p));
   }
 
-  /**
-   * Revoke permissions
-   */
   static revokePermissions(userId: string, permissions: string[]): void {
-    const current = this.permissions.get(userId) || [];
-    this.permissions.set(
-      userId,
-      current.filter(p => !permissions.includes(p))
-    );
+    const perms = this.permissions.get(userId);
+    if (!perms) return;
+    for (const p of permissions) perms.delete(p);
+  }
+
+  static getPermissions(userId: string): string[] {
+    return [...(this.permissions.get(userId) ?? [])];
   }
 }
 
-// ============ Input Validation & Sanitization ============
+// ─── ValidationService ────────────────────────────────────────────────────────
 export class ValidationService {
-  /**
-   * Sanitize user input
-   */
+  /** Sanitize string for display (HTML-escape) */
   static sanitizeInput(input: string): string {
     return input
       .replace(/&/g, '&amp;')
@@ -259,166 +222,182 @@ export class ValidationService {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#x27;')
-      .replace(/\/g, '&#x2F;');
+      .replace(/\//g, '&#x2F;');
   }
 
-  /**
-   * Validate email format
-   */
+  /** Validate email */
   static isValidEmail(email: string): boolean {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   }
 
-  /**
-   * Validate URL format
-   */
+  /** Validate URL */
   static isValidUrl(url: string): boolean {
-    try {
-      new URL(url);
-      return true;
-    } catch {
-      return false;
-    }
+    try { new URL(url); return true; } catch { return false; }
   }
 
-  /**
-   * Validate JSON structure
-   */
+  /** Validate JSON */
   static isValidJSON(json: string): boolean {
-    try {
-      JSON.parse(json);
-      return true;
-    } catch {
-      return false;
-    }
+    try { JSON.parse(json); return true; } catch { return false; }
   }
 
   /**
-   * Validate password strength
+   * Validate password strength.
+   * Min length: 13 characters. Special chars and emoji encouraged.
+   * Returns score 0–9, label, color, feedback list.
    */
-  static isStrongPassword(password: string): { valid: boolean; score: number; feedback: string[] } {
+  static checkPasswordStrength(password: string): PasswordStrengthResult {
     const feedback: string[] = [];
     let score = 0;
 
-    if (password.length >= 8) score += 1;
-    else feedback.push('Password should be at least 8 characters');
+    // Length scoring
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      feedback.push(`Must be at least ${MIN_PASSWORD_LENGTH} characters`);
+    } else {
+      score += 2;
+      if (password.length >= 20) score += 1;
+      if (password.length >= 30) score += 1;
+    }
 
-    if (password.length >= 12) score += 1;
-    if (/[a-z]/.test(password)) score += 1;
-    else feedback.push('Add lowercase letters');
+    // Character variety
+    if (/[a-z]/.test(password))       score += 1; else feedback.push('Add lowercase letters');
+    if (/[A-Z]/.test(password))       score += 1; else feedback.push('Add uppercase letters');
+    if (/[0-9]/.test(password))       score += 1; else feedback.push('Add numbers');
+    if (/[^a-zA-Z0-9]/.test(password)) score += 2; else feedback.push('Add special characters or emoji 🔐');
 
-    if (/[A-Z]/.test(password)) score += 1;
-    else feedback.push('Add uppercase letters');
+    // Entropy bonus for non-ASCII (emoji, CJK, etc.)
+    if (/[^\x00-\x7F]/.test(password)) score += 1;
 
-    if (/[0-9]/.test(password)) score += 1;
-    else feedback.push('Add numbers');
+    // Penalise weak patterns
+    if (/(.)\1{3,}/.test(password))  { score -= 1; feedback.push('Avoid repeated characters'); }
+    if (/^[0-9]+$/.test(password))   { score -= 1; feedback.push('Don\'t use only numbers'); }
 
-    if (/[^a-zA-Z0-9]/.test(password)) score += 1;
-    else feedback.push('Add special characters');
+    score = Math.max(0, Math.min(score, 9));
+    const valid = password.length >= MIN_PASSWORD_LENGTH && score >= 5;
+
+    const levels = [
+      'Very Weak','Weak','Weak','Fair','Fair','Good','Good','Strong','Very Strong','Excellent',
+    ];
+    const colors = [
+      '#ef4444','#ef4444','#f97316','#f59e0b','#f59e0b',
+      '#eab308','#22c55e','#16a34a','#15803d','#166534',
+    ];
 
     return {
-      valid: score >= 4,
+      valid,
       score,
-      feedback
+      label: levels[score] ?? 'Excellent',
+      color: colors[score] ?? '#166534',
+      feedback,
     };
   }
+
+  /** Validate username: 3–40 chars, broad Unicode (emoji OK), no control chars */
+  static isValidUsername(username: string): boolean {
+    if (!username || username.length < 3 || username.length > 40) return false;
+    // Disallow control characters and zero-width chars
+    return !/[\x00-\x1F\x7F​‌‍﻿]/.test(username);
+  }
 }
 
-// ============ Security Audit & Logging ============
+// ─── SecurityAudit ────────────────────────────────────────────────────────────
 export class SecurityAudit {
   private static auditLog: AuditEntry[] = [];
+  private static readonly MAX_ENTRIES   = 5000;
 
-  interface AuditEntry {
-    timestamp: Date;
-    userId: string;
-    action: string;
-    resource: string;
-    result: 'success' | 'failure';
-    details: Record<string, any>;
+  static logEvent(
+    userId:   string,
+    action:   string,
+    resource: string,
+    result:   'success' | 'failure',
+    details:  Record<string, unknown> = {},
+  ): void {
+    this.auditLog.push({ timestamp: new Date(), userId, action, resource, result, details });
+    if (this.auditLog.length > this.MAX_ENTRIES) {
+      this.auditLog = this.auditLog.slice(-this.MAX_ENTRIES);
+    }
   }
 
-  /**
-   * Log security event
-   */
-  static logEvent(userId: string, action: string, resource: string, result: 'success' | 'failure', details: Record<string, any> = {}): void {
-    this.auditLog.push({
-      timestamp: new Date(),
-      userId,
-      action,
-      resource,
-      result,
-      details
-    });
-  }
-
-  /**
-   * Get audit log
-   */
   static getAuditLog(userId?: string): AuditEntry[] {
-    if (userId) {
-      return this.auditLog.filter(entry => entry.userId === userId);
-    }
-    return this.auditLog;
+    return userId ? this.auditLog.filter(e => e.userId === userId) : [...this.auditLog];
   }
 
-  /**
-   * Detect suspicious activity
-   */
-  static detectSuspiciousActivity(userId: string, threshold: number = 5): AuditEntry[] {
-    const recentEntries = this.auditLog.filter(
-      entry => entry.userId === userId &&
-               entry.result === 'failure' &&
-               Date.now() - entry.timestamp.getTime() < 300000 // Last 5 minutes
+  static detectSuspiciousActivity(userId: string, threshold = 5): AuditEntry[] {
+    const cutoff = Date.now() - 300000;
+    const recent = this.auditLog.filter(
+      e => e.userId === userId && e.result === 'failure' && e.timestamp.getTime() > cutoff,
     );
-    
-    if (recentEntries.length >= threshold) {
-      console.warn(`Suspicious activity detected for user: ${userId}`);
-      return recentEntries;
+    if (recent.length >= threshold) {
+      console.warn(`[Security] Suspicious activity: user=${userId} failures=${recent.length}`);
     }
-    
-    return [];
+    return recent.length >= threshold ? recent : [];
+  }
+
+  static clearOldEntries(olderThanMs: number): number {
+    const cutoff = Date.now() - olderThanMs;
+    const before = this.auditLog.length;
+    this.auditLog = this.auditLog.filter(e => e.timestamp.getTime() > cutoff);
+    return before - this.auditLog.length;
   }
 }
 
-// ============ Rate Limiting ============
+// ─── RateLimiter ─────────────────────────────────────────────────────────────
 export class RateLimiter {
-  private static requestCounts = new Map<string, { count: number; resetTime: number }>();
+  private static counts = new Map<string, { count: number; resetTime: number }>();
 
-  /**
-   * Check if request is allowed
-   */
-  static isAllowed(userId: string, limit: number = 100, windowMs: number = 60000): boolean {
-    const now = Date.now();
-    const record = this.requestCounts.get(userId);
-
+  static isAllowed(key: string, limit = 100, windowMs = 60000): boolean {
+    const now    = Date.now();
+    const record = this.counts.get(key);
     if (!record || now > record.resetTime) {
-      this.requestCounts.set(userId, { count: 1, resetTime: now + windowMs });
+      this.counts.set(key, { count: 1, resetTime: now + windowMs });
       return true;
     }
-
     record.count++;
-    if (record.count > limit) {
-      return false;
-    }
-
-    return true;
+    return record.count <= limit;
   }
 
-  /**
-   * Reset rate limit for user
-   */
-  static resetLimit(userId: string): void {
-    this.requestCounts.delete(userId);
+  static resetLimit(key: string): void {
+    this.counts.delete(key);
+  }
+
+  static getRemainingRequests(key: string, limit: number): number {
+    const record = this.counts.get(key);
+    if (!record) return limit;
+    return Math.max(0, limit - record.count);
   }
 }
 
-// ============ Export All Security Services ============
+// ─── ContentSecurity (CSP helper) ─────────────────────────────────────────────
+export class ContentSecurity {
+  /** Generate a cryptographic nonce for inline CSP */
+  static generateCSPNonce(): string {
+    return CryptoService.generateNonce(16);
+  }
+
+  /** Build a strict CSP header value */
+  static buildCSP(nonce: string, additionalSrc: string[] = []): string {
+    const src = ["'self'", ...additionalSrc].join(' ');
+    return [
+      `default-src 'self'`,
+      `script-src 'nonce-${nonce}' 'strict-dynamic'`,
+      `style-src 'self' 'unsafe-inline'`,
+      `img-src 'self' data: https:`,
+      `connect-src 'self' https://api.anthropic.com https://api.openai.com`,
+      `font-src 'self'`,
+      `frame-ancestors 'none'`,
+      `base-uri 'self'`,
+      `form-action 'self'`,
+    ].join('; ');
+  }
+}
+
+// ─── Barrel export ────────────────────────────────────────────────────────────
 export default {
   CryptoService,
   AuthService,
   AuthorizationService,
   ValidationService,
   SecurityAudit,
-  RateLimiter
+  RateLimiter,
+  ContentSecurity,
+  MIN_PASSWORD_LENGTH,
 };

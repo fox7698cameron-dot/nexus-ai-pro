@@ -100,8 +100,20 @@
     "workbox-window": "^7.3.0"
   },
   "overrides": {
-    "esbuild": "^0.24.2",
-    "rollup": "^4.29.1"
+    "esbuild":    "^0.25.0",
+    "rollup":     "^4.30.0",
+    "semver":     "^7.6.0",
+    "tough-cookie":"^5.0.0",
+    "ws":         "^8.18.0",
+    "nanoid":     "^5.0.0",
+    "path-to-regexp": "^8.0.0",
+    "on-finished": "^2.4.1",
+    "send":       "^1.1.0",
+    "serve-static":"^2.1.0",
+    "express":    "^4.21.2",
+    "cookie":     "^0.7.0",
+    "braces":     "^3.0.3",
+    "micromatch": "^4.0.8"
   },
   "capacitor": {
     "appId": "com.cameronfox.nexusaipro",

@@ -1,0 +1,70 @@
+{
+  "app": { "name": "Nexus AI Pro", "tagline": "Votre plateforme IA d'entreprise" },
+  "nav": {
+    "dashboard":   "Tableau de bord",
+    "analytics":   "Analytique",
+    "security":    "Sécurité",
+    "projects":    "Projets",
+    "settings":    "Paramètres",
+    "payments":    "Facturation",
+    "admin":       "Admin",
+    "signOut":     "Se déconnecter"
+  },
+  "auth": {
+    "login": {
+      "title":    "Connexion",
+      "email":    "Adresse e-mail",
+      "password": "Mot de passe",
+      "submit":   "Se connecter",
+      "noAccount": "Pas encore de compte ?",
+      "register": "Créer un compte"
+    },
+    "register": {
+      "title":    "Créer un compte",
+      "username": "Nom d'utilisateur",
+      "email":    "Adresse e-mail",
+      "password": "Mot de passe",
+      "submit":   "Créer un compte"
+    },
+    "mfa": {
+      "title":   "Authentification à deux facteurs",
+      "prompt":  "Saisissez le code à 6 chiffres de votre application d'authentification",
+      "verify":  "Vérifier"
+    }
+  },
+  "analytics": {
+    "title":       "Tableau de bord analytique",
+    "views":       "Vues",
+    "likes":       "J'aime",
+    "comments":    "Commentaires",
+    "shares":      "Partages",
+    "followers":   "Abonnés",
+    "reach":       "Portée",
+    "impressions": "Impressions",
+    "retention":   "Rétention",
+    "engagement":  "Taux d'engagement"
+  },
+  "security": {
+    "title":   "Tableau de bord sécurité",
+    "score":   "Score de sécurité",
+    "scan":    "Lancer une analyse",
+    "threats": "Journal des menaces"
+  },
+  "common": {
+    "save":    "Sauvegarder",
+    "cancel":  "Annuler",
+    "confirm": "Confirmer",
+    "delete":  "Supprimer",
+    "loading": "Chargement...",
+    "error":   "Une erreur s'est produite",
+    "success": "Succès !",
+    "close":   "Fermer",
+    "back":    "Retour",
+    "next":    "Suivant"
+  },
+  "errors": {
+    "network":      "Erreur réseau. Vérifiez votre connexion.",
+    "unauthorized": "Session expirée. Veuillez vous reconnecter.",
+    "server":       "Erreur serveur. Veuillez réessayer."
+  }
+}

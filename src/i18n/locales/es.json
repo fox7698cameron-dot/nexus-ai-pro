@@ -1,0 +1,70 @@
+{
+  "app": { "name": "Nexus AI Pro", "tagline": "Tu plataforma empresarial de IA" },
+  "nav": {
+    "dashboard":   "Panel",
+    "analytics":   "Análisis",
+    "security":    "Seguridad",
+    "projects":    "Proyectos",
+    "settings":    "Configuración",
+    "payments":    "Facturación",
+    "admin":       "Admin",
+    "signOut":     "Cerrar sesión"
+  },
+  "auth": {
+    "login": {
+      "title":    "Iniciar sesión",
+      "email":    "Correo electrónico",
+      "password": "Contraseña",
+      "submit":   "Iniciar sesión",
+      "noAccount": "¿No tienes cuenta?",
+      "register": "Crear cuenta"
+    },
+    "register": {
+      "title":    "Crear cuenta",
+      "username": "Nombre de usuario",
+      "email":    "Correo electrónico",
+      "password": "Contraseña",
+      "submit":   "Crear cuenta"
+    },
+    "mfa": {
+      "title":   "Autenticación en dos pasos",
+      "prompt":  "Ingresa el código de 6 dígitos de tu aplicación autenticadora",
+      "verify":  "Verificar"
+    }
+  },
+  "analytics": {
+    "title":       "Panel de análisis",
+    "views":       "Vistas",
+    "likes":       "Me gusta",
+    "comments":    "Comentarios",
+    "shares":      "Compartidos",
+    "followers":   "Seguidores",
+    "reach":       "Alcance",
+    "impressions": "Impresiones",
+    "retention":   "Retención",
+    "engagement":  "Tasa de interacción"
+  },
+  "security": {
+    "title":   "Panel de seguridad",
+    "score":   "Puntuación de seguridad",
+    "scan":    "Ejecutar análisis",
+    "threats": "Registro de amenazas"
+  },
+  "common": {
+    "save":    "Guardar",
+    "cancel":  "Cancelar",
+    "confirm": "Confirmar",
+    "delete":  "Eliminar",
+    "loading": "Cargando...",
+    "error":   "Ocurrió un error",
+    "success": "¡Éxito!",
+    "close":   "Cerrar",
+    "back":    "Atrás",
+    "next":    "Siguiente"
+  },
+  "errors": {
+    "network":      "Error de red. Verifica tu conexión.",
+    "unauthorized": "Sesión expirada. Por favor inicia sesión de nuevo.",
+    "server":       "Error del servidor. Por favor intenta de nuevo."
+  }
+}

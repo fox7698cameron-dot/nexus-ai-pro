@@ -1,0 +1,158 @@
+{
+  "app": {
+    "name": "Nexus AI Pro",
+    "tagline": "Your enterprise AI platform"
+  },
+  "nav": {
+    "dashboard":   "Dashboard",
+    "analytics":   "Analytics",
+    "security":    "Security",
+    "projects":    "Projects",
+    "settings":    "Settings",
+    "payments":    "Billing",
+    "admin":       "Admin",
+    "signOut":     "Sign Out"
+  },
+  "auth": {
+    "login": {
+      "title":       "Sign In",
+      "email":       "Email address",
+      "password":    "Password",
+      "submit":      "Sign In",
+      "forgotPw":    "Forgot password?",
+      "noAccount":   "Don't have an account?",
+      "register":    "Create account"
+    },
+    "register": {
+      "title":       "Create Account",
+      "username":    "Username",
+      "email":       "Email address",
+      "password":    "Password",
+      "confirm":     "Confirm password",
+      "submit":      "Create Account",
+      "hasAccount":  "Already have an account?",
+      "signIn":      "Sign in"
+    },
+    "mfa": {
+      "title":       "Two-Factor Authentication",
+      "prompt":      "Enter the 6-digit code from your authenticator app",
+      "verify":      "Verify",
+      "setup":       "Set Up 2FA",
+      "disable":     "Disable 2FA",
+      "enabled":     "2FA is enabled",
+      "disabled":    "2FA is not enabled"
+    },
+    "biometric": {
+      "title":       "Biometric Login",
+      "prompt":      "Use your fingerprint, Face ID, or device PIN",
+      "button":      "Authenticate with Biometrics",
+      "notSupported": "Biometrics not supported on this device"
+    },
+    "errors": {
+      "invalidCreds":  "Invalid email or password",
+      "accountLocked": "Account locked. Contact support.",
+      "mfaFailed":     "Invalid verification code"
+    }
+  },
+  "dashboard": {
+    "welcome":       "Welcome back, {{name}}!",
+    "overview":      "Overview",
+    "recentActivity": "Recent Activity"
+  },
+  "analytics": {
+    "title":         "Analytics Dashboard",
+    "views":         "Views",
+    "likes":         "Likes",
+    "comments":      "Comments",
+    "shares":        "Shares",
+    "followers":     "Followers",
+    "reach":         "Reach",
+    "impressions":   "Impressions",
+    "retention":     "Retention",
+    "engagement":    "Engagement Rate",
+    "watchTime":     "Watch Time",
+    "topContent":    "Top Content",
+    "noData":        "No data yet. Connect a platform to get started.",
+    "connectPlatform": "Connect Platform"
+  },
+  "security": {
+    "title":          "Security Dashboard",
+    "score":          "Security Score",
+    "status": {
+      "secure":       "Secure",
+      "warning":      "Warning",
+      "critical":     "Critical"
+    },
+    "scan":           "Run Scan",
+    "scanning":       "Scanning...",
+    "lastScan":       "Last scan: {{time}}",
+    "threats":        "Threat Log",
+    "noThreats":      "No threats detected",
+    "encryption":     "Encryption",
+    "network":        "Network",
+    "vulnerabilities": "Vulnerabilities"
+  },
+  "projects": {
+    "title":         "Projects",
+    "new":           "New Project",
+    "name":          "Project Name",
+    "type":          "Type",
+    "status":        "Status",
+    "engine":        "Engine",
+    "platform":      "Platform",
+    "milestones":    "Milestones",
+    "achievements":  "Achievements",
+    "builds":        "Builds",
+    "noProjects":    "No projects yet. Create your first project!"
+  },
+  "payments": {
+    "title":         "Billing",
+    "plans":         "Plans",
+    "current":       "Current Plan",
+    "upgrade":       "Upgrade",
+    "manage":        "Manage Subscription",
+    "free":          "Free",
+    "pro":           "Pro",
+    "enterprise":    "Enterprise",
+    "perMonth":      "/month",
+    "giftCard":      "Redeem Gift Card",
+    "crypto":        "Pay with Crypto"
+  },
+  "settings": {
+    "title":         "Settings",
+    "language":      "Language",
+    "theme":         "Theme",
+    "notifications": "Notifications",
+    "privacy":       "Privacy",
+    "security":      "Security",
+    "account":       "Account",
+    "changePassword": "Change Password",
+    "deleteAccount":  "Delete Account"
+  },
+  "common": {
+    "save":    "Save",
+    "cancel":  "Cancel",
+    "confirm": "Confirm",
+    "delete":  "Delete",
+    "edit":    "Edit",
+    "loading": "Loading...",
+    "error":   "An error occurred",
+    "success": "Success!",
+    "close":   "Close",
+    "back":    "Back",
+    "next":    "Next",
+    "submit":  "Submit",
+    "search":  "Search",
+    "filter":  "Filter",
+    "refresh": "Refresh",
+    "export":  "Export",
+    "import":  "Import"
+  },
+  "errors": {
+    "network":       "Network error. Check your connection.",
+    "unauthorized":  "Session expired. Please sign in again.",
+    "forbidden":     "You don't have permission to do this.",
+    "notFound":      "Not found.",
+    "server":        "Server error. Please try again."
+  }
+}

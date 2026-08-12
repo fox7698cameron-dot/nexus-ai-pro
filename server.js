@@ -1,6 +1,9 @@
 // ================================================
 // NEXUS AI PRO - Enhanced Backend Server
 // Military-Grade Security & Multi-Model AI Platform
+// Updated: 2026-08-12
+// Copyright © 2025-2026 Cameron Fox. All rights reserved.
+// Licensed under the Apache License, Version 2.0
 // ================================================
 
 import express from 'express';
@@ -15,6 +18,16 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+
+// ── New modular routes (2026-08-12) ──────────────────────────────────────────
+import authRoutes    from './src/api/auth.js';
+import analyticsRoutes from './src/api/analytics.js';
+import securityRoutes  from './src/api/security.js';
+import paymentsRoutes  from './src/api/payments.js';
+import projectsRoutes  from './src/api/projects.js';
+import cloudRoutes     from './src/api/connectors/cloud.js';
+import gamingRoutes    from './src/api/connectors/gaming.js';
+import { sanitizeBody, detectSQLInjection, detectAnomalies } from './src/middleware/security.js';
 
 dotenv.config();
 
@@ -441,8 +454,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-flash';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -806,7 +818,6 @@ class WorkflowEngine {
     if (typeof condition !== 'string' || !condition.trim()) {
       return { conditionResult: false };
     }
-    const { transform } = node.config || {};
     try {
       const result = await Jexl.eval(condition, context);
       return { conditionResult: !!result };
@@ -816,6 +827,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -1147,6 +1159,58 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     security.logAudit('SOCKET_DISCONNECT', { socketId: socket.id });
+  });
+});
+
+// ================================================
+// NEW MODULAR API ROUTES (2026-08-12)
+// ================================================
+
+// Raw body capture for Stripe webhook signature verification
+// Must come BEFORE json() for the webhook path
+app.use((req, res, next) => {
+  if (req.path === '/api/payments/stripe/webhook') {
+    let data = '';
+    req.setEncoding('utf8');
+    req.on('data', chunk => { data += chunk; });
+    req.on('end', () => { req.rawBody = data; next(); });
+  } else {
+    next();
+  }
+});
+
+// Global input sanitization (defense-in-depth)
+app.use(sanitizeBody);
+app.use(detectAnomalies);
+
+// Auth routes (strict rate limiting)
+const authRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 20,
+  message: { error: 'Too many auth requests' },
+  standardHeaders: true, legacyHeaders: false,
+});
+app.use('/api/auth', authRateLimiter, authRoutes);
+
+// Feature routes
+app.use('/api/analytics',          analyticsRoutes);
+app.use('/api/security',           securityRoutes);
+app.use('/api/payments',           paymentsRoutes);
+app.use('/api/projects',           projectsRoutes);
+app.use('/api/connectors/cloud',   cloudRoutes);
+app.use('/api/connectors/gaming',  gamingRoutes);
+
+// Platform / capability manifest
+app.get('/api/capabilities', (req, res) => {
+  res.json({
+    auth:           ['jwt', '2fa-totp', 'mfa', 'biometric-webauthn'],
+    analytics:      ['tiktok', 'instagram', 'facebook', 'twitch', 'discord', 'lemon8', 'reddit', 'redgifs'],
+    payments:       ['stripe-cards', 'stripe-wallets', 'crypto', 'gift-cards'],
+    gaming:         ['epic-unreal', 'sony-psn', 'microsoft-xbox', 'ubisoft-connect', 'steam', 'nintendo'],
+    cloud:          ['aws', 'azure', 'gcp', 'adobe', 'slack', 'zoom', 'github', 'bitbucket', 'redis', 'blob'],
+    projectTypes:   ['software', 'game', 'ar_vr', '3d', 'mobile', 'web', 'api', 'library'],
+    platforms:      ['linux', 'windows', 'macos', 'ios', 'android', 'electron', 'pwa'],
+    i18n:           ['en', 'es', 'fr', 'de', 'ja', 'zh', 'pt', 'ar', 'ko', 'hi', 'ru', 'it', 'nl', 'pl', 'tr', 'sv'],
+    security:       ['aes-256-gcm', 'pbkdf2-sha512', 'hmac-sha256', 'ecdh-p256'],
   });
 });
 

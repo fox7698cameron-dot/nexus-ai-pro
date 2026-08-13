@@ -45,10 +45,19 @@
     "android:dev": "cd android && ./gradlew assembleDebug",
     "android:build": "cd android && ./gradlew assembleRelease",
     "pwa:build": "vite build --mode pwa",
-    "copyright:add": "node scripts/add-copyright.js"
+    "copyright:add": "node scripts/add-copyright.js",
+    "audit:full": "npm audit --audit-level=moderate",
+    "audit:fix": "npm audit fix",
+    "security:full-scan": "node -e \"fetch('http://localhost:3001/api/security/scan', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type:'full'})}).then(r=>r.json()).then(console.log)\"",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "vitest run --reporter=verbose",
+    "lint:fix": "eslint . --fix",
+    "type-check": "tsc --noEmit"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "@azure/identity": "^4.5.0",
+    "@azure/storage-blob": "^12.25.0",
     "@capacitor/android": "^6.2.0",
     "@capacitor/app": "^6.0.1",
     "@capacitor/camera": "^6.1.0",
@@ -69,21 +78,28 @@
     "express": "^4.21.2",
     "express-rate-limit": "^7.5.0",
     "helmet": "^8.0.0",
+    "ioredis": "^5.4.1",
+    "jexl": "^2.3.0",
     "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.469.0",
     "multer": "^2.0.2",
+    "node-cron": "^4.6.0",
     "node-fetch": "^3.3.2",
     "openai": "^4.77.0",
+    "otplib": "^12.0.1",
+    "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
+    "speakeasy": "^2.0.0",
+    "stripe": "^17.0.0",
     "uuid": "^11.0.4",
     "winston": "^3.17.0",
-    "zod": "^3.24.1",
-    "jexl": "^2.3.0"
+    "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@capacitor/cli": "^6.2.0",
+    "@capacitor/cli": "^8.5.0",
     "@eslint/js": "^9.39.2",
     "@types/node": "^22.10.5",
     "@vitejs/plugin-react": "^4.3.4",
@@ -100,8 +116,9 @@
     "workbox-window": "^7.3.0"
   },
   "overrides": {
-    "esbuild": "^0.24.2",
-    "rollup": "^4.29.1"
+    "esbuild": "^0.25.0",
+    "rollup": "^4.29.1",
+    "tar": "^7.4.3"
   },
   "capacitor": {
     "appId": "com.cameronfox.nexusaipro",

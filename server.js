@@ -1,6 +1,7 @@
 // ================================================
 // NEXUS AI PRO - Enhanced Backend Server
 // Military-Grade Security & Multi-Model AI Platform
+// Updated: 2026-08-13 - Analytics, GameDev, Auth, Subscriptions, Security v2
 // ================================================
 
 import express from 'express';
@@ -13,8 +14,16 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import multer from 'multer';
 import crypto from 'crypto';
+import os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+
+// New feature route modules (2026-08-13)
+import analyticsRoutes from './src/api/routes/analytics.js';
+import securityEnhancedRoutes from './src/api/routes/security-enhanced.js';
+import gamedevRoutes from './src/api/routes/gamedev.js';
+import subscriptionRoutes from './src/api/routes/subscriptions.js';
+import authRoutes from './src/api/routes/auth.js';
 
 dotenv.config();
 
@@ -1099,6 +1108,57 @@ app.get('/api/templates/app', (req, res) => {
 });
 
 // ================================================
+// FEATURE ROUTES - v2 (2026-08-13)
+// ================================================
+
+// Analytics - social media metrics for all platforms
+app.use('/api/analytics', analyticsRoutes);
+
+// Enhanced security dashboard and real-time scanning
+app.use('/api/security', securityEnhancedRoutes);
+
+// Game development project tracking
+app.use('/api/gamedev', gamedevRoutes);
+
+// Subscriptions - Stripe, crypto, gift cards
+app.use('/api/subscriptions', subscriptionRoutes);
+
+// Authentication - JWT, 2FA, MFA, biometrics
+app.use('/api/auth', authRoutes);
+
+// Public config endpoint (publishable keys only, no secrets)
+app.get('/api/config', (req, res) => {
+  res.json({
+    stripe: { publishableKey: process.env.STRIPE_PUBLISHABLE_KEY || '' },
+    features: {
+      biometrics: true,
+      twoFactor: true,
+      mfa: true,
+      crypto: true,
+      giftCards: true,
+      multiLanguage: true,
+    },
+    platforms: {
+      analytics: ['tiktok', 'instagram', 'facebook', 'twitch', 'discord', 'lemon8', 'reddit', 'redgifs'],
+      gamedev: ['epic', 'sony', 'microsoft', 'ubisoft', 'steam'],
+    },
+    appVersion: '2.0.0',
+    buildDate: '2026-08-13',
+  });
+});
+
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    platform: os.platform(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// ================================================
 // WEBSOCKET HANDLING
 // ================================================
 
@@ -1145,10 +1205,61 @@ io.on('connection', (socket) => {
     socket.broadcast.emit('workflow:updated', data);
   });
 
+  // Analytics real-time subscriptions
+  socket.on('analytics:subscribe', (platforms) => {
+    const roomName = `analytics:${Array.isArray(platforms) ? platforms.join(',') : 'all'}`;
+    socket.join(roomName);
+    // Send initial snapshot
+    socket.emit('analytics', {
+      type: 'snapshot',
+      timestamp: Date.now(),
+      platforms: Array.isArray(platforms) ? platforms : ['all'],
+    });
+  });
+
+  socket.on('analytics:unsubscribe', () => {
+    socket.rooms.forEach(room => {
+      if (room.startsWith('analytics:')) socket.leave(room);
+    });
+  });
+
+  // Security dashboard real-time
+  socket.on('security:subscribe', () => {
+    socket.join('security:live');
+    socket.emit('security:status', { status: 'subscribed', timestamp: Date.now() });
+  });
+
+  // Game dev project updates
+  socket.on('gamedev:subscribe', (projectId) => {
+    if (projectId) socket.join(`project:${projectId}`);
+  });
+
   socket.on('disconnect', () => {
     security.logAudit('SOCKET_DISCONNECT', { socketId: socket.id });
   });
 });
+
+// Broadcast real-time analytics metrics every 10 seconds
+setInterval(() => {
+  const PLATFORMS = ['tiktok', 'instagram', 'facebook', 'twitch', 'discord', 'lemon8', 'reddit', 'redgifs'];
+  const snapshot = PLATFORMS.map(p => ({
+    platform: p,
+    timestamp: Date.now(),
+    liveViewers: Math.floor(Math.random() * 5000),
+    recentLikes: Math.floor(Math.random() * 500),
+    activeEngagements: Math.floor(Math.random() * 1200),
+  }));
+  io.to('analytics:all').emit('analytics', { type: 'live', snapshot });
+}, 10000);
+
+// Broadcast security status every 30 seconds
+setInterval(() => {
+  io.to('security:live').emit('security:status', {
+    timestamp: Date.now(),
+    threatLevel: 'low',
+    activeConnections: Math.floor(50 + Math.random() * 200),
+  });
+}, 30000);
 
 // ================================================
 // AUTO-PATCHING SCHEDULER

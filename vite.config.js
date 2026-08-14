@@ -27,13 +27,10 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
-    minify: 'terser',
-    terserOptions: {
-      compress: {
-        drop_console: true,
-        drop_debugger: true
-      }
-    },
+    // Target evergreen browsers (2022+) — avoids esbuild destructuring-lowering issues
+    target: ['chrome100', 'edge100', 'firefox100', 'safari15'],
+    // Use esbuild minifier (faster, avoids terser incompatibilities with esbuild 0.28+)
+    minify: 'esbuild',
     rollupOptions: {
       output: {
         manualChunks: {

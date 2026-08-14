@@ -1,9 +1,23 @@
-/* app.jsx
-   Updated: make UI more responsive for mobile/desktop, persist model selection, chats, memories, settings,
-   ensure AES-256 label present, and small responsive CSS tweaks.
-*/
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+/**
+ * app.jsx
+ * Copyright © 2025-2026 Cameron Fox. All rights reserved.
+ * Licensed under the Apache License, Version 2.0
+ *
+ * Nexus AI Pro — Root Application Shell
+ * Integrates chat, analytics, security, game-dev, auth, payments, and connectors
+ * Multi-platform: Linux · Windows · macOS · iOS · Android · Electron · PWA
+ * Updated: 2026-08-14
+ */
+import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense, lazy } from 'react';
 import { securityService } from './src/security-service.js';
+
+// ─── Lazy-loaded full-screen panels (code-split for perf) ─────────────────────
+const AnalyticsDashboard = lazy(() => import('./src/components/AnalyticsDashboard.jsx'));
+const SecurityDashboard  = lazy(() => import('./src/components/SecurityDashboard.jsx'));
+const GameDevDashboard   = lazy(() => import('./src/components/GameDevDashboard.jsx'));
+const AuthSystem         = lazy(() => import('./src/components/AuthSystem.jsx'));
+const StripeCheckout     = lazy(() => import('./src/components/StripeCheckout.jsx'));
+const ConnectorsPanel    = lazy(() => import('./src/components/ConnectorsPanel.jsx'));
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
   Settings, Menu, X, Plus, Trash2, Download, Upload,
@@ -21,7 +35,8 @@ import {
   Bug, Wrench, Hammer, Cog, RotateCcw,
   ShieldCheck, ShieldAlert, Fingerprint, ScanFace,
   Network, Wifi, Radio, Antenna, Signal,
-  ArrowLeft, Film, ImagePlus, Clapperboard
+  ArrowLeft, Film, ImagePlus, Clapperboard,
+  CreditCard, ExternalLink, CheckCircle2
 } from 'lucide-react';
 
 // Persistence keys
@@ -453,16 +468,20 @@ const AI_MODELS = {
 // TOOL CATEGORIES
 // ============================================
 const TOOLS = {
-  chat: { name: 'Chat', icon: MessageSquare, description: 'Conversational AI' },
-  code: { name: 'Code', icon: Code, description: 'Code generation & debugging' },
-  image: { name: 'Image Gen', icon: ImagePlus, description: 'AI image generation' },
-  video: { name: 'Video Gen', icon: Clapperboard, description: 'AI video creation' },
-  gamedev: { name: 'Game Dev', icon: Gamepad2, description: 'Game development suite' },
-  appdev: { name: 'App Dev', icon: Smartphone, description: 'Application development' },
-  automation: { name: 'Automation', icon: Workflow, description: 'N8N-style workflows' },
-  deploy: { name: 'Deploy', icon: Rocket, description: 'App deployment' },
-  security: { name: 'Security', icon: Shield, description: 'Security analysis' },
-  schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' }
+  chat:       { name: 'Chat',        icon: MessageSquare, description: 'Conversational AI',            fullScreen: false },
+  code:       { name: 'Code',        icon: Code,          description: 'Code generation & debugging',  fullScreen: false },
+  image:      { name: 'Image Gen',   icon: ImagePlus,     description: 'AI image generation',          fullScreen: false },
+  video:      { name: 'Video Gen',   icon: Clapperboard,  description: 'AI video creation',            fullScreen: false },
+  gamedev:    { name: 'Game Dev',    icon: Gamepad2,      description: 'Game development suite',       fullScreen: true  },
+  appdev:     { name: 'App Dev',     icon: Smartphone,    description: 'Application development',      fullScreen: false },
+  automation: { name: 'Automation',  icon: Workflow,      description: 'N8N-style workflows',          fullScreen: false },
+  deploy:     { name: 'Deploy',      icon: Rocket,        description: 'App deployment',               fullScreen: false },
+  security:   { name: 'Security',    icon: Shield,        description: 'Security analysis',            fullScreen: true  },
+  analytics:  { name: 'Analytics',   icon: BarChart3,     description: 'Social & platform analytics',  fullScreen: true  },
+  connectors: { name: 'Connectors',  icon: Puzzle,        description: 'Platform integrations',        fullScreen: true  },
+  payments:   { name: 'Payments',    icon: CreditCard,    description: 'Subscriptions & billing',      fullScreen: true  },
+  auth:       { name: 'Auth & IAM',  icon: Fingerprint,   description: 'Users, roles & biometrics',    fullScreen: true  },
+  schedule:   { name: 'Schedule',    icon: Calendar,      description: 'Task scheduling',              fullScreen: false },
 };
 
 // ============================================
@@ -615,6 +634,17 @@ export default function NexusAI() {
   const [gameTemplate, setGameTemplate] = useState(null);
   const [appTemplate, setAppTemplate] = useState(null);
   const [showToolContent, setShowToolContent] = useState(false);
+
+  // Full-screen panel routing — 'chat' = default chat view
+  const [fullScreenView, setFullScreenView] = useState(null);
+
+  // Auth: track whether user is signed in (null = not signed in)
+  const [authedUser, setAuthedUser] = useState(() => {
+    try {
+      const token = localStorage.getItem('nexus_token');
+      return token ? JSON.parse(atob(token.split('.')[1] || '{}')) : null;
+    } catch { return null; }
+  });
 
   // Security Dashboard State
   const [securityScan, setSecurityScan] = useState({
@@ -849,8 +879,8 @@ export default function NexusAI() {
           <button className="icon-btn" onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
             <Menu size={20} />
           </button>
-          {showToolContent && (
-            <button className="back-btn" onClick={() => setShowToolContent(false)}>
+          {(showToolContent || fullScreenView) && (
+            <button className="back-btn" onClick={() => { setShowToolContent(false); setFullScreenView(null); setActiveTool('chat'); }}>
               <ArrowLeft size={18} />
               <span>Back</span>
             </button>
@@ -914,8 +944,13 @@ export default function NexusAI() {
           </div>
           <button className="icon-btn" onClick={() => setIsMemoryOpen(!isMemoryOpen)}><Brain size={20} /></button>
           <button className="icon-btn" onClick={() => setIsCallActive(true)}><Phone size={20} /></button>
+          <button className="icon-btn" title="Analytics" onClick={() => { setFullScreenView('analytics'); setActiveTool('analytics'); setShowToolContent(false); }}><BarChart3 size={20} /></button>
+          <button className="icon-btn" title="Connectors" onClick={() => { setFullScreenView('connectors'); setActiveTool('connectors'); setShowToolContent(false); }}><Puzzle size={20} /></button>
+          <button className="icon-btn" title={authedUser ? authedUser.email || 'Account' : 'Sign In'} onClick={() => { setFullScreenView('auth'); setActiveTool('auth'); setShowToolContent(false); }}>
+            {authedUser ? <CheckCircle2 size={20} style={{ color: '#22c55e' }} /> : <User size={20} />}
+          </button>
           <button className="icon-btn" onClick={() => setIsSettingsOpen(true)}><Settings size={20} /></button>
-          <div className="user-avatar">{userAvatar?.emoji || '≡ƒæñ'}</div>
+          <div className="user-avatar">{userAvatar?.emoji || '🧑'}</div>
         </div>
       </header>
 
@@ -946,7 +981,19 @@ export default function NexusAI() {
             {Object.entries(TOOLS).map(([key, tool]) => {
               const Icon = tool.icon;
               return (
-                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security'].includes(key)) setShowToolContent(true); }}>
+                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => {
+                    setActiveTool(key);
+                    if (tool.fullScreen) {
+                      setFullScreenView(key);
+                      setShowToolContent(false);
+                    } else if (['appdev', 'automation'].includes(key)) {
+                      setShowToolContent(true);
+                      setFullScreenView(null);
+                    } else {
+                      setShowToolContent(false);
+                      setFullScreenView(null);
+                    }
+                  }}>
                   <Icon size={18} />
                   <span>{tool.name}</span>
                 </button>
@@ -1104,8 +1151,26 @@ export default function NexusAI() {
             </div>
           )}
 
-          {/* Messages */}
-          <div className="messages-container">
+          {/* ── Full-Screen Panels ──────────────────────────────────────────── */}
+          {fullScreenView && (
+            <div style={{ flex: 1, overflow: 'auto', background: 'var(--bg-1, #0a0a0c)' }}>
+              <Suspense fallback={
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-3, #6b7280)' }}>
+                  <Loader2 size={32} className="spin" />
+                </div>
+              }>
+                {fullScreenView === 'analytics'  && <AnalyticsDashboard />}
+                {fullScreenView === 'security'   && <SecurityDashboard />}
+                {fullScreenView === 'gamedev'    && <GameDevDashboard />}
+                {fullScreenView === 'auth'       && <AuthSystem onLogin={u => setAuthedUser(u)} user={authedUser} />}
+                {fullScreenView === 'payments'   && <StripeCheckout user={authedUser} />}
+                {fullScreenView === 'connectors' && <ConnectorsPanel />}
+              </Suspense>
+            </div>
+          )}
+
+          {/* Messages — hidden when a full-screen panel is active */}
+          <div className="messages-container" style={{ display: fullScreenView ? 'none' : undefined }}>
             {messages.length === 0 ? (
               <div className="welcome">
                 <div className="welcome-icon"><Sparkles size={48} /></div>
@@ -1144,7 +1209,7 @@ export default function NexusAI() {
           </div>
 
           {/* Input */}
-          <div className="input-area">
+          <div className="input-area" style={{ display: fullScreenView ? 'none' : undefined }}>
             <div className="input-box">
               <button className="attach-btn" onClick={() => fileInputRef.current?.click()}><Upload size={20} /></button>
               <input type="file" ref={fileInputRef} onChange={handleFileUpload} multiple hidden />

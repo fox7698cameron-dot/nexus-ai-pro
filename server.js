@@ -16,6 +16,11 @@ import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
 
+// Route modules
+import authRoutes, { requireAuth } from './src/server/authRoutes.js';
+import analyticsRoutes from './src/server/analyticsRoutes.js';
+import paymentRoutes from './src/server/paymentRoutes.js';
+
 dotenv.config();
 
 const app = express();
@@ -441,8 +446,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-2.0-flash-exp';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +820,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -833,6 +838,81 @@ const workflowEngine = new WorkflowEngine();
 // ================================================
 // API ROUTES
 // ================================================
+
+// ================================================
+// ROUTE REGISTRATION — Auth, Analytics, Payments
+// ================================================
+
+// Stripe webhook needs raw body — must be mounted before json() for /webhook path
+app.use('/api/payments/stripe/webhook', express.raw({ type: 'application/json' }));
+
+app.use('/api/auth', authRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/payments', paymentRoutes);
+
+// ─── Translation endpoint ──────────────────────────────────────────────
+// Proxies translation requests through the AI backend (no client-side key exposure)
+app.post('/api/translate', requireAuth, async (req, res) => {
+  try {
+    const { text, targetLang } = req.body;
+    if (!text || !targetLang) return res.status(400).json({ error: 'text and targetLang required.' });
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1024,
+        messages: [{ role: 'user',
+          content: `Translate the following text to ${targetLang}. Return only the translation, no explanation:\n\n${text}` }],
+      }),
+    });
+    const d = await response.json();
+    const translated = d.content?.[0]?.text ?? text;
+    return res.json({ translated });
+  } catch {
+    return res.status(500).json({ error: 'Translation failed.' });
+  }
+});
+
+// ─── Project tracking endpoints ────────────────────────────────────────
+const projectStore = new Map();
+
+app.get('/api/projects', requireAuth, (req, res) => {
+  const userProjects = [...projectStore.values()]
+    .filter((p) => p.userId === req.user.userId);
+  return res.json({ projects: userProjects });
+});
+
+app.post('/api/projects', requireAuth, (req, res) => {
+  const id = uuidv4();
+  const project = {
+    id, userId: req.user.userId,
+    ...req.body,
+    createdAt: Date.now(), updatedAt: Date.now(),
+  };
+  projectStore.set(id, project);
+  security.logAudit('PROJECT_CREATED', { id, userId: req.user.userId });
+  return res.status(201).json(project);
+});
+
+app.patch('/api/projects/:id', requireAuth, (req, res) => {
+  const p = projectStore.get(req.params.id);
+  if (!p || p.userId !== req.user.userId) return res.status(404).json({ error: 'Project not found.' });
+  const updated = { ...p, ...req.body, updatedAt: Date.now() };
+  projectStore.set(p.id, updated);
+  return res.json(updated);
+});
+
+app.delete('/api/projects/:id', requireAuth, (req, res) => {
+  const p = projectStore.get(req.params.id);
+  if (!p || p.userId !== req.user.userId) return res.status(404).json({ error: 'Project not found.' });
+  projectStore.delete(p.id);
+  return res.json({ success: true });
+});
 
 // Health check
 app.get('/api/health', (req, res) => {

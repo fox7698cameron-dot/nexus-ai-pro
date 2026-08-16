@@ -16,6 +16,15 @@ import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
 
+// New route modules
+import authRoutes from './src/routes/auth.js';
+import analyticsRoutes from './src/routes/analytics.js';
+import projectsRoutes from './src/routes/projects.js';
+import checkoutRoutes from './src/routes/checkout.js';
+import securityRoutes from './src/routes/security.js';
+import adminRoutes from './src/routes/admin.js';
+import i18nRoutes from './src/routes/i18n.js';
+
 dotenv.config();
 
 const app = express();
@@ -441,8 +450,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-flash';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -1151,18 +1159,40 @@ io.on('connection', (socket) => {
 });
 
 // ================================================
-// AUTO-PATCHING SCHEDULER
+// NEW ROUTE REGISTRATIONS
+// ================================================
+
+app.use('/api/auth',      authRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/projects',  projectsRoutes);
+app.use('/api/security',  securityRoutes);
+app.use('/api/admin',     adminRoutes);
+app.use('/api/i18n',      i18nRoutes);
+// Stripe webhook must use raw body — register before json middleware would re-parse
+app.use('/api/checkout',  checkoutRoutes);
+
+// ================================================
+// HEALTH CHECK
+// ================================================
+
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    version: '2.0.0',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+  });
+});
+
+// ================================================
+// SECURITY SCAN SCHEDULER (minimal logging)
 // ================================================
 
 setInterval(async () => {
-  console.log('Running automated security scan...');
-  const scan = await security.scanVulnerabilities();
-
-  if (scan.vulnerabilities.length > 0) {
-    console.log('Vulnerabilities detected, auto-patching...');
-    await security.autoPatch();
-  }
-}, 60 * 60 * 1000); // Every hour
+  try {
+    await security.scanVulnerabilities();
+  } catch { /* silent — log stays minimal */ }
+}, 60 * 60 * 1000); // Every hour — no console spam
 
 // ================================================
 // ERROR HANDLING

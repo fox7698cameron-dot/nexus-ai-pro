@@ -1,9 +1,16 @@
 /* app.jsx
-   Updated: make UI more responsive for mobile/desktop, persist model selection, chats, memories, settings,
-   ensure AES-256 label present, and small responsive CSS tweaks.
+   Updated: 2026-08-18 — integrate role-based routing, analytics, security, project tracker,
+   payments, and auth dashboards; add admin/dev/moderator/user role separation.
 */
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react';
 import { securityService } from './src/security-service.js';
+
+// ─── Lazy-load feature dashboards (code-split per role/tool) ─────────────────
+const AuthDashboard      = lazy(() => import('./src/auth/AuthDashboard.jsx'));
+const AnalyticsDashboard = lazy(() => import('./src/analytics/AnalyticsDashboard.jsx'));
+const SecurityDashboard  = lazy(() => import('./src/security/SecurityDashboard.jsx'));
+const ProjectTracker     = lazy(() => import('./src/projects/ProjectTracker.jsx'));
+const StripeCheckout     = lazy(() => import('./src/payments/StripeCheckout.jsx'));
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
   Settings, Menu, X, Plus, Trash2, Download, Upload,
@@ -21,7 +28,8 @@ import {
   Bug, Wrench, Hammer, Cog, RotateCcw,
   ShieldCheck, ShieldAlert, Fingerprint, ScanFace,
   Network, Wifi, Radio, Antenna, Signal,
-  ArrowLeft, Film, ImagePlus, Clapperboard
+  ArrowLeft, Film, ImagePlus, Clapperboard,
+  CreditCard, LogOut, UserCheck, ShieldOff, ChevronUp
 } from 'lucide-react';
 
 // Persistence keys
@@ -453,17 +461,23 @@ const AI_MODELS = {
 // TOOL CATEGORIES
 // ============================================
 const TOOLS = {
-  chat: { name: 'Chat', icon: MessageSquare, description: 'Conversational AI' },
-  code: { name: 'Code', icon: Code, description: 'Code generation & debugging' },
-  image: { name: 'Image Gen', icon: ImagePlus, description: 'AI image generation' },
-  video: { name: 'Video Gen', icon: Clapperboard, description: 'AI video creation' },
-  gamedev: { name: 'Game Dev', icon: Gamepad2, description: 'Game development suite' },
-  appdev: { name: 'App Dev', icon: Smartphone, description: 'Application development' },
-  automation: { name: 'Automation', icon: Workflow, description: 'N8N-style workflows' },
-  deploy: { name: 'Deploy', icon: Rocket, description: 'App deployment' },
-  security: { name: 'Security', icon: Shield, description: 'Security analysis' },
-  schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' }
+  chat:      { name: 'Chat',      icon: MessageSquare, description: 'Conversational AI' },
+  code:      { name: 'Code',      icon: Code,          description: 'Code generation & debugging' },
+  image:     { name: 'Image Gen', icon: ImagePlus,     description: 'AI image generation' },
+  video:     { name: 'Video Gen', icon: Clapperboard,  description: 'AI video creation' },
+  gamedev:   { name: 'Game Dev',  icon: Gamepad2,      description: 'Game development suite' },
+  appdev:    { name: 'App Dev',   icon: Smartphone,    description: 'Application development' },
+  automation:{ name: 'Automation',icon: Workflow,      description: 'N8N-style workflows' },
+  deploy:    { name: 'Deploy',    icon: Rocket,        description: 'App deployment' },
+  security:  { name: 'Security',  icon: Shield,        description: 'Security analysis' },
+  analytics: { name: 'Analytics', icon: BarChart3,     description: 'Social media analytics' },
+  projects:  { name: 'Projects',  icon: GitBranch,     description: 'Project tracking' },
+  payments:  { name: 'Payments',  icon: CreditCard,    description: 'Subscription & billing' },
+  schedule:  { name: 'Schedule',  icon: Calendar,      description: 'Task scheduling' }
 };
+
+// Tools that open a full panel view
+const PANEL_TOOLS = new Set(['gamedev', 'appdev', 'automation', 'security', 'analytics', 'projects', 'payments']);
 
 // ============================================
 // GAME DEV TEMPLATES
@@ -597,7 +611,50 @@ const WORKFLOW_NODES = {
 // ============================================
 // MAIN APP COMPONENT
 // ============================================
+// ─── Role-based tool visibility ────────────────────────────────────────────────
+const ROLE_TOOLS = {
+  superadmin: Object.keys(TOOLS),
+  admin:      ['chat','code','image','video','analytics','security','projects','payments','automation','deploy','schedule'],
+  dev:        ['chat','code','image','video','gamedev','appdev','projects','automation','deploy','schedule'],
+  moderator:  ['chat','analytics','security','schedule'],
+  user:       ['chat','code','image','video','gamedev','appdev','projects','payments','schedule'],
+  guest:      ['chat'],
+};
+
 export default function NexusAI() {
+  // ─── Auth / session state ─────────────────────────────────────────────────
+  const [authSession, setAuthSession] = useState(() => {
+    try {
+      const raw = sessionStorage.getItem('nexus:session');
+      if (!raw) return null;
+      const s = JSON.parse(raw);
+      // Treat expired sessions as logged-out
+      if (s.expiresAt && Date.now() > s.expiresAt) { sessionStorage.removeItem('nexus:session'); return null; }
+      return s;
+    } catch { return null; }
+  });
+  const [showAuthModal, setShowAuthModal] = useState(false);
+
+  // Derive role from session (default: user for demo; guest when truly unauthenticated)
+  const userRole = authSession?.role || 'guest';
+  const visibleTools = useMemo(() => {
+    const allowed = new Set(ROLE_TOOLS[userRole] || ROLE_TOOLS.guest);
+    return Object.fromEntries(Object.entries(TOOLS).filter(([k]) => allowed.has(k)));
+  }, [userRole]);
+
+  const handleAuthSuccess = useCallback((session) => {
+    sessionStorage.setItem('nexus:session', JSON.stringify(session));
+    setAuthSession(session);
+    setShowAuthModal(false);
+  }, []);
+
+  const handleLogout = useCallback(() => {
+    sessionStorage.removeItem('nexus:session');
+    localStorage.removeItem('nexus:refreshToken');
+    setAuthSession(null);
+    fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
+  }, []);
+
   // State
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -915,9 +972,44 @@ export default function NexusAI() {
           <button className="icon-btn" onClick={() => setIsMemoryOpen(!isMemoryOpen)}><Brain size={20} /></button>
           <button className="icon-btn" onClick={() => setIsCallActive(true)}><Phone size={20} /></button>
           <button className="icon-btn" onClick={() => setIsSettingsOpen(true)}><Settings size={20} /></button>
-          <div className="user-avatar">{userAvatar?.emoji || '≡ƒæñ'}</div>
+          {authSession ? (
+            <div className="user-session" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className="role-badge" style={{
+                fontSize: '0.65rem', padding: '2px 7px', borderRadius: 9999,
+                background: authSession.role === 'admin' || authSession.role === 'superadmin' ? 'linear-gradient(135deg,#7c3aed,#4f46e5)' :
+                            authSession.role === 'dev' ? 'linear-gradient(135deg,#0891b2,#0d9488)' :
+                            authSession.role === 'moderator' ? 'linear-gradient(135deg,#d97706,#b45309)' :
+                            'linear-gradient(135deg,#374151,#1f2937)',
+                color: '#fff', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em'
+              }}>{authSession.role}</span>
+              <div className="user-avatar" title={authSession.username || authSession.email}>{userAvatar?.emoji || '🧑'}</div>
+              <button className="icon-btn" title="Sign out" onClick={handleLogout}><LogOut size={18} /></button>
+            </div>
+          ) : (
+            <button className="icon-btn sign-in-btn" onClick={() => setShowAuthModal(true)} title="Sign in"
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 8,
+                background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600 }}>
+              <UserCheck size={16} />
+              <span>Sign In</span>
+            </button>
+          )}
         </div>
       </header>
+
+      {/* Auth Modal */}
+      {showAuthModal && (
+        <div className="modal-overlay" onClick={() => setShowAuthModal(false)} style={{ zIndex: 2000 }}>
+          <div style={{ background: 'var(--bg-panel, #111)', borderRadius: 16, padding: '2px',
+            background: 'linear-gradient(135deg,#6366f1,#8b5cf6)', maxWidth: 480, width: '100%', margin: 'auto' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ background: 'var(--bg-card, #18181b)', borderRadius: 14, overflow: 'hidden' }}>
+              <Suspense fallback={<div style={{ padding: 40, textAlign: 'center' }}><Loader2 size={24} className="spin" /></div>}>
+                <AuthDashboard onAuthSuccess={handleAuthSuccess} apiBase="/api/auth" />
+              </Suspense>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Content */}
       <div className="app-content">
@@ -943,10 +1035,10 @@ export default function NexusAI() {
         <main className="chat-area">
           {/* Tool Panel */}
           <div className="tool-panel">
-            {Object.entries(TOOLS).map(([key, tool]) => {
+            {Object.entries(visibleTools).map(([key, tool]) => {
               const Icon = tool.icon;
               return (
-                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security'].includes(key)) setShowToolContent(true); }}>
+                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (PANEL_TOOLS.has(key)) setShowToolContent(true); else setShowToolContent(false); }}>
                   <Icon size={18} />
                   <span>{tool.name}</span>
                 </button>
@@ -995,8 +1087,8 @@ export default function NexusAI() {
             </div>
           )}
 
-          {/* Security Dashboard */}
-          {showToolContent && activeTool === 'security' && (
+          {/* Security Dashboard — legacy inline (hidden; replaced by SecurityDashboard component below) */}
+          {false && showToolContent && activeTool === 'security' && (
             <div className="tool-content security-dashboard">
               <div className="panel-header">
                 <ShieldCheck size={18} />
@@ -1104,8 +1196,44 @@ export default function NexusAI() {
             </div>
           )}
 
-          {/* Messages */}
-          <div className="messages-container">
+          {/* Analytics Dashboard Panel */}
+          {showToolContent && activeTool === 'analytics' && (
+            <div className="tool-content tool-content--fullscreen">
+              <Suspense fallback={<div className="panel-loading"><Loader2 size={24} className="spin" /><span>Loading Analytics…</span></div>}>
+                <AnalyticsDashboard apiBase="/api/analytics" />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Project Tracker Panel */}
+          {showToolContent && activeTool === 'projects' && (
+            <div className="tool-content tool-content--fullscreen">
+              <Suspense fallback={<div className="panel-loading"><Loader2 size={24} className="spin" /><span>Loading Projects…</span></div>}>
+                <ProjectTracker apiBase="/api/projects" />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Payments / Billing Panel */}
+          {showToolContent && activeTool === 'payments' && (
+            <div className="tool-content tool-content--fullscreen">
+              <Suspense fallback={<div className="panel-loading"><Loader2 size={24} className="spin" /><span>Loading Payments…</span></div>}>
+                <StripeCheckout apiBase="/api/payments" />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Full Security Dashboard Panel (replaces legacy inline version) */}
+          {showToolContent && activeTool === 'security' && (
+            <div className="tool-content tool-content--fullscreen">
+              <Suspense fallback={<div className="panel-loading"><Loader2 size={24} className="spin" /><span>Loading Security…</span></div>}>
+                <SecurityDashboard />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Messages — hidden when a full-screen tool panel is active */}
+          <div className="messages-container" style={{ display: showToolContent && PANEL_TOOLS.has(activeTool) ? 'none' : undefined }}>
             {messages.length === 0 ? (
               <div className="welcome">
                 <div className="welcome-icon"><Sparkles size={48} /></div>
@@ -1144,7 +1272,7 @@ export default function NexusAI() {
           </div>
 
           {/* Input */}
-          <div className="input-area">
+          <div className="input-area" style={{ display: showToolContent && PANEL_TOOLS.has(activeTool) ? 'none' : undefined }}>
             <div className="input-box">
               <button className="attach-btn" onClick={() => fileInputRef.current?.click()}><Upload size={20} /></button>
               <input type="file" ref={fileInputRef} onChange={handleFileUpload} multiple hidden />
@@ -1541,6 +1669,22 @@ export default function NexusAI() {
           padding: 16px;
           background: var(--bg-2);
           border-bottom: 1px solid var(--border);
+        }
+        .tool-content--fullscreen {
+          padding: 0;
+          flex: 1;
+          overflow-y: auto;
+          border-bottom: none;
+          min-height: 0;
+        }
+        .panel-loading {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 12px;
+          padding: 60px 24px;
+          color: var(--text-2, #9ca3af);
+          font-size: 0.9rem;
         }
         .panel-header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
         .panel-header h3 { font-size: 0.95rem; }

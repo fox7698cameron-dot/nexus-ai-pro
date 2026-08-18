@@ -1,6 +1,7 @@
 // ================================================
 // NEXUS AI PRO - Enhanced Backend Server
 // Military-Grade Security & Multi-Model AI Platform
+// Date: 2026-08-18
 // ================================================
 
 import express from 'express';
@@ -15,6 +16,13 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import jwt from 'jsonwebtoken';
+
+// Feature route modules
+import authRoutes from './server/routes/auth.js';
+import paymentRoutes from './server/routes/payments.js';
+import analyticsRoutes from './server/routes/analytics.js';
+import projectRoutes from './server/routes/projects.js';
 
 dotenv.config();
 
@@ -441,8 +449,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-pro';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +823,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -833,6 +841,15 @@ const workflowEngine = new WorkflowEngine();
 // ================================================
 // API ROUTES
 // ================================================
+
+// Feature route modules
+app.use('/api/auth', authRoutes);
+app.use('/api/payments', paymentRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/projects', projectRoutes);
+
+// Translation endpoint (delegated to analytics module)
+app.use('/api/i18n', analyticsRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -1098,21 +1115,41 @@ app.get('/api/templates/app', (req, res) => {
   });
 });
 
+// Connectors status endpoint
+app.get('/api/connectors/:connectorId/status', (req, res) => {
+  const { connectorId } = req.params;
+  const VALID_CONNECTORS = new Set([
+    'azure', 'adobe', 'aws', 'google', 'slack', 'zoom',
+    'github', 'bitbucket', 'redis', 'blob',
+  ]);
+  if (!VALID_CONNECTORS.has(connectorId)) {
+    return res.status(400).json({ error: 'Unknown connector' });
+  }
+  // In production: check real connection status
+  return res.json({ connected: false, reason: 'Not configured' });
+});
+
 // ================================================
 // WEBSOCKET HANDLING
 // ================================================
 
 io.use((socket, next) => {
-  // Authenticate socket connection
+  // Authenticate socket connection via JWT
   const token = socket.handshake.auth.token;
-  if (token) {
-    // Verify token
+  if (token && process.env.JWT_SECRET) {
+    try {
+      const payload = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+      socket.userId = payload.sub;
+      socket.userRole = payload.role;
+    } catch {
+      socket.userId = uuidv4();
+    }
+  } else if (token) {
     socket.userId = security.hash(token);
-    next();
   } else {
     socket.userId = uuidv4();
-    next();
   }
+  next();
 });
 
 io.on('connection', (socket) => {

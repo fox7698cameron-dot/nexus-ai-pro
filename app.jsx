@@ -11,6 +11,7 @@ const AnalyticsDashboard = lazy(() => import('./src/analytics/AnalyticsDashboard
 const SecurityDashboard  = lazy(() => import('./src/security/SecurityDashboard.jsx'));
 const ProjectTracker     = lazy(() => import('./src/projects/ProjectTracker.jsx'));
 const StripeCheckout     = lazy(() => import('./src/payments/StripeCheckout.jsx'));
+const RoleDashboard      = lazy(() => import('./src/dashboards/index.jsx'));
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
   Settings, Menu, X, Plus, Trash2, Download, Upload,
@@ -461,6 +462,7 @@ const AI_MODELS = {
 // TOOL CATEGORIES
 // ============================================
 const TOOLS = {
+  dashboard: { name: 'Dashboard', icon: BarChart3,     description: 'Role dashboard' },
   chat:      { name: 'Chat',      icon: MessageSquare, description: 'Conversational AI' },
   code:      { name: 'Code',      icon: Code,          description: 'Code generation & debugging' },
   image:     { name: 'Image Gen', icon: ImagePlus,     description: 'AI image generation' },
@@ -477,7 +479,7 @@ const TOOLS = {
 };
 
 // Tools that open a full panel view
-const PANEL_TOOLS = new Set(['gamedev', 'appdev', 'automation', 'security', 'analytics', 'projects', 'payments']);
+const PANEL_TOOLS = new Set(['dashboard', 'gamedev', 'appdev', 'automation', 'security', 'analytics', 'projects', 'payments']);
 
 // ============================================
 // GAME DEV TEMPLATES
@@ -614,11 +616,11 @@ const WORKFLOW_NODES = {
 // ─── Role-based tool visibility ────────────────────────────────────────────────
 const ROLE_TOOLS = {
   superadmin: Object.keys(TOOLS),
-  admin:      ['chat','code','image','video','analytics','security','projects','payments','automation','deploy','schedule'],
-  dev:        ['chat','code','image','video','gamedev','appdev','projects','automation','deploy','schedule'],
-  moderator:  ['chat','analytics','security','schedule'],
-  user:       ['chat','code','image','video','gamedev','appdev','projects','payments','schedule'],
-  guest:      ['chat'],
+  admin:      ['dashboard','chat','code','image','video','analytics','security','projects','payments','automation','deploy','schedule'],
+  dev:        ['dashboard','chat','code','image','video','gamedev','appdev','projects','automation','deploy','schedule'],
+  moderator:  ['dashboard','chat','analytics','security','schedule'],
+  user:       ['dashboard','chat','code','image','video','gamedev','appdev','projects','payments','schedule'],
+  guest:      ['dashboard','chat'],
 };
 
 export default function NexusAI() {
@@ -1193,6 +1195,20 @@ export default function NexusAI() {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Role Dashboard Panel */}
+          {showToolContent && activeTool === 'dashboard' && (
+            <div className="tool-content tool-content--fullscreen">
+              <Suspense fallback={<div className="panel-loading"><Loader2 size={24} className="spin" /><span>Loading Dashboard…</span></div>}>
+                <RoleDashboard
+                  session={authSession}
+                  apiBase=""
+                  onSignIn={() => setShowAuthModal(true)}
+                  onToolSelect={(tool) => { setActiveTool(tool); if (PANEL_TOOLS.has(tool)) setShowToolContent(true); else setShowToolContent(false); }}
+                />
+              </Suspense>
             </div>
           )}
 

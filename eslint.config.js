@@ -8,7 +8,12 @@ import globals from 'globals';
 
 export default [
   {
-    ignores: ['dist/**', 'node_modules/**', 'build/**', '.git/**', 'nexus-ai-pro/**', 'capacitor/**', 'desktop/**', 'multiplatform/**']
+    ignores: [
+      'dist/**', 'node_modules/**', 'build/**', '.git/**',
+      'nexus-ai-pro/**', 'capacitor/**', 'desktop/**', 'multiplatform/**',
+      'dev-dist/**',   // Service worker / workbox generated files
+      '**/*.min.js'   // Minified bundles
+    ]
   },
   {
     files: ['**/*.js', '**/*.jsx'],

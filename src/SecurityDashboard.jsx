@@ -43,7 +43,7 @@ const SecurityDashboard = () => {
           vulnerabilities: dashboard.vulnerabilities.map(v =>
             v.id === vulnId ? { ...v, status: 'patched' } : v
           ),
-          overallScore: Math.min(100, dashboard.overallScore + 5),
+          overallScore: Math.min(100, dashboard.overallScore + 5)
         };
         setDashboard(updated);
       }
@@ -62,12 +62,12 @@ const SecurityDashboard = () => {
 
   const getSeverityColor = (severity) => {
     switch (severity) {
-      case 'high':
-        return '#ef4444';
-      case 'medium':
-        return '#f59e0b';
-      default:
-        return '#3b82f6';
+    case 'high':
+      return '#ef4444';
+    case 'medium':
+      return '#f59e0b';
+    default:
+      return '#3b82f6';
     }
   };
 
@@ -94,7 +94,7 @@ const SecurityDashboard = () => {
             border: '1px solid #ef4444',
             borderRadius: '8px',
             color: '#fca5a5',
-            fontSize: '12px',
+            fontSize: '12px'
           }}
         >
           {error}
@@ -108,7 +108,7 @@ const SecurityDashboard = () => {
           borderRadius: '16px',
           padding: '30px',
           marginBottom: '30px',
-          textAlign: 'center',
+          textAlign: 'center'
         }}
       >
         <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.7)', marginBottom: '12px' }}>
@@ -122,7 +122,7 @@ const SecurityDashboard = () => {
             height: '6px',
             background: 'rgba(255,255,255,0.2)',
             borderRadius: '3px',
-            overflow: 'hidden',
+            overflow: 'hidden'
           }}
         >
           <div
@@ -130,7 +130,7 @@ const SecurityDashboard = () => {
               height: '100%',
               width: `${dashboard.overallScore}%`,
               background: getScoreColor(dashboard.overallScore),
-              transition: 'width 0.3s ease',
+              transition: 'width 0.3s ease'
             }}
           />
         </div>
@@ -143,7 +143,7 @@ const SecurityDashboard = () => {
           border: '1px solid #333',
           borderRadius: '12px',
           padding: '20px',
-          marginBottom: '30px',
+          marginBottom: '30px'
         }}
       >
         <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px' }}>
@@ -165,7 +165,7 @@ const SecurityDashboard = () => {
             cursor: isScanning ? 'not-allowed' : 'pointer',
             fontSize: '14px',
             fontWeight: '600',
-            transition: 'background 0.2s',
+            transition: 'background 0.2s'
           }}
         >
           {isScanning ? 'Scanning...' : 'Start Scan'}
@@ -186,7 +186,7 @@ const SecurityDashboard = () => {
                 border: '1px solid #333',
                 borderRadius: '12px',
                 padding: '16px',
-                marginBottom: '12px',
+                marginBottom: '12px'
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
@@ -200,7 +200,7 @@ const SecurityDashboard = () => {
                     color: getSeverityColor(vuln.severity),
                     borderRadius: '4px',
                     fontSize: '11px',
-                    fontWeight: '600',
+                    fontWeight: '600'
                   }}
                 >
                   {vuln.severity.toUpperCase()}
@@ -221,7 +221,7 @@ const SecurityDashboard = () => {
                     borderRadius: '6px',
                     cursor: 'pointer',
                     fontSize: '12px',
-                    fontWeight: '600',
+                    fontWeight: '600'
                   }}
                 >
                   Apply Patch
@@ -236,7 +236,7 @@ const SecurityDashboard = () => {
                     borderRadius: '6px',
                     textAlign: 'center',
                     fontSize: '12px',
-                    fontWeight: '600',
+                    fontWeight: '600'
                   }}
                 >
                   Patched
@@ -265,7 +265,7 @@ const SecurityDashboard = () => {
                 marginBottom: '12px',
                 display: 'flex',
                 justifyContent: 'space-between',
-                alignItems: 'center',
+                alignItems: 'center'
               }}
             >
               <div>
@@ -293,7 +293,7 @@ const SecurityDashboard = () => {
                         : '#f59e0b',
                   borderRadius: '4px',
                   fontSize: '11px',
-                  fontWeight: '600',
+                  fontWeight: '600'
                 }}
               >
                 {threat.status.toUpperCase()}
@@ -310,7 +310,7 @@ const SecurityDashboard = () => {
           background: '#1a1a1a',
           border: '1px solid #333',
           borderRadius: '12px',
-          padding: '16px',
+          padding: '16px'
         }}
       >
         <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: '600' }}>
@@ -322,7 +322,7 @@ const SecurityDashboard = () => {
               width: '12px',
               height: '12px',
               background: '#16b981',
-              borderRadius: '50%',
+              borderRadius: '50%'
             }}
           />
           <span style={{ fontSize: '12px', color: '#999' }}>

@@ -9,7 +9,7 @@
     "email": "contact@nexusai.pro"
   },
   "license": "Apache-2.0",
-  "copyright": "Copyright © 2025-2026 Cameron Fox. All rights reserved.",
+  "copyright": "Copyright \u00a9 2025-2026 Cameron Fox. All rights reserved.",
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "vite",
@@ -77,13 +77,12 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "socket.io": "^4.8.1",
-    "uuid": "^11.0.4",
+    "uuid": "^11.1.1",
     "winston": "^3.17.0",
-    "zod": "^3.24.1",
-    "jexl": "^2.3.0"
+    "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@capacitor/cli": "^6.2.0",
+    "@capacitor/cli": "^8.5.0",
     "@eslint/js": "^9.39.2",
     "@types/node": "^22.10.5",
     "@vitejs/plugin-react": "^4.3.4",
@@ -100,8 +99,12 @@
     "workbox-window": "^7.3.0"
   },
   "overrides": {
-    "esbuild": "^0.24.2",
-    "rollup": "^4.29.1"
+    "tar": "^7.5.0",
+    "@capacitor/cli": {
+      "xcode": {
+        "uuid": "^11.1.1"
+      }
+    }
   },
   "capacitor": {
     "appId": "com.cameronfox.nexusaipro",

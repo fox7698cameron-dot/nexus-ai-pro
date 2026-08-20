@@ -15,6 +15,7 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import { buildPlatformRouter } from './src/routes/platform-routes.js';
 
 dotenv.config();
 
@@ -1149,6 +1150,14 @@ io.on('connection', (socket) => {
     security.logAudit('SOCKET_DISCONNECT', { socketId: socket.id });
   });
 });
+
+// ================================================
+// PLATFORM ROUTES (v2) — analytics, projects, connectors, billing, auth,
+// realtime security, i18n, reasoning tiers, audit tail.  Mounted under
+// /api/v2 so the existing /api routes are unaffected.
+// ================================================
+const platform = buildPlatformRouter({ io });
+app.use('/api/v2', platform.router);
 
 // ================================================
 // AUTO-PATCHING SCHEDULER

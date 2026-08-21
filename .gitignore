@@ -6,3 +6,30 @@ Caches/
 node_modules/
 dist/
 build/
+
+# ── Secrets — NEVER commit these ──────────────────
+.env
+.env.local
+.env.production
+.env.*.local
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials/
+service-account*.json
+
+# ── Logs ─────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+
+# ── Build artifacts ───────────────────────────────
+.vite/
+.parcel-cache/
+coverage/
+
+# ── OS ───────────────────────────────────────────
+Thumbs.db
+desktop.ini

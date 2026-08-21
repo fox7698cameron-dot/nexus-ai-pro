@@ -8,7 +8,14 @@ import globals from 'globals';
 
 export default [
   {
-    ignores: ['dist/**', 'node_modules/**', 'build/**', '.git/**', 'nexus-ai-pro/**', 'capacitor/**', 'desktop/**', 'multiplatform/**']
+    ignores: [
+      'dist/**', 'node_modules/**', 'build/**', '.git/**',
+      'nexus-ai-pro/**', 'capacitor/**', 'desktop/**', 'multiplatform/**',
+      'dev-dist/**',                // Generated service worker build artifacts
+      'src/network/p2p.js',         // Third-party p2p module
+      'src/security/index.ts',      // TypeScript — not linted by eslint .js
+      'scripts/add-copyright.js'    // Build script with intentional patterns
+    ]
   },
   {
     files: ['**/*.js', '**/*.jsx'],

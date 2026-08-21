@@ -441,8 +441,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-2.0-flash';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +815,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -1151,15 +1151,19 @@ io.on('connection', (socket) => {
 });
 
 // ================================================
+// EXTENDED ROUTES (Auth, Payments, Analytics, Game, i18n, Connectors)
+// ================================================
+
+import { registerRoutes } from './src/server/routes.js';
+registerRoutes(app, security);
+
+// ================================================
 // AUTO-PATCHING SCHEDULER
 // ================================================
 
 setInterval(async () => {
-  console.log('Running automated security scan...');
   const scan = await security.scanVulnerabilities();
-
   if (scan.vulnerabilities.length > 0) {
-    console.log('Vulnerabilities detected, auto-patching...');
     await security.autoPatch();
   }
 }, 60 * 60 * 1000); // Every hour

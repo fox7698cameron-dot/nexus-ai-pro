@@ -1,6 +1,8 @@
 // ================================================
 // NEXUS AI PRO - Enhanced Backend Server
 // Military-Grade Security & Multi-Model AI Platform
+// Date: 2026-08-22
+// Copyright © 2025-2026 Cameron Fox. All rights reserved.
 // ================================================
 
 import express from 'express';
@@ -15,6 +17,12 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import analyticsRouter from './routes/analytics.js';
+import authRouter from './routes/auth.js';
+import paymentsRouter from './routes/payments.js';
+import gamedevRouter from './routes/gamedev.js';
+import securityRouter from './routes/security.js';
+import connectorsRouter from './routes/connectors.js';
 
 dotenv.config();
 
@@ -441,8 +449,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-pro';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +823,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -829,6 +837,16 @@ class WorkflowEngine {
 }
 
 const workflowEngine = new WorkflowEngine();
+
+// ================================================
+// ROUTE MODULES
+// ================================================
+app.use('/api/analytics', analyticsRouter);
+app.use('/api/auth', authRouter);
+app.use('/api/payments', paymentsRouter);
+app.use('/api/gamedev', gamedevRouter);
+app.use('/api/security/v2', securityRouter);
+app.use('/api/connectors', connectorsRouter);
 
 // ================================================
 // API ROUTES
@@ -874,7 +892,7 @@ app.get('/api/security/dashboard', async (req, res) => {
   try {
     const status = security.getSecurityStatus();
     const recentLogs = security.auditLog.slice(-10);
-    const threatsSummary = recentLogs.filter(l => l.type.includes('THREAT') || l.type.includes('ATTACK'));
+    const threatsSummary = recentLogs.filter(l => (l.event || l.type || '').includes('THREAT') || (l.event || l.type || '').includes('ATTACK'));
     
     res.json({
       overallScore: status.securityScore || 92,
@@ -901,7 +919,7 @@ app.get('/api/security/dashboard', async (req, res) => {
 // Security alerts endpoint
 app.get('/api/security/alerts', (req, res) => {
   const alerts = security.auditLog
-    .filter(l => l.type.includes('ERROR') || l.type.includes('THREAT') || l.type.includes('ATTACK'))
+    .filter(l => { const e = l.event || l.type || ''; return e.includes('ERROR') || e.includes('THREAT') || e.includes('ATTACK'); })
     .slice(-20);
   
   res.json({

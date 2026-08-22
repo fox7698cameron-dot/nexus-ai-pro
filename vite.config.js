@@ -9,7 +9,10 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [
-    react()
+    react({
+      // Enable JSX in both .js and .jsx files
+      include: ['**/*.{jsx,js,tsx,ts}'],
+    }),
     // VitePWA disabled due to workbox generation error
     // Re-enable once workbox-build is fixed
   ],

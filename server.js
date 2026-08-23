@@ -15,6 +15,9 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+// New modular API routes (v2.1.0 — 2026-08-23)
+import apiRouter from './src/api/routes.js';
+import { corsMiddleware, cspMiddleware, requestId, secureHeaders } from './src/middleware/security.js';
 
 dotenv.config();
 
@@ -352,6 +355,23 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+// Secure HTTP headers (v2.1.0)
+// Lightweight cookie parser (avoids external cookie-parser dep)
+app.use((req, _res, next) => {
+  req.cookies = {};
+  const raw = req.headers.cookie || '';
+  raw.split(';').forEach((pair) => {
+    const [k, ...v] = pair.trim().split('=');
+    if (k) req.cookies[k.trim()] = decodeURIComponent(v.join('=').trim());
+  });
+  next();
+});
+app.use(secureHeaders);
+app.use(cspMiddleware);
+
+// New modular API router (v2.1.0)
+app.use('/api', apiRouter);
 
 // Logging middleware
 app.use((req, res, next) => {

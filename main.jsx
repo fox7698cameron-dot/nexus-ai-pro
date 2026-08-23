@@ -1,6 +1,9 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import NexusAI from './app.jsx';
+// New full-stack router (v2.1.0 — 2026-08-23)
+// Enabled when VITE_USE_ROUTER=true — keeps backward compat with existing app.jsx
+import AppRouter from './src/AppRouter.jsx';
 
 // Security: Disable React DevTools in production
 if (typeof window.__REACT_DEVTOOLS_GLOBAL_HOOK__ === 'object') {
@@ -79,12 +82,15 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+// Feature flag: set VITE_USE_ROUTER=true in .env to enable the new full-stack router
+const USE_ROUTER = import.meta.env?.VITE_USE_ROUTER === 'true';
+
 // Mount application
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
     <ErrorBoundary>
-      <NexusAI />
+      {USE_ROUTER ? <AppRouter /> : <NexusAI />}
     </ErrorBoundary>
   </React.StrictMode>
 );

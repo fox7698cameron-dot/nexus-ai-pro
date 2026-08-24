@@ -36,11 +36,21 @@ export default defineConfig({
     },
     rollupOptions: {
       output: {
-        manualChunks: {
-          'react-vendor': ['react', 'react-dom'],
-          'ai-vendor': ['@anthropic-ai/sdk', 'openai'],
-          'ui-vendor': ['lucide-react']
-        }
+        // manualChunks as a function (required by Vite 6+ / rolldown)
+        manualChunks(id) {
+          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) {
+            return 'react-vendor';
+          }
+          if (id.includes('@anthropic-ai') || id.includes('node_modules/openai')) {
+            return 'ai-vendor';
+          }
+          if (id.includes('lucide-react') || id.includes('recharts')) {
+            return 'ui-vendor';
+          }
+          if (id.includes('i18next') || id.includes('react-i18next')) {
+            return 'i18n-vendor';
+          }
+        },
       }
     },
     chunkSizeWarningLimit: 1000

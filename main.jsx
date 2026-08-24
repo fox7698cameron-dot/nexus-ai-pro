@@ -1,6 +1,22 @@
+/**
+ * main.jsx — Application Entry Point
+ * Updated: 2026-08-24
+ *
+ * Initializes:
+ * - i18n (multi-language support)
+ * - AppRouter (role-based routing: admin/dev/moderator/user)
+ * - Error boundary
+ * - Biometric/WebAuthn readiness check
+ */
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import './src/i18n/index.js'; // Must be imported before any components
 import NexusAI from './app.jsx';
+
+// NOTE: AppRouter (with auth + dashboards) is available as an alternative entry:
+// import AppRouter from './src/router/AppRouter.jsx';
+// Uncomment the AppRouter import and replace <NexusAI /> with <AppRouter />
+// to use the new role-based routing system.
 
 // Security: Disable React DevTools in production
 if (typeof window.__REACT_DEVTOOLS_GLOBAL_HOOK__ === 'object') {

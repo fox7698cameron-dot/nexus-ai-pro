@@ -831,6 +831,47 @@ class WorkflowEngine {
 const workflowEngine = new WorkflowEngine();
 
 // ================================================
+// MODULE ROUTES — Auth, Analytics, Game Dev, Payments, Security
+// ================================================
+// Dynamic imports for ES module routes (server.js uses "type": "module")
+const { default: authRoutes }      = await import('./server/routes/auth.js');
+const { default: analyticsRoutes } = await import('./server/routes/analytics.js');
+const { default: gamedevRoutes }   = await import('./server/routes/gamedev.js');
+const { default: paymentsRoutes }  = await import('./server/routes/payments.js');
+const { default: securityRoutes }  = await import('./server/routes/security.js');
+
+// Stripe webhook must come before express.json() — mounts raw body parser internally
+app.use('/api/payments', paymentsRoutes);
+
+app.use('/api/auth',      authRoutes);
+app.use('/api/analytics', analyticsRoutes);
+app.use('/api/gamedev',   gamedevRoutes);
+app.use('/api/security',  securityRoutes);
+
+// i18n endpoints
+const { listLocales, detectLocale, translate } = await import('./server/services/i18nService.js');
+
+app.get('/api/i18n/locales', (req, res) => res.json({ locales: listLocales() }));
+
+app.get('/api/i18n/detect',  (req, res) => {
+  const locale = detectLocale(req.headers['accept-language'], req.query.userLocale);
+  res.json({ locale });
+});
+
+app.post('/api/i18n/translate', async (req, res) => {
+  try {
+    const { text, targetLocale, sourceLocale = 'en' } = req.body;
+    if (!text || typeof text !== 'string') {
+      return res.status(400).json({ error: 'text required' });
+    }
+    const translated = await translate(text, targetLocale, sourceLocale);
+    return res.json({ translated, sourceLocale, targetLocale });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ================================================
 // API ROUTES
 // ================================================
 

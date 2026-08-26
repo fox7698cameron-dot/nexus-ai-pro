@@ -1,6 +1,8 @@
 // ================================================
 // NEXUS AI PRO - Enhanced Backend Server
 // Military-Grade Security & Multi-Model AI Platform
+// File: server.js
+// Date: 2026-08-26
 // ================================================
 
 import express from 'express';
@@ -15,6 +17,9 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+
+// ─── New modular API router ────────────────────────────────────────────────────
+import { apiRouter, setupAnalyticsSocket, setupSecuritySocket, setupProjectSocket } from './src/api/index.js';
 
 dotenv.config();
 
@@ -206,35 +211,63 @@ class SecurityModule {
     const threats = [];
     const { body, query, headers, ip } = request;
 
-    // SQL Injection patterns
-    const sqlPatterns = /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER)\b|--|;|'|")/gi;
+    // ─── Only scan user-supplied string values (not JSON structure chars) ──────
+    const extractStrings = (obj, depth = 0) => {
+      if (depth > 5 || obj === null || obj === undefined) return [];
+      if (typeof obj === 'string') return [obj];
+      if (typeof obj !== 'object') return [];
+      return Object.values(obj).flatMap(v => extractStrings(v, depth + 1));
+    };
+
+    const stringValues = [...extractStrings(body), ...extractStrings(query)];
+
+    // SQL Injection: require combination of keyword + operator (reduces false positives)
+    const sqlPattern = /\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER)\b.*?\bFROM\b|\bOR\b\s+\d+=\d+|--\s|;\s*DROP/gi;
 
     // XSS patterns
-    const xssPatterns = /<script|javascript:|on\w+=/gi;
+    const xssPatterns = /<script[\s>]|javascript:\s*\w|on(?:load|error|click|mouse\w+)\s*=/gi;
 
     // Path traversal
-    const pathPatterns = /\.\.\//g;
+    const pathPattern = /(?:\.\.\/){2,}|(?:\.\.\\){2,}/g;
 
-    const checkData = JSON.stringify({ body, query });
+    // Null byte injection
+    const nullBytePattern = /\x00/;
 
-    if (sqlPatterns.test(checkData)) {
-      threats.push({ type: 'SQL_INJECTION', severity: 'critical' });
+    for (const val of stringValues) {
+      if (sqlPattern.test(val)) {
+        threats.push({ type: 'SQL_INJECTION', severity: 'critical' });
+        break;
+      }
     }
 
-    if (xssPatterns.test(checkData)) {
-      threats.push({ type: 'XSS', severity: 'high' });
+    for (const val of stringValues) {
+      if (xssPatterns.test(val)) {
+        threats.push({ type: 'XSS', severity: 'high' });
+        break;
+      }
     }
 
-    if (pathPatterns.test(checkData)) {
-      threats.push({ type: 'PATH_TRAVERSAL', severity: 'high' });
+    for (const val of stringValues) {
+      if (pathPattern.test(val)) {
+        threats.push({ type: 'PATH_TRAVERSAL', severity: 'high' });
+        break;
+      }
     }
 
-    // Check against known threat database
-    if (this.threatDatabase.has(ip)) {
-      threats.push({ type: 'KNOWN_THREAT_IP', severity: 'critical' });
+    for (const val of stringValues) {
+      if (nullBytePattern.test(val)) {
+        threats.push({ type: 'NULL_BYTE_INJECTION', severity: 'critical' });
+        break;
+      }
     }
 
-    if (threats.length > 0) {
+    // Check against known threat database (only block if IP has prior critical hits)
+    if (this.threatDatabase.has(ip) && threats.length === 0) {
+      // IP is flagged but current request is clean — warn but don't block
+      this.logAudit('KNOWN_THREAT_IP_REQUEST', { ip, path: request.path });
+    }
+
+    if (threats.some(t => t.severity === 'critical')) {
       this.logAudit('THREAT_DETECTED', { ip, threats });
       this.threatDatabase.add(ip);
     }
@@ -1115,7 +1148,17 @@ io.use((socket, next) => {
   }
 });
 
+// ─── Mount new API router ──────────────────────────────────────────────────────
+app.use('/api', apiRouter);
+
 io.on('connection', (socket) => {
+  // Room join for namespaced real-time updates
+  socket.on('join', (room) => {
+    if (['analytics', 'security', 'projects'].includes(room)) {
+      socket.join(room);
+    }
+  });
+
   console.log(`Client connected: ${socket.id}`);
   security.logAudit('SOCKET_CONNECT', { socketId: socket.id, userId: socket.userId });
 
@@ -1150,19 +1193,10 @@ io.on('connection', (socket) => {
   });
 });
 
-// ================================================
-// AUTO-PATCHING SCHEDULER
-// ================================================
-
-setInterval(async () => {
-  console.log('Running automated security scan...');
-  const scan = await security.scanVulnerabilities();
-
-  if (scan.vulnerabilities.length > 0) {
-    console.log('Vulnerabilities detected, auto-patching...');
-    await security.autoPatch();
-  }
-}, 60 * 60 * 1000); // Every hour
+// ─── Setup real-time sockets for new dashboard modules ────────────────────────
+setupAnalyticsSocket(io);
+setupSecuritySocket(io);
+setupProjectSocket(io);
 
 // ================================================
 // ERROR HANDLING

@@ -29,16 +29,26 @@
       "preload.js"
     ],
     "win": {
-      "target": ["nsis", "portable"],
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "icon": "assets/icon.ico"
     },
     "mac": {
-      "target": ["dmg", "zip"],
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "icon": "assets/icon.icns",
       "category": "public.app-category.productivity"
     },
     "linux": {
-      "target": ["AppImage", "deb", "rpm"],
+      "target": [
+        "AppImage",
+        "deb",
+        "rpm"
+      ],
       "icon": "assets/icon.png",
       "category": "Utility"
     },
@@ -56,11 +66,11 @@
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.1",
     "concurrently": "^8.2.2",
-    "electron": "^28.1.3",
-    "electron-builder": "^24.9.1",
+    "electron": "^44.0.0",
+    "electron-builder": "^26.15.3",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "vite": "^5.0.11",
+    "vite": "^8.2.2",
     "wait-on": "^7.2.0"
   }
 }

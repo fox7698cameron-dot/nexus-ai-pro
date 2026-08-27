@@ -1,6 +1,7 @@
 // ================================================
 // NEXUS AI PRO - Enhanced Backend Server
 // Military-Grade Security & Multi-Model AI Platform
+// Date: 2026-08-27
 // ================================================
 
 import express from 'express';
@@ -17,6 +18,13 @@ import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
 
 dotenv.config();
+
+// ── Route imports ──────────────────────────────────────────────────────────────
+import authRoutes         from './src/routes/auth.js';
+import analyticsRoutes    from './src/routes/analytics.js';
+import subscriptionRoutes from './src/routes/subscriptions.js';
+import i18nRoutes         from './src/routes/i18n.js';
+import projectsRoutes     from './src/routes/projects.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -831,6 +839,16 @@ class WorkflowEngine {
 const workflowEngine = new WorkflowEngine();
 
 // ================================================
+// MOUNTED ROUTE MODULES
+// ================================================
+
+app.use('/api/auth',          authRoutes);
+app.use('/api/analytics',     analyticsRoutes);
+app.use('/api/subscriptions', subscriptionRoutes);
+app.use('/api/i18n',          i18nRoutes);
+app.use('/api/projects',      projectsRoutes);
+
+// ================================================
 // API ROUTES
 // ================================================
 
@@ -1148,6 +1166,29 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     security.logAudit('SOCKET_DISCONNECT', { socketId: socket.id });
   });
+
+  // Analytics real-time subscription
+  socket.on('analytics:subscribe', (platforms) => {
+    socket.join('analytics:room');
+    socket.emit('analytics:ack', { subscribed: true, platforms });
+  });
+
+  // Security dashboard real-time subscription
+  socket.on('security:subscribe', () => {
+    socket.join('security:room');
+    socket.emit('security:ack', { subscribed: true });
+  });
+
+  // Project tracker real-time subscription
+  socket.on('projects:subscribe', () => {
+    socket.join('projects:room');
+    socket.emit('projects:ack', { subscribed: true });
+  });
+
+  // Project update from client
+  socket.on('projects:update', (data) => {
+    socket.to('projects:room').emit('projects:updated', data);
+  });
 });
 
 // ================================================
@@ -1155,14 +1196,30 @@ io.on('connection', (socket) => {
 // ================================================
 
 setInterval(async () => {
-  console.log('Running automated security scan...');
   const scan = await security.scanVulnerabilities();
-
+  // Broadcast security updates to subscribed clients
+  io.to('security:room').emit('security:scan_result', {
+    vulnerabilities: scan.vulnerabilities,
+    status:          security.getSecurityStatus(),
+    timestamp:       Date.now(),
+  });
   if (scan.vulnerabilities.length > 0) {
-    console.log('Vulnerabilities detected, auto-patching...');
     await security.autoPatch();
   }
 }, 60 * 60 * 1000); // Every hour
+
+// Real-time analytics push (every 30 seconds)
+setInterval(() => {
+  io.to('analytics:room').emit('analytics:update', {
+    timestamp: Date.now(),
+    message:   'Analytics data refreshed',
+  });
+}, 30_000);
+
+// Real-time project tracker push (every 10 seconds)
+setInterval(() => {
+  io.to('projects:room').emit('projects:tick', { timestamp: Date.now() });
+}, 10_000);
 
 // ================================================
 // ERROR HANDLING

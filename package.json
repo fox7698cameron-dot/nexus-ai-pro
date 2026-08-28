@@ -9,7 +9,7 @@
     "email": "contact@nexusai.pro"
   },
   "license": "Apache-2.0",
-  "copyright": "Copyright © 2025-2026 Cameron Fox. All rights reserved.",
+  "copyright": "Copyright \u00a9 2025-2026 Cameron Fox. All rights reserved.",
   "scripts": {
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "vite",
@@ -100,8 +100,9 @@
     "workbox-window": "^7.3.0"
   },
   "overrides": {
-    "esbuild": "^0.24.2",
-    "rollup": "^4.29.1"
+    "esbuild": "^0.25.0",
+    "rollup": "^4.29.1",
+    "tar": "^7.0.0"
   },
   "capacitor": {
     "appId": "com.cameronfox.nexusaipro",

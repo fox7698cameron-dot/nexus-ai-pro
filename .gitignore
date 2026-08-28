@@ -1,8 +1,48 @@
-.claude/
-Library/
-.Trash/
-.DS_Store
-Caches/
-node_modules/
+# ── Build outputs ────────────────────────────────────────────
 dist/
 build/
+dev-dist/
+.vite/
+coverage/
+
+# ── Dependencies ─────────────────────────────────────────────
+node_modules/
+
+# ── Environment (NEVER commit secrets) ───────────────────────
+.env
+.env.local
+.env.production
+.env.staging
+*.env
+
+# ── OS / Editor ───────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+.idea/
+.vscode/settings.json
+
+# ── IDE ───────────────────────────────────────────────────────
+.vs/
+*.suo
+*.user
+*.swp
+
+# ── Mobile ────────────────────────────────────────────────────
+android/
+ios/
+Library/
+.Trash/
+Caches/
+
+# ── Logs ──────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+
+# ── Claude Code ───────────────────────────────────────────────
+.claude/

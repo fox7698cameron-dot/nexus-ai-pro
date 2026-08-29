@@ -16,6 +16,13 @@ import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
 
+// ── Feature route modules ──────────────────────────────────────────────────
+import authRoutes         from './server/routes/auth.js';
+import analyticsRoutes    from './server/routes/analytics.js';
+import gamingRoutes       from './server/routes/gaming.js';
+import projectRoutes      from './server/routes/projects.js';
+import subscriptionRoutes from './server/routes/subscription.js';
+
 dotenv.config();
 
 const app = express();
@@ -441,8 +448,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-2.0-flash';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -1096,6 +1102,58 @@ app.get('/api/templates/app', (req, res) => {
       { id: 'ai', name: 'AI Application', stack: 'Python/FastAPI' }
     ]
   });
+});
+
+// ================================================
+// FEATURE API ROUTES
+// ================================================
+
+// Auth & identity (register, login, MFA, biometrics, RBAC)
+app.use('/api/auth', authRoutes);
+
+// Social analytics (TikTok, IG, Facebook, Twitch, Discord, Lemon8, Reddit, RedGIFs)
+app.use('/api/analytics', analyticsRoutes);
+
+// Gaming (Unreal/Epic, Sony, Microsoft, Ubisoft connectors + achievements)
+app.use('/api/gaming', gamingRoutes);
+
+// Project tracking (coding, game dev, AR/VR/3D)
+app.use('/api/projects', projectRoutes);
+
+// Billing (Stripe, crypto, gift cards)
+app.use('/api/billing', subscriptionRoutes);
+
+// Translation (auto-translate endpoint for i18n)
+app.post('/api/translate', async (req, res) => {
+  const { text, targetLocale } = req.body ?? {};
+  if (!text || !targetLocale) {
+    return res.status(400).json({ error: 'text and targetLocale required' });
+  }
+  // In production: call Azure Translator, DeepL, or Google Translate API
+  // All keys from ENV, never hardcoded
+  const translationApiKey = process.env.AZURE_TRANSLATOR_KEY;
+  if (!translationApiKey) {
+    return res.json({ translated: text, note: 'Translation API not configured — returning original' });
+  }
+  try {
+    const response = await fetch(
+      `https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=${targetLocale}`,
+      {
+        method: 'POST',
+        headers: {
+          'Ocp-Apim-Subscription-Key': translationApiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify([{ text }]),
+        signal: AbortSignal.timeout(8000),
+      }
+    );
+    const json = await response.json();
+    const translated = json[0]?.translations?.[0]?.text ?? text;
+    return res.json({ translated });
+  } catch (err) {
+    return res.json({ translated: text, error: err.message });
+  }
 });
 
 // ================================================

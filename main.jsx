@@ -1,6 +1,19 @@
+/**
+ * Copyright © 2025-2026 Cameron Fox. All rights reserved.
+ * Licensed under the Apache License, Version 2.0
+ *
+ * main.jsx — Application entry point
+ * Date: 2026-08-29
+ */
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { AuthProvider } from './src/auth/AuthSystem.jsx';
+import RoleDashboard from './src/dashboards/RoleDashboards.jsx';
 import NexusAI from './app.jsx';
+import { setLocale, detectLocale } from './src/i18n/index.js';
+
+// Initialise locale from saved pref or browser setting
+setLocale(detectLocale());
 
 // Security: Disable React DevTools in production
 if (typeof window.__REACT_DEVTOOLS_GLOBAL_HOOK__ === 'object') {
@@ -80,11 +93,21 @@ class ErrorBoundary extends React.Component {
 }
 
 // Mount application
+// NEXUS_DASHBOARD_MODE=1 env var activates the full role-based dashboard.
+// Otherwise falls back to the existing NexusAI chat UI.
+const USE_DASHBOARD = import.meta.env.VITE_DASHBOARD_MODE === '1';
+
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
     <ErrorBoundary>
-      <NexusAI />
+      {USE_DASHBOARD ? (
+        <AuthProvider>
+          <RoleDashboard />
+        </AuthProvider>
+      ) : (
+        <NexusAI />
+      )}
     </ErrorBoundary>
   </React.StrictMode>
 );

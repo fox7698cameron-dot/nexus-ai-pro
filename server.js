@@ -18,6 +18,21 @@ import Jexl from 'jexl';
 
 dotenv.config();
 
+// Validate critical environment variables at startup
+const REQUIRED_ENV = ['JWT_SECRET'];
+REQUIRED_ENV.forEach(key => {
+  if (!process.env[key] || process.env[key].length < 16) {
+    console.warn(`[startup] WARNING: ${key} is missing or too short. Set a strong value in .env`);
+  }
+});
+
+// Set defaults for optional secrets if not provided (dev only)
+if (!process.env.JWT_REFRESH_SECRET) {
+  process.env.JWT_REFRESH_SECRET = process.env.JWT_SECRET
+    ? process.env.JWT_SECRET + '_refresh'
+    : crypto.randomBytes(64).toString('hex');
+}
+
 const app = express();
 const httpServer = createServer(app);
 
@@ -831,7 +846,26 @@ class WorkflowEngine {
 const workflowEngine = new WorkflowEngine();
 
 // ================================================
-// API ROUTES
+// MODULAR ROUTE INTEGRATION
+// Mount new route modules (auth, security, payments, analytics, connectors)
+// ================================================
+
+// Stripe webhook needs raw body – must be registered BEFORE express.json()
+// handled inside payments route via its own body accumulator
+
+// Mount all new API routes at /api
+import('./server/router.js')
+  .then(({ default: apiRouter }) => {
+    app.use('/api', apiRouter);
+    // Expose io for use in route handlers that need WebSocket emit
+    app.locals.io = io;
+  })
+  .catch(err => {
+    console.error('[router] Failed to load modular routes:', err.message);
+  });
+
+// ================================================
+// API ROUTES (Legacy inline routes - preserved for compatibility)
 // ================================================
 
 // Health check
@@ -1211,6 +1245,34 @@ httpServer.listen(PORT, () => {
 
   // Initial security scan
   security.scanVulnerabilities();
+});
+
+// ================================================
+// MULTI-PLATFORM OS DETECTION
+// ================================================
+app.get('/api/platform/info', (req, res) => {
+  const { platform, arch, version } = process;
+  const ua = req.get('user-agent') ?? '';
+  const isMobile  = /Mobile|Android|iPhone|iPad/i.test(ua);
+  const isTablet  = /iPad|Tablet/i.test(ua);
+  const isElectron = ua.includes('Electron');
+
+  res.json({
+    server: { platform, arch, nodeVersion: version },
+    client: {
+      userAgent: ua,
+      isMobile,
+      isTablet,
+      isDesktop: !isMobile && !isTablet,
+      isElectron,
+    },
+    supported: {
+      os:       ['linux', 'windows', 'macos', 'ios', 'android'],
+      electron: true,
+      pwa:      true,
+      mobile:   true,
+    },
+  });
 });
 
 export default app;

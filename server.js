@@ -1,6 +1,7 @@
 // ================================================
-// NEXUS AI PRO - Enhanced Backend Server
+// NEXUS AI PRO - Enhanced Backend Server v2.1.0
 // Military-Grade Security & Multi-Model AI Platform
+// File: server.js | Updated: 2026-08-31
 // ================================================
 
 import express from 'express';
@@ -15,6 +16,13 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+
+// New route modules
+import authRouter       from './src/routes/auth.js';
+import analyticsRouter  from './src/routes/analytics.js';
+import projectsRouter   from './src/routes/projects.js';
+import securityRouter   from './src/routes/security.js';
+import paymentsRouter   from './src/routes/payments.js';
 
 dotenv.config();
 
@@ -441,8 +449,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-pro';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +823,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -831,7 +839,21 @@ class WorkflowEngine {
 const workflowEngine = new WorkflowEngine();
 
 // ================================================
-// API ROUTES
+// ROUTE MODULES INTEGRATION
+// ================================================
+
+// Share security module with route modules
+app.locals.security = security;
+
+// Mount new route modules
+app.use('/api/auth',        authRouter);
+app.use('/api/analytics',   analyticsRouter);
+app.use('/api/projects',    projectsRouter);
+app.use('/api/security',    securityRouter);
+app.use('/api/payments',    paymentsRouter);
+
+// ================================================
+// API ROUTES (core)
 // ================================================
 
 // Health check

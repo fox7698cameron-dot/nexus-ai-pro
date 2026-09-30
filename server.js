@@ -15,6 +15,9 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import securityRoutes from './src/security/securityRoutes.js';
+import authRouter from './src/auth/authRoutes.js';
+import paymentRouter from './src/payments/paymentRoutes.js';
 
 dotenv.config();
 
@@ -326,6 +329,9 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-ID']
 }));
+
+// Stripe webhook needs raw body — must be before express.json()
+app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
 
 // Body parsing with size limits
 app.use(express.json({ limit: '10mb' }));
@@ -1148,6 +1154,46 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     security.logAudit('SOCKET_DISCONNECT', { socketId: socket.id });
   });
+});
+
+// ================================================
+// NEW FEATURE ROUTES (2026-09-30)
+// ================================================
+
+// Auth routes — must be before express.json body parser override for webhook
+app.use('/api/auth', authRouter);
+
+// Payment routes — webhook endpoint needs raw body (mounted in paymentRoutes.js)
+app.use('/api/payments', paymentRouter);
+
+// Enhanced security routes (supplement existing /api/security endpoints)
+app.use('/api/security/v2', securityRoutes);
+
+// Analytics WebSocket namespace
+io.of('/analytics').on('connection', (socket) => {
+  socket.on('subscribe', (data) => {
+    socket.join(`analytics:${data?.userId ?? 'public'}`);
+    socket.emit('subscribed', { status: 'ok', timestamp: new Date().toISOString() });
+  });
+
+  // Broadcast simulated real-time metric updates
+  const tickInterval = setInterval(() => {
+    const platforms = ['tiktok', 'instagram', 'facebook', 'twitch', 'discord', 'reddit'];
+    const update = {
+      timestamp: new Date().toISOString(),
+      metrics: platforms.reduce((acc, p) => {
+        acc[p] = {
+          views: Math.floor(Math.random() * 500),
+          likes: Math.floor(Math.random() * 50),
+          reach: Math.floor(Math.random() * 800),
+        };
+        return acc;
+      }, {}),
+    };
+    socket.emit('metrics:update', update);
+  }, 4000);
+
+  socket.on('disconnect', () => clearInterval(tickInterval));
 });
 
 // ================================================

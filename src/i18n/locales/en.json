@@ -1,0 +1,176 @@
+{
+  "nav": {
+    "dashboard": "Dashboard",
+    "analytics": "Analytics",
+    "security": "Security",
+    "gameDev": "Game Dev",
+    "connectors": "Connectors",
+    "settings": "Settings",
+    "signIn": "Sign In",
+    "signOut": "Sign Out",
+    "register": "Register"
+  },
+  "auth": {
+    "username": "Username",
+    "password": "Password",
+    "confirmPassword": "Confirm Password",
+    "email": "Email",
+    "signIn": "Sign In",
+    "register": "Create Account",
+    "forgotPassword": "Forgot password?",
+    "biometric": "Sign in with Biometric",
+    "twoFactor": "Two-Factor Authentication",
+    "enterCode": "Enter 6-digit code",
+    "passwordMinLength": "Minimum 13 characters required",
+    "passwordStrength": {
+      "veryWeak": "Very Weak",
+      "weak": "Weak",
+      "fair": "Fair",
+      "good": "Good",
+      "strong": "Strong",
+      "veryStrong": "Very Strong"
+    },
+    "roles": {
+      "admin": "Admin",
+      "developer": "Developer",
+      "moderator": "Moderator",
+      "user": "User"
+    }
+  },
+  "analytics": {
+    "title": "Analytics Dashboard",
+    "subtitle": "Real-time social media metrics",
+    "views": "Views",
+    "likes": "Likes",
+    "reach": "Reach",
+    "retention": "Retention",
+    "followers": "Followers",
+    "engagement": "Engagement",
+    "platforms": {
+      "tiktok": "TikTok",
+      "instagram": "Instagram",
+      "facebook": "Facebook",
+      "twitch": "Twitch",
+      "discord": "Discord",
+      "lemon8": "Lemon8",
+      "reddit": "Reddit",
+      "redgifs": "RedGifs"
+    },
+    "dateRange": {
+      "7d": "Last 7 days",
+      "30d": "Last 30 days",
+      "90d": "Last 90 days"
+    },
+    "export": "Export CSV"
+  },
+  "security": {
+    "title": "Security Dashboard",
+    "subtitle": "Real-time vulnerability & network monitoring",
+    "runScan": "Run Security Scan",
+    "scanning": "Scanning…",
+    "score": "Security Score",
+    "findings": "Findings",
+    "network": "Network",
+    "device": "Device",
+    "log": "Log",
+    "severity": {
+      "critical": "Critical",
+      "high": "High",
+      "medium": "Medium",
+      "low": "Low",
+      "info": "Info"
+    }
+  },
+  "gameDev": {
+    "title": "Game Development Tracker",
+    "subtitle": "Real-time project tracking for games, AR/VR, and 3D",
+    "newProject": "New Project",
+    "projectTypes": {
+      "game": "Game",
+      "arVr": "AR/VR",
+      "3d": "3D",
+      "coding": "Coding"
+    },
+    "platforms": {
+      "unreal": "Unreal Engine",
+      "unity": "Unity",
+      "godot": "Godot",
+      "sony": "PlayStation",
+      "xbox": "Xbox",
+      "ubisoft": "Ubisoft Connect",
+      "steam": "Steam"
+    },
+    "metrics": {
+      "fps": "FPS",
+      "buildTime": "Build Time",
+      "memoryUsage": "Memory Usage",
+      "coverage": "Coverage"
+    }
+  },
+  "subscription": {
+    "title": "Subscription & Billing",
+    "choosePlan": "Choose your plan",
+    "currentPlan": "Current Plan",
+    "upgrade": "Upgrade",
+    "cancel": "Cancel Subscription",
+    "plans": {
+      "free": "Free",
+      "pro": "Pro",
+      "enterprise": "Enterprise"
+    },
+    "payment": {
+      "card": "Credit / Debit Card",
+      "crypto": "Cryptocurrency",
+      "gift": "Gift Card",
+      "processing": "Processing…",
+      "success": "Payment Successful"
+    }
+  },
+  "connectors": {
+    "title": "Platform Connectors",
+    "testAll": "Test All Connectors",
+    "configure": "Configure",
+    "test": "Test",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "testing": "Testing…"
+  },
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "confirm": "Confirm",
+    "loading": "Loading…",
+    "error": "Error",
+    "success": "Success",
+    "warning": "Warning",
+    "info": "Information",
+    "back": "Back",
+    "next": "Next",
+    "done": "Done",
+    "close": "Close",
+    "search": "Search",
+    "export": "Export",
+    "import": "Import",
+    "refresh": "Refresh",
+    "settings": "Settings",
+    "help": "Help",
+    "language": "Language",
+    "theme": "Theme",
+    "light": "Light",
+    "dark": "Dark",
+    "auto": "Auto"
+  },
+  "errors": {
+    "required": "This field is required",
+    "invalidEmail": "Invalid email address",
+    "passwordMismatch": "Passwords do not match",
+    "invalidCard": "Invalid card number",
+    "networkError": "Network error. Please try again.",
+    "unauthorized": "Session expired. Please sign in again.",
+    "forbidden": "You don't have permission to do this.",
+    "notFound": "Resource not found.",
+    "serverError": "Server error. Please try again later."
+  }
+}

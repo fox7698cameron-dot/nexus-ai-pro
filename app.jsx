@@ -2,8 +2,15 @@
    Updated: make UI more responsive for mobile/desktop, persist model selection, chats, memories, settings,
    ensure AES-256 label present, and small responsive CSS tweaks.
 */
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react';
 import { securityService } from './src/security-service.js';
+
+// Lazy-load heavy dashboards to keep initial bundle small
+const AnalyticsDashboard = lazy(() => import('./src/components/AnalyticsDashboard.jsx'));
+const ProjectTracker = lazy(() => import('./src/components/ProjectTracker.jsx'));
+const SecurityDashboardFull = lazy(() => import('./src/components/SecurityDashboardFull.jsx'));
+const AuthModal = lazy(() => import('./src/components/AuthModal.jsx'));
+const PaymentModal = lazy(() => import('./src/components/PaymentModal.jsx'));
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
   Settings, Menu, X, Plus, Trash2, Download, Upload,
@@ -462,6 +469,8 @@ const TOOLS = {
   automation: { name: 'Automation', icon: Workflow, description: 'N8N-style workflows' },
   deploy: { name: 'Deploy', icon: Rocket, description: 'App deployment' },
   security: { name: 'Security', icon: Shield, description: 'Security analysis' },
+  analytics: { name: 'Analytics', icon: BarChart3, description: 'Social media & reach metrics' },
+  projects: { name: 'Projects', icon: Database, description: 'Project tracking & achievements' },
   schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' }
 };
 
@@ -626,6 +635,13 @@ export default function NexusAI() {
     overallScore: 92
   });
 
+  // Auth state
+  const [currentUser, setCurrentUser] = useState(null);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [selectedPlanForCheckout, setSelectedPlanForCheckout] = useState(null);
+  const [appLang, setAppLang] = useState('en');
+
   // User customization
   const [userAvatar, setUserAvatar] = useState(AVATAR_STYLES.user[0]);
 
@@ -677,7 +693,7 @@ export default function NexusAI() {
     };
 
     return {
-      content: `**${modelInfo?.name || 'AI'}** responding to: "${prompt}"\n\nΓ£à Processing complete with ${tool} mode.\n\n≡ƒöÆ End-to-end encrypted`,
+      content: `**${modelInfo?.name || 'AI'}** responding to: "${prompt}"\n\n✅ Processing complete with ${tool} mode.\n\n🔑 End-to-end encrypted`,
       reasoning
     };
   };
@@ -915,7 +931,7 @@ export default function NexusAI() {
           <button className="icon-btn" onClick={() => setIsMemoryOpen(!isMemoryOpen)}><Brain size={20} /></button>
           <button className="icon-btn" onClick={() => setIsCallActive(true)}><Phone size={20} /></button>
           <button className="icon-btn" onClick={() => setIsSettingsOpen(true)}><Settings size={20} /></button>
-          <div className="user-avatar">{userAvatar?.emoji || '≡ƒæñ'}</div>
+          <div className="user-avatar">{userAvatar?.emoji || '👤'}</div>
         </div>
       </header>
 
@@ -946,7 +962,7 @@ export default function NexusAI() {
             {Object.entries(TOOLS).map(([key, tool]) => {
               const Icon = tool.icon;
               return (
-                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security'].includes(key)) setShowToolContent(true); }}>
+                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security', 'analytics', 'projects'].includes(key)) setShowToolContent(true); }}>
                   <Icon size={18} />
                   <span>{tool.name}</span>
                 </button>
@@ -995,13 +1011,17 @@ export default function NexusAI() {
             </div>
           )}
 
-          {/* Security Dashboard */}
+          {/* Security Dashboard (full featured) */}
           {showToolContent && activeTool === 'security' && (
             <div className="tool-content security-dashboard">
-              <div className="panel-header">
+              <Suspense fallback={<div style={{ padding: 20, color: '#9ca3af' }}>Loading security dashboard…</div>}>
+                <SecurityDashboardFull wsUrl={`ws://${window.location.hostname}:${window.location.port}`} />
+              </Suspense>
+              {/* Legacy inline dashboard hidden below for reference */}
+              {false && <div className="panel-header">
                 <ShieldCheck size={18} />
                 <h3>Security Dashboard</h3>
-              </div>
+              </div>}
               
               <div className="security-grid">
                 {/* Overall Score */}
@@ -1091,7 +1111,7 @@ export default function NexusAI() {
                           </div>
                           <div className="threat-info">
                             <div className="threat-type">{threat.type}</div>
-                            <div className="threat-time">{threat.status.toUpperCase()} ΓÇó {new Date(threat.timestamp).toLocaleTimeString()}</div>
+                            <div className="threat-time">{threat.status.toUpperCase()} · {new Date(threat.timestamp).toLocaleTimeString()}</div>
                           </div>
                         </div>
                       ))
@@ -1104,13 +1124,60 @@ export default function NexusAI() {
             </div>
           )}
 
+          {/* Analytics Dashboard Panel */}
+          {showToolContent && activeTool === 'analytics' && (
+            <div className="tool-content" style={{ height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              <Suspense fallback={<div style={{ padding: 20, color: '#9ca3af' }}>Loading analytics…</div>}>
+                <AnalyticsDashboard apiTokens={settings.apiKeys ?? {}} />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Project Tracker Panel */}
+          {showToolContent && activeTool === 'projects' && (
+            <div className="tool-content" style={{ height: '100%', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              <Suspense fallback={<div style={{ padding: 20, color: '#9ca3af' }}>Loading project tracker…</div>}>
+                <ProjectTracker />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Auth & Payment modals */}
+          {showAuthModal && (
+            <Suspense fallback={null}>
+              <AuthModal
+                onClose={() => setShowAuthModal(false)}
+                onAuth={async (payload) => {
+                  const endpoint = payload.mode === 'register' ? '/api/auth/register' : '/api/auth/login';
+                  const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                  const data = await res.json();
+                  if (!res.ok) throw new Error(data.error ?? 'Auth failed');
+                  setCurrentUser(data.user);
+                  localStorage.setItem('nexus:token', data.token);
+                  setShowAuthModal(false);
+                  setAppLang(data.user?.lang ?? 'en');
+                }}
+              />
+            </Suspense>
+          )}
+
+          {showPaymentModal && selectedPlanForCheckout && (
+            <Suspense fallback={null}>
+              <PaymentModal
+                plan={selectedPlanForCheckout}
+                onClose={() => setShowPaymentModal(false)}
+                onSuccess={() => setShowPaymentModal(false)}
+              />
+            </Suspense>
+          )}
+
           {/* Messages */}
           <div className="messages-container">
             {messages.length === 0 ? (
               <div className="welcome">
                 <div className="welcome-icon"><Sparkles size={48} /></div>
                 <h2>Nexus AI Pro</h2>
-                <p>Military-grade encrypted AI ΓÇó 40+ Models</p>
+                <p>Military-grade encrypted AI · 40+ Models</p>
                 <div className="model-badges">
                   {Object.entries(AI_MODELS).slice(0, 12).map(([key, m]) => (
                     <span key={key} className="badge" onClick={() => setSelectedModel(key)}>{m.icon} {m.name}</span>
@@ -1120,7 +1187,7 @@ export default function NexusAI() {
             ) : (
               messages.map(msg => (
                 <div key={msg.id} className={`message ${msg.role}`}>
-                  <div className="message-avatar">{msg.role === 'user' ? userAvatar?.emoji : AI_MODELS[msg.model]?.icon || '≡ƒñû'}</div>
+                  <div className="message-avatar">{msg.role === 'user' ? userAvatar?.emoji : AI_MODELS[msg.model]?.icon || '🤖'}</div>
                   <div className="message-body">
                     <div className="message-header">
                       <span className="sender">{msg.role === 'user' ? 'You' : AI_MODELS[msg.model]?.name}</span>

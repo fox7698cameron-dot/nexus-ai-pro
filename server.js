@@ -15,6 +15,8 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 
 dotenv.config();
 
@@ -1096,6 +1098,174 @@ app.get('/api/templates/app', (req, res) => {
       { id: 'ai', name: 'AI Application', stack: 'Python/FastAPI' }
     ]
   });
+});
+
+// ================================================
+// ANALYTICS API
+// ================================================
+
+/** In-memory demo analytics store (replace with Redis/DB in production) */
+const analyticsStore = new Map();
+
+app.get('/api/analytics/:platform', (req, res) => {
+  const { platform } = req.params;
+  const { range = '7d' } = req.query;
+  const VALID_PLATFORMS = ['tiktok', 'instagram', 'facebook', 'twitch', 'discord', 'lemon8', 'reddit', 'redgifs'];
+  if (!VALID_PLATFORMS.includes(platform)) {
+    return res.status(400).json({ error: 'Unknown platform' });
+  }
+  const key = `${platform}:${range}`;
+  const cached = analyticsStore.get(key);
+  if (cached && Date.now() - cached.ts < 60_000) {
+    return res.json(cached.data);
+  }
+  // Real implementation would call each platform's OAuth API using tokens from env
+  const data = { platform, range, message: 'Configure platform API tokens in .env to fetch live data', demo: true, generatedAt: new Date().toISOString() };
+  analyticsStore.set(key, { ts: Date.now(), data });
+  res.json(data);
+});
+
+// ================================================
+// PROJECT TRACKING API
+// ================================================
+
+const projectStore = new Map();
+
+app.get('/api/projects', (req, res) => {
+  const { userId } = req.query;
+  if (!userId) return res.status(400).json({ error: 'userId required' });
+  const userProjects = Array.from(projectStore.values()).filter(p => p.userId === userId);
+  res.json(userProjects);
+});
+
+app.post('/api/projects', (req, res) => {
+  const { userId, name, category, status, connector, platform } = req.body;
+  if (!userId || !name) return res.status(400).json({ error: 'userId and name required' });
+  const VALID_CATS = ['coding', 'gamedev', 'arvr'];
+  if (category && !VALID_CATS.includes(category)) return res.status(400).json({ error: 'Invalid category' });
+  const project = {
+    id: uuidv4(),
+    userId,
+    name: String(name).slice(0, 200),
+    category: category ?? 'coding',
+    status: status ?? 'planning',
+    connector: connector ?? null,
+    platform: platform ?? null,
+    progress: 0,
+    commits: 0,
+    issues: 0,
+    builds: 0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  projectStore.set(project.id, project);
+  security.logAudit('PROJECT_CREATED', { id: project.id, userId });
+  res.status(201).json(project);
+});
+
+app.put('/api/projects/:id', (req, res) => {
+  const project = projectStore.get(req.params.id);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  const ALLOWED = ['name', 'status', 'progress', 'commits', 'issues', 'builds', 'connector', 'platform'];
+  const updates = {};
+  ALLOWED.forEach(k => { if (req.body[k] !== undefined) updates[k] = req.body[k]; });
+  const updated = { ...project, ...updates, updatedAt: new Date().toISOString() };
+  projectStore.set(req.params.id, updated);
+  res.json(updated);
+});
+
+app.delete('/api/projects/:id', (req, res) => {
+  const existed = projectStore.delete(req.params.id);
+  res.json({ success: existed });
+});
+
+// ================================================
+// CHECKOUT API (Stripe + crypto + gift card stubs)
+// Real Stripe key lives in STRIPE_SECRET_KEY env var — never hardcoded.
+// ================================================
+
+app.post('/api/checkout', async (req, res) => {
+  const { method, plan, amount } = req.body;
+  if (!method) return res.status(400).json({ error: 'method required' });
+
+  try {
+    if (method === 'card') {
+      // In production: use Stripe API with server-side key from process.env.STRIPE_SECRET_KEY
+      // const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+      // const session = await stripe.checkout.sessions.create({...});
+      const demoReceipt = { id: `ch_demo_${uuidv4().slice(0, 8)}`, status: 'paid', plan, amount, method: 'card', ts: new Date().toISOString() };
+      security.logAudit('CHECKOUT_CARD', { plan, amount, receiptId: demoReceipt.id });
+      return res.json(demoReceipt);
+    }
+    if (method === 'crypto') {
+      const { coin } = req.body;
+      const receipt = { id: `crypto_${uuidv4().slice(0, 8)}`, status: 'pending', plan, amount, coin, ts: new Date().toISOString() };
+      security.logAudit('CHECKOUT_CRYPTO', { plan, coin, receiptId: receipt.id });
+      return res.json(receipt);
+    }
+    if (method === 'gift') {
+      const { code } = req.body;
+      if (!code || code.length < 8) return res.status(400).json({ error: 'Invalid gift card code' });
+      const receipt = { id: `gift_${uuidv4().slice(0, 8)}`, status: 'redeemed', plan, code: '****' + code.slice(-4), ts: new Date().toISOString() };
+      security.logAudit('CHECKOUT_GIFT', { plan, receiptId: receipt.id });
+      return res.json(receipt);
+    }
+    return res.status(400).json({ error: 'Unknown payment method' });
+  } catch (err) {
+    security.logAudit('CHECKOUT_ERROR', { error: err.message, plan });
+    res.status(500).json({ error: 'Payment processing failed' });
+  }
+});
+
+// ================================================
+// AUTH API (registration / sign-in stubs)
+// Passwords hashed with bcryptjs — raw values never logged.
+// ================================================
+
+const userStore = new Map();
+const BCRYPT_ROUNDS = 12;
+const VALID_ROLES = ['user', 'moderator', 'developer', 'admin'];
+
+app.use('/api/auth/', authLimiter);
+
+app.post('/api/auth/register', async (req, res) => {
+  const { email, username, password, role = 'user', lang = 'en' } = req.body;
+  if (!email || !password || !username) return res.status(400).json({ error: 'email, username and password required' });
+  if (password.length < 13) return res.status(400).json({ error: 'Password must be at least 13 characters' });
+  if (!VALID_ROLES.includes(role)) return res.status(400).json({ error: 'Invalid role' });
+  const normalEmail = email.toLowerCase().trim();
+  if (userStore.has(normalEmail)) return res.status(409).json({ error: 'Email already registered' });
+
+  const hash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+  const userId = uuidv4();
+  const user = { id: userId, email: normalEmail, username: String(username).slice(0, 100), role, lang, createdAt: new Date().toISOString() };
+  userStore.set(normalEmail, { ...user, hash });
+
+  const token = jwt.sign({ sub: userId, role, email: normalEmail }, process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex'), { expiresIn: '7d' });
+  security.logAudit('USER_REGISTERED', { userId, role });
+  res.status(201).json({ token, user });
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  const { email, password, tfaCode } = req.body;
+  if (!email || !password) return res.status(400).json({ error: 'email and password required' });
+  const normalEmail = email.toLowerCase().trim();
+  const record = userStore.get(normalEmail);
+  if (!record) return res.status(401).json({ error: 'Invalid credentials' });
+
+  const match = await bcrypt.compare(password, record.hash);
+  if (!match) return res.status(401).json({ error: 'Invalid credentials' });
+
+  const { hash: _h, ...user } = record;
+  const token = jwt.sign({ sub: user.id, role: user.role, email: normalEmail }, process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex'), { expiresIn: '7d' });
+  security.logAudit('USER_LOGIN', { userId: user.id, role: user.role });
+  res.json({ token, user });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  // Stateless JWT: client drops token. Server audit only.
+  security.logAudit('USER_LOGOUT', { ip: req.ip });
+  res.json({ success: true });
 });
 
 // ================================================

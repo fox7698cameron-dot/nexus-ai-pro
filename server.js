@@ -1,6 +1,7 @@
 // ================================================
 // NEXUS AI PRO - Enhanced Backend Server
 // Military-Grade Security & Multi-Model AI Platform
+// Date: 2026-10-03
 // ================================================
 
 import express from 'express';
@@ -15,6 +16,10 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import authRouter from './src/routes/auth.js';
+import paymentsRouter from './src/routes/payments.js';
+import analyticsRouter from './src/routes/analytics.js';
+import projectsRouter from './src/routes/projects.js';
 
 dotenv.config();
 
@@ -441,8 +446,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-pro-latest';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +820,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -829,6 +834,14 @@ class WorkflowEngine {
 }
 
 const workflowEngine = new WorkflowEngine();
+
+// ================================================
+// ROUTE MODULES
+// ================================================
+app.use('/api/auth',      authRouter);
+app.use('/api/payments',  paymentsRouter);
+app.use('/api/analytics', analyticsRouter);
+app.use('/api/projects',  projectsRouter);
 
 // ================================================
 // API ROUTES

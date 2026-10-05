@@ -63,6 +63,7 @@
     "@capacitor/splash-screen": "^6.0.2",
     "@capacitor/status-bar": "^6.0.1",
     "bcryptjs": "^2.4.3",
+    "braces": "^3.0.3",
     "compression": "^1.7.5",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",

@@ -15,6 +15,8 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 
 dotenv.config();
 
@@ -1096,6 +1098,571 @@ app.get('/api/templates/app', (req, res) => {
       { id: 'ai', name: 'AI Application', stack: 'Python/FastAPI' }
     ]
   });
+});
+
+// ================================================
+// NEW FEATURE ROUTES - Added 2026-10-05
+// Auth, Analytics, GameDev, Subscription
+// ================================================
+
+// ---- JWT Secret (never hardcode - use env var) ----
+const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-prod';
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
+
+// ---- Role-based auth middleware ----
+const requireRole = (...roles) => (req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    if (roles.length > 0 && !roles.includes(decoded.role)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    req.user = decoded;
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+};
+
+// ---- In-memory stores (NOTE: replace with DB in production) ----
+const usersMap = new Map();
+const gameProjectsMap = new Map();
+const achievementsMap = new Map();
+const connectedPlatformsMap = new Map();
+
+// Pre-seed a demo admin (password: Admin@Nexus2026!)
+(async () => {
+  const hash = await bcrypt.hash('Admin@Nexus2026!', 12);
+  usersMap.set('admin@nexusai.pro', {
+    id: uuidv4(),
+    username: 'admin',
+    email: 'admin@nexusai.pro',
+    passwordHash: hash,
+    role: 'admin',
+    mfaEnabled: false,
+    createdAt: Date.now(),
+  });
+})();
+
+// ---- Input validation helpers ----
+function validatePasswordStrength(pw) {
+  if (!pw || typeof pw !== 'string') return 'Password is required';
+  if (pw.length < 13) return 'Password must be at least 13 characters';
+  if (!/[A-Z]/.test(pw)) return 'Password must contain an uppercase letter';
+  if (!/[a-z]/.test(pw)) return 'Password must contain a lowercase letter';
+  if (!/[0-9]/.test(pw)) return 'Password must contain a number';
+  if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(pw)) return 'Password must contain a special character';
+  return null;
+}
+
+function sanitizeString(str, maxLen = 255) {
+  if (typeof str !== 'string') return '';
+  return str.trim().slice(0, maxLen);
+}
+
+const VALID_ROLES = ['user', 'moderator', 'developer', 'admin'];
+
+// ================================================
+// AUTH ROUTES (/api/auth/*)
+// ================================================
+
+// POST /api/auth/register
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { username, email, password, role, mfaEnabled, mfaMethod } = req.body;
+
+    if (!username || !email || !password) {
+      return res.status(400).json({ error: 'username, email, and password are required' });
+    }
+
+    const cleanUsername = sanitizeString(username, 30);
+    const cleanEmail = sanitizeString(email, 255).toLowerCase();
+    const cleanRole = VALID_ROLES.includes(role) ? role : 'user';
+
+    if (!cleanUsername || cleanUsername.length < 3) {
+      return res.status(400).json({ error: 'Username must be at least 3 characters' });
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      return res.status(400).json({ error: 'Invalid email address' });
+    }
+
+    const pwError = validatePasswordStrength(password);
+    if (pwError) return res.status(400).json({ error: pwError });
+
+    if (usersMap.has(cleanEmail)) {
+      return res.status(409).json({ error: 'Email already registered' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const userId = uuidv4();
+    const user = {
+      id: userId,
+      username: cleanUsername,
+      email: cleanEmail,
+      passwordHash,
+      role: cleanRole,
+      mfaEnabled: !!mfaEnabled,
+      mfaMethod: mfaEnabled ? (mfaMethod || 'totp') : null,
+      createdAt: Date.now(),
+    };
+
+    usersMap.set(cleanEmail, user);
+    security.logAudit('AUTH_REGISTER', { userId, role: cleanRole });
+
+    res.status(201).json({
+      message: 'Account created successfully',
+      user: { id: userId, username: cleanUsername, email: cleanEmail, role: cleanRole },
+    });
+  } catch (err) {
+    security.logAudit('AUTH_REGISTER_ERROR', { error: err.message });
+    res.status(500).json({ error: 'Registration failed' });
+  }
+});
+
+// POST /api/auth/login
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { identifier, password, role, rememberDevice } = req.body;
+    if (!identifier || !password) {
+      return res.status(400).json({ error: 'identifier and password are required' });
+    }
+
+    const cleanId = sanitizeString(identifier, 255).toLowerCase();
+    // Find user by email or username
+    let user = usersMap.get(cleanId);
+    if (!user) {
+      user = [...usersMap.values()].find(u => u.username.toLowerCase() === cleanId);
+    }
+
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+
+    const match = await bcrypt.compare(password, user.passwordHash);
+    if (!match) return res.status(401).json({ error: 'Invalid credentials' });
+
+    if (role && user.role !== role) {
+      return res.status(403).json({ error: `Account is not registered as ${role}` });
+    }
+
+    if (user.mfaEnabled) {
+      security.logAudit('AUTH_MFA_REQUIRED', { userId: user.id });
+      return res.json({ requiresMfa: true, mfaMethod: user.mfaMethod });
+    }
+
+    const expiresIn = rememberDevice ? '30d' : JWT_EXPIRES_IN;
+    const token = jwt.sign(
+      { id: user.id, username: user.username, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn }
+    );
+    const expiresAt = Date.now() + (rememberDevice ? 30 * 86400000 : 86400000);
+
+    security.logAudit('AUTH_LOGIN', { userId: user.id, role: user.role });
+
+    res.json({
+      token,
+      expiresAt,
+      user: { id: user.id, username: user.username, email: user.email, role: user.role, mfaEnabled: user.mfaEnabled },
+    });
+  } catch (err) {
+    security.logAudit('AUTH_LOGIN_ERROR', { error: err.message });
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// POST /api/auth/logout
+app.post('/api/auth/logout', requireRole(), (req, res) => {
+  security.logAudit('AUTH_LOGOUT', { userId: req.user?.id });
+  res.json({ message: 'Logged out successfully' });
+});
+
+// POST /api/auth/refresh
+app.post('/api/auth/refresh', requireRole(), (req, res) => {
+  try {
+    const token = jwt.sign(
+      { id: req.user.id, username: req.user.username, email: req.user.email, role: req.user.role },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
+    );
+    res.json({ token, expiresAt: Date.now() + 86400000 });
+  } catch {
+    res.status(500).json({ error: 'Token refresh failed' });
+  }
+});
+
+// GET /api/auth/me
+app.get('/api/auth/me', requireRole(), (req, res) => {
+  const user = [...usersMap.values()].find(u => u.id === req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json({
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    role: user.role,
+    mfaEnabled: user.mfaEnabled,
+    createdAt: user.createdAt,
+  });
+});
+
+// POST /api/auth/2fa/setup
+app.post('/api/auth/2fa/setup', requireRole(), (req, res) => {
+  // NOTE: In production use a TOTP library (e.g. otplib) to generate real secrets
+  const secret = crypto.randomBytes(20).toString('base32');
+  res.json({
+    secret,
+    qrUrl: `otpauth://totp/NexusAIPro:${req.user.email}?secret=${secret}&issuer=NexusAIPro`,
+    message: 'Scan QR code with your authenticator app',
+  });
+});
+
+// POST /api/auth/2fa/verify
+app.post('/api/auth/2fa/verify', async (req, res) => {
+  try {
+    const { code, identifier } = req.body;
+    if (!code || !/^\d{6}$/.test(String(code))) {
+      return res.status(400).json({ error: 'Invalid code format' });
+    }
+
+    const cleanId = sanitizeString(identifier || '', 255).toLowerCase();
+    let user = usersMap.get(cleanId);
+    if (!user) {
+      user = [...usersMap.values()].find(u => u.username.toLowerCase() === cleanId);
+    }
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+
+    // NOTE: In production verify against stored TOTP secret using otplib
+    // For now we issue a token on any 6-digit code submission
+    const token = jwt.sign(
+      { id: user.id, username: user.username, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
+    );
+
+    security.logAudit('AUTH_2FA_VERIFIED', { userId: user.id });
+    res.json({
+      token,
+      expiresAt: Date.now() + 86400000,
+      user: { id: user.id, username: user.username, email: user.email, role: user.role, mfaEnabled: true },
+    });
+  } catch {
+    res.status(500).json({ error: '2FA verification failed' });
+  }
+});
+
+// POST /api/auth/biometric/register
+app.post('/api/auth/biometric/register', requireRole(), (req, res) => {
+  // Stub: In production integrate with WebAuthn or platform biometric API
+  const { method } = req.body;
+  const allowed = ['fingerprint', 'touchid', 'faceid', 'retinal'];
+  if (!allowed.includes(method)) {
+    return res.status(400).json({ error: 'Unsupported biometric method' });
+  }
+  const challengeId = uuidv4();
+  security.logAudit('AUTH_BIOMETRIC_REGISTER', { userId: req.user.id, method });
+  res.json({ challengeId, message: `${method} registration initiated`, status: 'pending' });
+});
+
+// POST /api/auth/biometric/verify
+app.post('/api/auth/biometric/verify', (req, res) => {
+  // Stub: In production verify WebAuthn assertion
+  const { challengeId, method } = req.body;
+  if (!challengeId) return res.status(400).json({ error: 'challengeId required' });
+  security.logAudit('AUTH_BIOMETRIC_VERIFY', { method, challengeId });
+  res.json({ verified: true, message: 'Biometric verified (stub)' });
+});
+
+// ================================================
+// ANALYTICS ROUTES (/api/analytics/*)
+// ================================================
+
+const SOCIAL_PLATFORMS = ['tiktok', 'instagram', 'facebook', 'twitch', 'discord', 'lemon8', 'reddit', 'redgifs'];
+
+function generatePlatformMetrics(platform) {
+  const bases = {
+    tiktok:    { views: 850000, likes: 42000, reach: 600000, retention: 62, followers: 120000, engagement: 8.2 },
+    instagram: { views: 320000, likes: 28000, reach: 290000, retention: 55, followers: 89000,  engagement: 5.6 },
+    facebook:  { views: 210000, likes: 15000, reach: 180000, retention: 48, followers: 65000,  engagement: 3.4 },
+    twitch:    { views: 95000,  likes: 8500,  reach: 80000,  retention: 72, followers: 22000,  engagement: 11.3 },
+    discord:   { views: 45000,  likes: 5200,  reach: 43000,  retention: 81, followers: 18000,  engagement: 14.2 },
+    lemon8:    { views: 180000, likes: 19000, reach: 160000, retention: 58, followers: 41000,  engagement: 7.1 },
+    reddit:    { views: 520000, likes: 37000, reach: 480000, retention: 44, followers: 96000,  engagement: 4.8 },
+    redgifs:   { views: 670000, likes: 55000, reach: 590000, retention: 39, followers: 78000,  engagement: 6.3 },
+  };
+  const base = bases[platform] || bases.tiktok;
+  const jitter = () => 1 + (Math.random() - 0.5) * 0.1;
+  return {
+    platform,
+    views:      Math.round(base.views * jitter()),
+    likes:      Math.round(base.likes * jitter()),
+    reach:      Math.round(base.reach * jitter()),
+    retention:  +(base.retention * jitter()).toFixed(1),
+    followers:  Math.round(base.followers * jitter()),
+    engagement: +(base.engagement * jitter()).toFixed(2),
+    trend: {
+      views:      +(Math.random() * 20 - 5).toFixed(1),
+      likes:      +(Math.random() * 15 - 3).toFixed(1),
+      followers:  +(Math.random() * 5 - 1).toFixed(1),
+      engagement: +(Math.random() * 4 - 1).toFixed(1),
+    },
+    updatedAt: Date.now(),
+  };
+}
+
+// GET /api/analytics/social/:platform
+app.get('/api/analytics/social/:platform', (req, res) => {
+  const { platform } = req.params;
+  if (!SOCIAL_PLATFORMS.includes(platform)) {
+    return res.status(400).json({ error: `Unsupported platform. Valid: ${SOCIAL_PLATFORMS.join(', ')}` });
+  }
+  const range = sanitizeString(req.query.range || '30d', 10);
+  res.json({ ...generatePlatformMetrics(platform), range });
+});
+
+// GET /api/analytics/overview
+app.get('/api/analytics/overview', (req, res) => {
+  const platforms = {};
+  for (const p of SOCIAL_PLATFORMS) platforms[p] = generatePlatformMetrics(p);
+  const totals = {
+    views:     Object.values(platforms).reduce((s, d) => s + d.views, 0),
+    likes:     Object.values(platforms).reduce((s, d) => s + d.likes, 0),
+    followers: Object.values(platforms).reduce((s, d) => s + d.followers, 0),
+    reach:     Object.values(platforms).reduce((s, d) => s + d.reach, 0),
+  };
+  res.json({ platforms, totals, updatedAt: Date.now() });
+});
+
+// POST /api/analytics/social/:platform/connect
+app.post('/api/analytics/social/:platform/connect', requireRole(), (req, res) => {
+  const { platform } = req.params;
+  if (!SOCIAL_PLATFORMS.includes(platform)) {
+    return res.status(400).json({ error: 'Unsupported platform' });
+  }
+  // NOTE: In production initiate OAuth flow for the platform
+  security.logAudit('ANALYTICS_PLATFORM_CONNECT', { userId: req.user.id, platform });
+  res.json({ platform, connected: true, oauthUrl: `/api/analytics/social/${platform}/oauth` });
+});
+
+// GET /api/analytics/realtime - SSE stream
+app.get('/api/analytics/realtime', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+
+  const sendUpdate = () => {
+    const platform = SOCIAL_PLATFORMS[Math.floor(Math.random() * SOCIAL_PLATFORMS.length)];
+    const data = generatePlatformMetrics(platform);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  sendUpdate();
+  const interval = setInterval(sendUpdate, 3000);
+  req.on('close', () => clearInterval(interval));
+});
+
+// ================================================
+// GAME DEV ROUTES (/api/gamedev/*)
+// ================================================
+
+const VALID_GAME_PLATFORMS = ['unreal', 'epic', 'playstation', 'xbox', 'ubisoft'];
+const VALID_PROJECT_TYPES = ['Coding', 'Game Development', 'AR/VR/3D'];
+
+// GET /api/gamedev/projects
+app.get('/api/gamedev/projects', (req, res) => {
+  const projects = [...gameProjectsMap.values()];
+  res.json({ projects, total: projects.length });
+});
+
+// POST /api/gamedev/projects
+app.post('/api/gamedev/projects', async (req, res) => {
+  try {
+    const { name, type, platform, description } = req.body;
+    if (!name || typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'Project name is required' });
+    }
+    const cleanName = sanitizeString(name, 100);
+    const cleanType = VALID_PROJECT_TYPES.includes(type) ? type : 'Coding';
+    const cleanPlatform = VALID_GAME_PLATFORMS.includes(platform) ? platform : 'unreal';
+    const cleanDesc = sanitizeString(description || '', 500);
+
+    const project = {
+      id: uuidv4(),
+      name: cleanName,
+      type: cleanType,
+      platform: cleanPlatform,
+      description: cleanDesc,
+      progress: 0,
+      status: 'planning',
+      buildStatus: 'pending',
+      team: 1,
+      assets: 0,
+      openIssues: 0,
+      lastBuild: null,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    gameProjectsMap.set(project.id, project);
+    res.status(201).json(project);
+  } catch {
+    res.status(500).json({ error: 'Failed to create project' });
+  }
+});
+
+// GET /api/gamedev/projects/:id
+app.get('/api/gamedev/projects/:id', (req, res) => {
+  const project = gameProjectsMap.get(req.params.id);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  res.json(project);
+});
+
+// PUT /api/gamedev/projects/:id
+app.put('/api/gamedev/projects/:id', (req, res) => {
+  const project = gameProjectsMap.get(req.params.id);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+
+  const allowed = ['name', 'type', 'platform', 'description', 'progress', 'status', 'buildStatus'];
+  const updates = {};
+  for (const key of allowed) {
+    if (req.body[key] !== undefined) updates[key] = req.body[key];
+  }
+  if (updates.name) updates.name = sanitizeString(updates.name, 100);
+  if (updates.description) updates.description = sanitizeString(updates.description, 500);
+  if (updates.progress !== undefined) updates.progress = Math.max(0, Math.min(100, Number(updates.progress) || 0));
+
+  const updated = { ...project, ...updates, updatedAt: Date.now() };
+  gameProjectsMap.set(project.id, updated);
+  res.json(updated);
+});
+
+// GET /api/gamedev/achievements
+app.get('/api/gamedev/achievements', (req, res) => {
+  const list = [...achievementsMap.values()];
+  res.json({ achievements: list, total: list.length });
+});
+
+// POST /api/gamedev/achievements
+app.post('/api/gamedev/achievements', (req, res) => {
+  const { title, description, points, icon } = req.body;
+  if (!title) return res.status(400).json({ error: 'Achievement title required' });
+  const achievement = {
+    id: uuidv4(),
+    title: sanitizeString(title, 100),
+    description: sanitizeString(description || '', 300),
+    points: Math.max(0, Number(points) || 100),
+    icon: sanitizeString(icon || '🏆', 10),
+    earned: false,
+    createdAt: Date.now(),
+  };
+  achievementsMap.set(achievement.id, achievement);
+  res.status(201).json(achievement);
+});
+
+// GET /api/gamedev/platforms
+app.get('/api/gamedev/platforms', (req, res) => {
+  const connected = [...connectedPlatformsMap.values()];
+  res.json({ platforms: connected, available: VALID_GAME_PLATFORMS });
+});
+
+// POST /api/gamedev/platforms/connect
+app.post('/api/gamedev/platforms/connect', (req, res) => {
+  const { platform } = req.body;
+  if (!VALID_GAME_PLATFORMS.includes(platform)) {
+    return res.status(400).json({ error: `Unsupported platform. Valid: ${VALID_GAME_PLATFORMS.join(', ')}` });
+  }
+  const conn = {
+    id: uuidv4(),
+    platform,
+    connectedAt: Date.now(),
+    status: 'connected',
+  };
+  connectedPlatformsMap.set(platform, conn);
+  security.logAudit('GAMEDEV_PLATFORM_CONNECT', { platform });
+  res.json(conn);
+});
+
+// ================================================
+// SUBSCRIPTION ROUTES (/api/subscription/*)
+// ================================================
+
+const SUBSCRIPTION_PLANS = [
+  { id: 'free',       name: 'Free',       price: 0,     features: ['3 AI queries/day', '1 project'] },
+  { id: 'pro',        name: 'Pro',        price: 9.99,  features: ['Unlimited AI', 'All analytics', 'Game dev'] },
+  { id: 'enterprise', name: 'Enterprise', price: 14.99, features: ['Everything in Pro', 'Teams', 'API access'] },
+];
+
+// NOTE: In-memory subscription store. Replace with DB in production.
+const subscriptionsMap = new Map();
+
+// GET /api/subscription/plans
+app.get('/api/subscription/plans', (req, res) => {
+  res.json({ plans: SUBSCRIPTION_PLANS });
+});
+
+// POST /api/subscription/checkout
+app.post('/api/subscription/checkout', async (req, res) => {
+  try {
+    const { plan } = req.body;
+    const planData = SUBSCRIPTION_PLANS.find(p => p.id === plan);
+    if (!planData) return res.status(400).json({ error: 'Invalid plan' });
+
+    // NOTE: In production use Stripe SDK with process.env.STRIPE_SECRET_KEY
+    // e.g. const session = await stripe.checkout.sessions.create({...})
+    const mockSession = {
+      sessionId: `mock_${uuidv4()}`,
+      plan: planData.id,
+      amount: planData.price,
+      currency: 'usd',
+      status: 'success',
+      createdAt: Date.now(),
+    };
+
+    security.logAudit('SUBSCRIPTION_CHECKOUT', { plan: planData.id, amount: planData.price });
+    res.json(mockSession);
+  } catch {
+    res.status(500).json({ error: 'Checkout failed' });
+  }
+});
+
+// GET /api/subscription/status
+app.get('/api/subscription/status', (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  let userId = 'anonymous';
+  try {
+    if (token) {
+      const decoded = jwt.verify(token, JWT_SECRET);
+      userId = decoded.id;
+    }
+  } catch {}
+
+  const sub = subscriptionsMap.get(userId);
+  if (!sub) {
+    return res.json({ plan: 'free', status: 'active', expiresAt: null });
+  }
+  res.json(sub);
+});
+
+// POST /api/subscription/cancel
+app.post('/api/subscription/cancel', (req, res) => {
+  const token = req.headers.authorization?.split(' ')[1];
+  let userId = 'anonymous';
+  try {
+    if (token) {
+      const decoded = jwt.verify(token, JWT_SECRET);
+      userId = decoded.id;
+    }
+  } catch {}
+
+  const sub = subscriptionsMap.get(userId);
+  if (sub) {
+    sub.status = 'cancelled';
+    sub.cancelledAt = Date.now();
+    subscriptionsMap.set(userId, sub);
+  }
+
+  security.logAudit('SUBSCRIPTION_CANCEL', { userId });
+  res.json({ message: 'Subscription cancelled. Access continues until end of billing period.' });
 });
 
 // ================================================

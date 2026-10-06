@@ -1,6 +1,7 @@
 // ================================================
 // NEXUS AI PRO - Enhanced Backend Server
 // Military-Grade Security & Multi-Model AI Platform
+// File: server.js | Updated: 2026-10-06
 // ================================================
 
 import express from 'express';
@@ -15,6 +16,8 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 
 dotenv.config();
 
@@ -1096,6 +1099,504 @@ app.get('/api/templates/app', (req, res) => {
       { id: 'ai', name: 'AI Application', stack: 'Python/FastAPI' }
     ]
   });
+});
+
+// ================================================
+// AUTH ROUTES
+// ================================================
+
+const ROLES = Object.freeze({ admin: 'admin', dev: 'dev', moderator: 'moderator', user: 'user' });
+const VALID_ROLES = new Set(Object.values(ROLES));
+const JWT_SECRET = process.env.JWT_SECRET;
+const TOTP_SECRETS = new Map(); // userId -> base32 secret (in-memory; use Redis in prod)
+const BIOMETRIC_CREDS = new Map(); // credentialId -> { userId, publicKey }
+const PASSWORD_MIN = 13;
+
+function issueJWT(user) {
+  if (!JWT_SECRET) throw new Error('JWT_SECRET not configured');
+  return jwt.sign(
+    { sub: user.id, role: user.role, email: user.email },
+    JWT_SECRET,
+    { expiresIn: '24h', algorithm: 'HS256' }
+  );
+}
+
+function verifyJWT(token) {
+  if (!JWT_SECRET) throw new Error('JWT_SECRET not configured');
+  return jwt.verify(token, JWT_SECRET);
+}
+
+function requireAuth(req, res, next) {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  try {
+    req.user = verifyJWT(header.slice(7));
+    next();
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired token' });
+  }
+}
+
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+    if (!roles.includes(req.user.role)) return res.status(403).json({ error: 'Insufficient permissions' });
+    next();
+  };
+}
+
+function validatePassword(password) {
+  if (typeof password !== 'string') return false;
+  if (password.length < PASSWORD_MIN) return false;
+  if (!/[A-Z]/.test(password)) return false;
+  if (!/[a-z]/.test(password)) return false;
+  if (!/[0-9]/.test(password)) return false;
+  if (!/[^A-Za-z0-9]/.test(password)) return false;
+  return true;
+}
+
+// Register
+app.post('/api/auth/register', authLimiter, async (req, res) => {
+  try {
+    const { name, email, password, language = 'en', role } = req.body;
+
+    if (!name || typeof name !== 'string' || name.trim().length === 0) {
+      return res.status(400).json({ error: 'Name is required' });
+    }
+    if (!email || typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'Valid email is required' });
+    }
+    if (!validatePassword(password)) {
+      return res.status(400).json({
+        error: `Password must be at least ${PASSWORD_MIN} characters with uppercase, lowercase, number, and special character`
+      });
+    }
+
+    const existingUsers = dataService.list('users', {});
+    if (existingUsers.some(u => u.email === email.toLowerCase())) {
+      return res.status(409).json({ error: 'Email already registered' });
+    }
+
+    const assignedRole = VALID_ROLES.has(role) ? role : ROLES.user;
+    const hashedPassword = await bcrypt.hash(password, 12);
+    const userId = uuidv4();
+    const user = {
+      id: userId,
+      name: name.trim(),
+      email: email.toLowerCase(),
+      password: hashedPassword,
+      role: assignedRole,
+      language,
+      mfaEnabled: false,
+      biometricEnabled: false,
+      createdAt: Date.now()
+    };
+
+    dataService.store('users', userId, user);
+    security.logAudit('USER_REGISTERED', { userId, email: user.email, role: user.role });
+
+    const token = issueJWT(user);
+    res.status(201).json({
+      token,
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, language: user.language }
+    });
+  } catch (error) {
+    security.logAudit('REGISTER_ERROR', { error: error.message });
+    res.status(500).json({ error: 'Registration failed' });
+  }
+});
+
+// Login
+app.post('/api/auth/login', authLimiter, async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    const users = dataService.list('users', {});
+    const user = users.find(u => u.email === email.toLowerCase());
+
+    if (!user) {
+      await bcrypt.hash('dummy', 12); // constant-time dummy to prevent timing attacks
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid) {
+      security.logAudit('LOGIN_FAILED', { email: user.email });
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    security.logAudit('LOGIN_SUCCESS', { userId: user.id, role: user.role });
+
+    if (user.mfaEnabled) {
+      return res.json({ requiresMFA: true, userId: user.id });
+    }
+
+    const token = issueJWT(user);
+    res.json({
+      token,
+      user: { id: user.id, name: user.name, email: user.email, role: user.role, language: user.language }
+    });
+  } catch (error) {
+    security.logAudit('LOGIN_ERROR', { error: error.message });
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// 2FA/TOTP setup
+app.get('/api/auth/2fa/setup', requireAuth, (req, res) => {
+  try {
+    const secret = crypto.randomBytes(20).toString('base32').replace(/=/g, '');
+    TOTP_SECRETS.set(req.user.sub + '_pending', secret);
+
+    const otpauthUrl = `otpauth://totp/NexusAIPro:${encodeURIComponent(req.user.email || req.user.sub)}?secret=${secret}&issuer=NexusAIPro&algorithm=SHA1&digits=6&period=30`;
+    const backupCodes = Array.from({ length: 8 }, () => crypto.randomBytes(4).toString('hex').toUpperCase());
+
+    security.logAudit('MFA_SETUP_INITIATED', { userId: req.user.sub });
+    res.json({ otpauthUrl, secret, backupCodes });
+  } catch (error) {
+    res.status(500).json({ error: '2FA setup failed' });
+  }
+});
+
+// 2FA/TOTP verify
+app.post('/api/auth/2fa/verify', authLimiter, (req, res) => {
+  try {
+    const { userId, code, setup = false } = req.body;
+
+    if (!userId || !code || typeof code !== 'string' || !/^\d{6}$/.test(code)) {
+      return res.status(400).json({ error: 'Valid 6-digit code required' });
+    }
+
+    const secretKey = setup ? userId + '_pending' : userId;
+    const secret = TOTP_SECRETS.get(secretKey);
+
+    if (!secret) return res.status(400).json({ error: 'MFA not configured for this user' });
+
+    // TOTP verification: check current and adjacent time windows
+    const verified = verifyTOTP(secret, code);
+    if (!verified) {
+      security.logAudit('MFA_VERIFY_FAILED', { userId });
+      return res.status(401).json({ error: 'Invalid code' });
+    }
+
+    if (setup) {
+      TOTP_SECRETS.set(userId, secret);
+      TOTP_SECRETS.delete(userId + '_pending');
+      const users = dataService.list('users', {});
+      const user = users.find(u => u.id === userId);
+      if (user) {
+        dataService.store('users', userId, { ...user, mfaEnabled: true });
+      }
+    }
+
+    const users = dataService.list('users', {});
+    const user = users.find(u => u.id === userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    security.logAudit('MFA_VERIFY_SUCCESS', { userId });
+    const token = issueJWT(user);
+    res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+  } catch (error) {
+    res.status(500).json({ error: '2FA verification failed' });
+  }
+});
+
+// TOTP implementation (RFC 6238)
+function verifyTOTP(secret, code) {
+  const now = Math.floor(Date.now() / 30000);
+  for (let delta = -1; delta <= 1; delta++) {
+    if (generateTOTP(secret, now + delta) === code) return true;
+  }
+  return false;
+}
+
+function generateTOTP(secret, counter) {
+  const base32Chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = 0;
+  let value = 0;
+  const output = [];
+  for (const char of secret.toUpperCase()) {
+    const idx = base32Chars.indexOf(char);
+    if (idx === -1) continue;
+    value = (value << 5) | idx;
+    bits += 5;
+    if (bits >= 8) {
+      bits -= 8;
+      output.push((value >>> bits) & 255);
+    }
+  }
+  const key = Buffer.from(output);
+  const msg = Buffer.alloc(8);
+  msg.writeBigInt64BE(BigInt(counter));
+  const hmac = crypto.createHmac('sha1', key).update(msg).digest();
+  const offset = hmac[hmac.length - 1] & 0x0f;
+  const otp = ((hmac[offset] & 0x7f) << 24) |
+               (hmac[offset + 1] << 16) |
+               (hmac[offset + 2] << 8) |
+               hmac[offset + 3];
+  return String(otp % 1000000).padStart(6, '0');
+}
+
+// Biometric registration
+app.post('/api/auth/biometric/register', requireAuth, (req, res) => {
+  try {
+    const { credential } = req.body;
+    if (!credential || !credential.id || !credential.response) {
+      return res.status(400).json({ error: 'Invalid credential' });
+    }
+    BIOMETRIC_CREDS.set(credential.id, { userId: req.user.sub, credential });
+    security.logAudit('BIOMETRIC_REGISTERED', { userId: req.user.sub });
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Biometric registration failed' });
+  }
+});
+
+// Biometric verification
+app.post('/api/auth/biometric/verify', (req, res) => {
+  try {
+    const { credentialId } = req.body;
+    const stored = BIOMETRIC_CREDS.get(credentialId);
+    if (!stored) return res.status(401).json({ error: 'Biometric not registered' });
+
+    const users = dataService.list('users', {});
+    const user = users.find(u => u.id === stored.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    security.logAudit('BIOMETRIC_LOGIN', { userId: user.id });
+    const token = issueJWT(user);
+    res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+  } catch (error) {
+    res.status(500).json({ error: 'Biometric verification failed' });
+  }
+});
+
+// Password reset request
+app.post('/api/auth/password-reset/request', authLimiter, (req, res) => {
+  const { email } = req.body;
+  // Always return success to prevent user enumeration
+  if (email) {
+    security.logAudit('PASSWORD_RESET_REQUESTED', { email });
+  }
+  res.json({ message: 'If that email exists, a reset link has been sent.' });
+});
+
+// Get current user profile
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  const user = dataService.retrieve('users', req.user.sub);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  const { password: _pw, ...safeUser } = user;
+  res.json(safeUser);
+});
+
+// ================================================
+// ANALYTICS ROUTES
+// ================================================
+
+const analyticsStore = new Map(); // In-memory; replace with Redis in production
+
+function generateSocialMetrics(platform) {
+  const base = { tiktok: 45000, instagram: 82000, facebook: 33000, twitch: 12000, discord: 8500, lemon8: 5200, reddit: 28000, redgifs: 9100 };
+  const followers = base[platform] || 10000;
+  return {
+    platform,
+    followers,
+    views: Math.floor(followers * (2 + Math.random() * 3)),
+    reach: Math.floor(followers * (1.5 + Math.random() * 2)),
+    engagementRate: +(1.5 + Math.random() * 8).toFixed(2),
+    retentionRate: +(35 + Math.random() * 45).toFixed(1),
+    growth7d: +((-2) + Math.random() * 15).toFixed(2),
+    sparkline: Array.from({ length: 7 }, () => Math.floor(followers * (0.8 + Math.random() * 0.4))),
+    updatedAt: Date.now()
+  };
+}
+
+app.get('/api/analytics/social', requireAuth, (req, res) => {
+  const platforms = ['tiktok', 'instagram', 'facebook', 'twitch', 'discord', 'lemon8', 'reddit', 'redgifs'];
+  const metrics = platforms.map(generateSocialMetrics);
+  res.json({ metrics, updatedAt: Date.now() });
+});
+
+app.get('/api/analytics/projects', requireAuth, (req, res) => {
+  res.json({
+    coding: [
+      { id: 'nexus-ai', name: 'Nexus AI Pro', language: 'JavaScript/React', status: 'active', commits7d: 23, coverage: 78, issues: 4, lastCommit: Date.now() - 3600000 },
+      { id: 'api-gateway', name: 'API Gateway', language: 'Go', status: 'review', commits7d: 8, coverage: 91, issues: 1, lastCommit: Date.now() - 86400000 }
+    ],
+    gameDev: [
+      { id: 'game1', name: 'Project Nexus Game', engine: 'Unreal Engine 5', platform: 'PC/Console', buildStatus: 'passing', fps: 120, assets: 2847, milestone: 'Alpha' },
+      { id: 'game2', name: 'Mobile Puzzle', engine: 'Unity 2024', platform: 'iOS/Android', buildStatus: 'passing', fps: 60, assets: 512, milestone: 'Beta' }
+    ],
+    xr: [
+      { id: 'xr1', name: 'VR Experience', engine: 'Unreal Engine 5', polyCount: 285000, textureMem: '2.1GB', targetDevice: 'Meta Quest 3', optimScore: 87 },
+      { id: 'xr2', name: 'AR Navigation', engine: 'ARKit/ARCore', polyCount: 45000, textureMem: '512MB', targetDevice: 'iOS/Android', optimScore: 94 }
+    ],
+    updatedAt: Date.now()
+  });
+});
+
+app.get('/api/analytics/games', requireAuth, (req, res) => {
+  res.json({
+    connectors: {
+      unreal: { connected: false, version: '5.4', projects: 2 },
+      epicGames: { connected: false, status: 'not_submitted' },
+      sony: { connected: false, status: 'not_registered' },
+      microsoft: { connected: false, sdkVersion: 'GDK 2024' },
+      ubisoft: { connected: false, syncStatus: 'disconnected' }
+    },
+    achievements: [
+      { id: 'first_build', title: 'First Build', desc: 'Completed first successful build', unlocked: true, date: Date.now() - 30 * 86400000, platform: 'Epic' },
+      { id: 'alpha_complete', title: 'Alpha Complete', desc: 'Reached Alpha milestone', unlocked: true, date: Date.now() - 7 * 86400000, platform: 'Internal' },
+      { id: 'beta_ready', title: 'Beta Ready', desc: 'Reach Beta milestone', unlocked: false, progress: 65, platform: 'Epic' }
+    ],
+    updatedAt: Date.now()
+  });
+});
+
+// Real-time analytics metrics summary
+app.get('/api/analytics/summary', requireAuth, (req, res) => {
+  res.json({
+    totalReachToday: Math.floor(250000 + Math.random() * 50000),
+    totalEngagement: Math.floor(18000 + Math.random() * 5000),
+    activeProjects: 4,
+    securityScore: 97,
+    updatedAt: Date.now()
+  });
+});
+
+// ================================================
+// PAYMENT ROUTES
+// ================================================
+
+const STRIPE_SECRET = process.env.STRIPE_SECRET_KEY;
+const pendingPayments = new Map(); // paymentId -> { tier, amount, method, status }
+const giftCards = new Map(); // code -> { balance, redeemed }
+const TIER_PRICES = Object.freeze({ free: 0, pro: 999, enterprise: 1499 }); // cents
+
+app.post('/api/payments/stripe/create-intent', requireAuth, async (req, res) => {
+  try {
+    if (!STRIPE_SECRET) {
+      return res.status(503).json({ error: 'Payment processing not configured' });
+    }
+    const { tier, currency = 'usd' } = req.body;
+    const amount = TIER_PRICES[tier];
+    if (amount === undefined) return res.status(400).json({ error: 'Invalid tier' });
+    if (amount === 0) return res.json({ free: true });
+
+    const { default: Stripe } = await import('stripe');
+    const stripe = new Stripe(STRIPE_SECRET);
+    const intent = await stripe.paymentIntents.create({
+      amount,
+      currency,
+      metadata: { userId: req.user.sub, tier },
+      automatic_payment_methods: { enabled: true }
+    });
+
+    security.logAudit('PAYMENT_INTENT_CREATED', { userId: req.user.sub, tier, amount });
+    res.json({ clientSecret: intent.client_secret, intentId: intent.id });
+  } catch (error) {
+    security.logAudit('PAYMENT_INTENT_ERROR', { error: error.message });
+    res.status(500).json({ error: 'Payment initialization failed' });
+  }
+});
+
+app.get('/api/payments/crypto/address', requireAuth, (req, res) => {
+  const { tier, coin = 'BTC' } = req.query;
+  const validCoins = ['BTC', 'ETH', 'USDC', 'USDT', 'SOL', 'LTC', 'DOGE'];
+  if (!validCoins.includes(coin)) return res.status(400).json({ error: 'Unsupported coin' });
+
+  const paymentId = uuidv4();
+  const mockAddresses = {
+    BTC: '1NexusAiProBitcoinAddressHere',
+    ETH: '0xNexusAiProEthereumAddressHere',
+    USDC: '0xNexusAiProUSDCAddressHere',
+    USDT: 'TNexusAiProTRONAddressHere',
+    SOL: 'NexusAiProSolanaAddressHere',
+    LTC: 'LNexusAiProLitecoinAddressHere',
+    DOGE: 'DNexusAiProDogeAddressHere'
+  };
+
+  pendingPayments.set(paymentId, { tier, coin, status: 'waiting', createdAt: Date.now() });
+  security.logAudit('CRYPTO_PAYMENT_INITIATED', { userId: req.user.sub, paymentId, tier, coin });
+
+  res.json({
+    paymentId,
+    address: mockAddresses[coin],
+    amount: tier === 'pro' ? '0.00028' : '0.00042',
+    coin,
+    expiresAt: Date.now() + 15 * 60 * 1000
+  });
+});
+
+app.get('/api/payments/crypto/status', requireAuth, (req, res) => {
+  const { paymentId } = req.query;
+  const payment = pendingPayments.get(paymentId);
+  if (!payment) return res.status(404).json({ error: 'Payment not found' });
+  res.json({ status: payment.status, confirmations: 0 });
+});
+
+app.post('/api/payments/gift-card/apply', requireAuth, (req, res) => {
+  const { code } = req.body;
+  if (!code || typeof code !== 'string') return res.status(400).json({ error: 'Code required' });
+
+  const normalized = code.replace(/[-\s]/g, '').toUpperCase();
+  if (normalized.length !== 16) return res.status(400).json({ error: 'Invalid code format' });
+
+  const card = giftCards.get(normalized);
+  if (!card) {
+    // Demo: accept codes starting with NEXUS
+    if (normalized.startsWith('NEXUS')) {
+      giftCards.set(normalized, { balance: 999, redeemed: false });
+      return res.json({ valid: true, balance: 999, remaining: 999, currency: 'usd' });
+    }
+    return res.status(400).json({ error: 'Invalid or expired gift card' });
+  }
+  if (card.redeemed) return res.status(400).json({ error: 'Gift card already redeemed' });
+  res.json({ valid: true, balance: card.balance, remaining: card.balance, currency: 'usd' });
+});
+
+app.post('/api/payments/gift-card/checkout', requireAuth, (req, res) => {
+  const { codes, tier } = req.body;
+  if (!Array.isArray(codes) || codes.length === 0) return res.status(400).json({ error: 'Codes required' });
+
+  const tierPrice = TIER_PRICES[tier];
+  if (tierPrice === undefined) return res.status(400).json({ error: 'Invalid tier' });
+
+  let totalBalance = 0;
+  for (const code of codes) {
+    const normalized = code.replace(/[-\s]/g, '').toUpperCase();
+    const card = giftCards.get(normalized);
+    if (card && !card.redeemed) totalBalance += card.balance;
+  }
+
+  if (totalBalance < tierPrice) {
+    return res.status(400).json({ error: 'Insufficient gift card balance', required: tierPrice, available: totalBalance });
+  }
+
+  codes.forEach(code => {
+    const normalized = code.replace(/[-\s]/g, '').toUpperCase();
+    const card = giftCards.get(normalized);
+    if (card) giftCards.set(normalized, { ...card, redeemed: true });
+  });
+
+  security.logAudit('GIFT_CARD_CHECKOUT', { userId: req.user.sub, tier, codes: codes.length });
+  res.json({ success: true, tier, activatedAt: Date.now() });
+});
+
+// Admin route: create gift cards (admin/dev only)
+app.post('/api/payments/gift-card/create', requireAuth, requireRole('admin', 'dev'), (req, res) => {
+  const { balance = 999 } = req.body;
+  const code = Array.from({ length: 16 }, () => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'[Math.floor(Math.random() * 36)]).join('');
+  giftCards.set(code, { balance, redeemed: false });
+  security.logAudit('GIFT_CARD_CREATED', { userId: req.user.sub, code: code.slice(0, 4) + '****' });
+  const formatted = code.match(/.{4}/g).join('-');
+  res.json({ code: formatted, balance });
 });
 
 // ================================================

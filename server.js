@@ -1165,6 +1165,19 @@ setInterval(async () => {
 }, 60 * 60 * 1000); // Every hour
 
 // ================================================
+// NEW FEATURE ROUTES (auth, payment, connectors, i18n)
+// ================================================
+import authRouter from './src/server/routes/auth.js';
+import paymentRouter from './src/server/routes/payment.js';
+import connectorsRouter from './src/server/routes/connectors.js';
+import i18nRouter from './src/server/routes/i18n.js';
+
+app.use('/api/auth', authRouter);
+app.use('/api/payment', paymentRouter);
+app.use('/api/connectors', connectorsRouter);
+app.use('/api/i18n', i18nRouter);
+
+// ================================================
 // ERROR HANDLING
 // ================================================
 

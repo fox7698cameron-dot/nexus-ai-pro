@@ -1183,6 +1183,154 @@ app.use((err, req, res, next) => {
 });
 
 // ================================================
+// ANALYTICS ROUTES | 2026-10-08
+// ================================================
+app.get('/api/analytics/metrics', (req, res) => {
+  const { platform = 'all', timeRange = '7d' } = req.query;
+  const platforms = ['tiktok','instagram','facebook','twitch','discord','lemon8','reddit','redgifs'];
+  const data = {};
+  platforms.forEach(p => {
+    data[p] = {
+      views: Math.floor(Math.random() * 100000) + 1000,
+      likes: Math.floor(Math.random() * 10000) + 100,
+      reach: Math.floor(Math.random() * 50000) + 500,
+      retention: Math.floor(Math.random() * 40) + 60,
+      followers: Math.floor(Math.random() * 5000) + 100,
+      engagement: (Math.random() * 8 + 1).toFixed(2),
+      timeRange,
+      updatedAt: new Date().toISOString()
+    };
+  });
+  res.json(platform === 'all' ? data : { [platform]: data[platform] || {} });
+});
+
+app.get('/api/analytics/realtime', (req, res) => {
+  const { platform } = req.query;
+  res.json({
+    platform: platform || 'all',
+    liveViewers: Math.floor(Math.random() * 1000) + 10,
+    currentEngagement: (Math.random() * 10 + 1).toFixed(2),
+    activeUsers: Math.floor(Math.random() * 500) + 50,
+    timestamp: new Date().toISOString()
+  });
+});
+
+// ================================================
+// AUTH ROUTES | 2026-10-08
+// ================================================
+app.post('/api/auth/register', authLimiter, async (req, res) => {
+  try {
+    const { username, email, password, role = 'USER' } = req.body;
+    if (!username || !email || !password) return res.status(400).json({ error: 'All fields required' });
+    if (password.length < 13) return res.status(400).json({ error: 'Password must be at least 13 characters' });
+    const specialCharRegex = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/;
+    if (!specialCharRegex.test(password)) return res.status(400).json({ error: 'Password must contain special characters' });
+    const allowedRoles = ['USER', 'MODERATOR', 'ADMIN', 'DEV'];
+    const userRole = allowedRoles.includes(role) ? role : 'USER';
+    const userId = uuidv4();
+    security.logAudit('USER_REGISTERED', { userId, email: email.substring(0,3) + '***', role: userRole });
+    res.json({ success: true, userId, role: userRole, message: 'Registration successful' });
+  } catch (err) { res.status(500).json({ error: 'Registration failed' }); }
+});
+
+app.post('/api/auth/login', authLimiter, async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+    security.logAudit('LOGIN_ATTEMPT', { email: email.substring(0,3) + '***' });
+    res.json({ success: true, token: 'jwt-placeholder-' + uuidv4(), requiresMfa: false });
+  } catch (err) { res.status(500).json({ error: 'Login failed' }); }
+});
+
+app.post('/api/auth/verify-mfa', authLimiter, (req, res) => {
+  const { token, code, method } = req.body;
+  if (!token || !code) return res.status(400).json({ error: 'Token and code required' });
+  const validMethods = ['TOTP', 'SMS', 'EMAIL', 'BIOMETRIC'];
+  res.json({ success: true, verified: true, method: validMethods.includes(method) ? method : 'TOTP' });
+});
+
+// ================================================
+// PAYMENT ROUTES | 2026-10-08
+// ================================================
+app.post('/api/payment/create-intent', async (req, res) => {
+  try {
+    const { tier, method } = req.body;
+    const prices = { pro: 999, enterprise: 1499 };
+    const amount = prices[tier] || 999;
+    security.logAudit('PAYMENT_INTENT', { tier, method: method || 'CARD', amount });
+    res.json({ success: true, clientSecret: 'pi_placeholder_' + uuidv4(), amount, currency: 'usd' });
+  } catch (err) { res.status(500).json({ error: 'Payment failed' }); }
+});
+
+app.post('/api/payment/gift-card', (req, res) => {
+  const { code } = req.body;
+  if (!code || code.length < 8) return res.status(400).json({ error: 'Invalid gift card code' });
+  res.json({ success: true, valid: true, balance: 1000, currency: 'usd' });
+});
+
+app.post('/api/payment/crypto', (req, res) => {
+  const { currency, amount } = req.body;
+  const supported = ['BTC', 'ETH', 'USDC'];
+  if (!supported.includes(currency)) return res.status(400).json({ error: 'Unsupported cryptocurrency' });
+  res.json({ success: true, address: 'crypto-address-placeholder', currency, amount, expires: Date.now() + 3600000 });
+});
+
+// ================================================
+// PROJECT TRACKING ROUTES | 2026-10-08
+// ================================================
+const projectStore = new Map();
+
+app.post('/api/projects', (req, res) => {
+  const { title, description, type, techStack, priority, deadline } = req.body;
+  if (!title || !type) return res.status(400).json({ error: 'Title and type required' });
+  const validTypes = ['CODING', 'GAME', 'AR_VR_3D'];
+  const project = {
+    id: uuidv4(),
+    title,
+    description: description || '',
+    type: validTypes.includes(type) ? type : 'CODING',
+    techStack: Array.isArray(techStack) ? techStack : [],
+    priority: ['LOW','MEDIUM','HIGH','CRITICAL'].includes(priority) ? priority : 'MEDIUM',
+    deadline: deadline || null,
+    status: 'TODO',
+    progress: 0,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  projectStore.set(project.id, project);
+  res.json({ success: true, project });
+});
+
+app.get('/api/projects', (req, res) => {
+  const { type } = req.query;
+  const projects = Array.from(projectStore.values());
+  res.json(type ? projects.filter(p => p.type === type) : projects);
+});
+
+app.put('/api/projects/:id', (req, res) => {
+  const project = projectStore.get(req.params.id);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  const updated = { ...project, ...req.body, id: project.id, updatedAt: new Date().toISOString() };
+  projectStore.set(project.id, updated);
+  res.json({ success: true, project: updated });
+});
+
+app.delete('/api/projects/:id', (req, res) => {
+  if (!projectStore.has(req.params.id)) return res.status(404).json({ error: 'Not found' });
+  projectStore.delete(req.params.id);
+  res.json({ success: true });
+});
+
+// ================================================
+// TRANSLATION ROUTE | 2026-10-08
+// ================================================
+app.post('/api/translate', (req, res) => {
+  const { text, targetLang } = req.body;
+  if (!text || !targetLang) return res.status(400).json({ error: 'text and targetLang required' });
+  res.json({ translated: text, sourceLang: 'en', targetLang, note: 'Configure TRANSLATE_API_KEY for real translations' });
+});
+
+// ================================================
 // SERVER START
 // ================================================
 

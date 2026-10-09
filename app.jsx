@@ -1,9 +1,16 @@
 /* app.jsx
-   Updated: make UI more responsive for mobile/desktop, persist model selection, chats, memories, settings,
-   ensure AES-256 label present, and small responsive CSS tweaks.
+   Updated: Multi-dashboard, analytics, game dev, auth, payment, i18n support.
+   Date: 2026-10-09
 */
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { securityService } from './src/security-service.js';
+import AnalyticsDashboard from './src/components/AnalyticsDashboard.jsx';
+import SecurityDashboardFull from './src/components/SecurityDashboardFull.jsx';
+import GameDevDashboard from './src/components/GameDevDashboard.jsx';
+import AuthForms from './src/components/AuthForms.jsx';
+import RoleDashboard from './src/components/AdminDashboard.jsx';
+import PaymentModal from './src/components/PaymentModal.jsx';
+import { useI18n, detectBrowserLanguage, SUPPORTED_LANGUAGES } from './src/i18n/translations.js';
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
   Settings, Menu, X, Plus, Trash2, Download, Upload,
@@ -21,7 +28,8 @@ import {
   Bug, Wrench, Hammer, Cog, RotateCcw,
   ShieldCheck, ShieldAlert, Fingerprint, ScanFace,
   Network, Wifi, Radio, Antenna, Signal,
-  ArrowLeft, Film, ImagePlus, Clapperboard
+  ArrowLeft, Film, ImagePlus, Clapperboard,
+  LogIn, Crown,
 } from 'lucide-react';
 
 // Persistence keys
@@ -453,16 +461,18 @@ const AI_MODELS = {
 // TOOL CATEGORIES
 // ============================================
 const TOOLS = {
-  chat: { name: 'Chat', icon: MessageSquare, description: 'Conversational AI' },
-  code: { name: 'Code', icon: Code, description: 'Code generation & debugging' },
-  image: { name: 'Image Gen', icon: ImagePlus, description: 'AI image generation' },
-  video: { name: 'Video Gen', icon: Clapperboard, description: 'AI video creation' },
-  gamedev: { name: 'Game Dev', icon: Gamepad2, description: 'Game development suite' },
-  appdev: { name: 'App Dev', icon: Smartphone, description: 'Application development' },
-  automation: { name: 'Automation', icon: Workflow, description: 'N8N-style workflows' },
-  deploy: { name: 'Deploy', icon: Rocket, description: 'App deployment' },
-  security: { name: 'Security', icon: Shield, description: 'Security analysis' },
-  schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' }
+  chat:       { name: 'Chat',       icon: MessageSquare, description: 'Conversational AI' },
+  code:       { name: 'Code',       icon: Code,          description: 'Code generation & debugging' },
+  image:      { name: 'Image Gen',  icon: ImagePlus,     description: 'AI image generation' },
+  video:      { name: 'Video Gen',  icon: Clapperboard,  description: 'AI video creation' },
+  analytics:  { name: 'Analytics',  icon: BarChart3,     description: 'Social media analytics' },
+  gamedev:    { name: 'Game Dev',   icon: Gamepad2,      description: 'Game development studio' },
+  appdev:     { name: 'App Dev',    icon: Smartphone,    description: 'Application development' },
+  automation: { name: 'Automation', icon: Workflow,      description: 'N8N-style workflows' },
+  deploy:     { name: 'Deploy',     icon: Rocket,        description: 'App deployment' },
+  security:   { name: 'Security',   icon: Shield,        description: 'Security dashboard' },
+  schedule:   { name: 'Schedule',   icon: Calendar,      description: 'Task scheduling' },
+  dashboard:  { name: 'My Dashboard', icon: Users,       description: 'Role-based dashboard' },
 };
 
 // ============================================
@@ -625,6 +635,15 @@ export default function NexusAI() {
     encryptionStatus: 'secure',
     overallScore: 92
   });
+
+  // Auth state
+  const [currentUser, setCurrentUser] = useState(null);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [isPaymentOpen, setIsPaymentOpen] = useState(false);
+  const [language, setLanguage] = useState(() => {
+    try { return localStorage.getItem('nexus:language') || detectBrowserLanguage(); } catch { return 'en'; }
+  });
+  const { t, isRTL } = useI18n(language);
 
   // User customization
   const [userAvatar, setUserAvatar] = useState(AVATAR_STYLES.user[0]);
@@ -908,14 +927,48 @@ export default function NexusAI() {
         <div className="header-right">
           <div className="security-badge">
             <ShieldCheck size={14} />
-            <span>Protected</span>
-            <Lock size={10} />
             <span>AES-256</span>
           </div>
+          {/* Language Selector */}
+          <select
+            value={language}
+            onChange={e => { setLanguage(e.target.value); try { localStorage.setItem('nexus:language', e.target.value); } catch {} }}
+            className="icon-btn"
+            style={{ background: 'transparent', border: '1px solid #374151', borderRadius: 8, color: '#9ca3af', fontSize: 12, padding: '4px 6px', cursor: 'pointer' }}
+            title="Language"
+          >
+            {SUPPORTED_LANGUAGES.map(l => (
+              <option key={l.code} value={l.code} style={{ background: '#1f2937' }}>{l.name}</option>
+            ))}
+          </select>
+          {/* Auth / Profile */}
+          {currentUser ? (
+            <button
+              className="icon-btn"
+              onClick={() => setActiveTool('dashboard')}
+              title={currentUser.username}
+              style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}
+            >
+              <User size={16} />
+              <span style={{ maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {currentUser.username}
+              </span>
+            </button>
+          ) : (
+            <button
+              className="icon-btn"
+              onClick={() => setIsAuthOpen(true)}
+              style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}
+            >
+              <LogIn size={16} />Sign In
+            </button>
+          )}
+          <button className="icon-btn" onClick={() => setIsPaymentOpen(true)} title="Upgrade" style={{ fontSize: 11 }}>
+            <Crown size={16} style={{ color: '#fbbf24' }} />
+          </button>
           <button className="icon-btn" onClick={() => setIsMemoryOpen(!isMemoryOpen)}><Brain size={20} /></button>
-          <button className="icon-btn" onClick={() => setIsCallActive(true)}><Phone size={20} /></button>
           <button className="icon-btn" onClick={() => setIsSettingsOpen(true)}><Settings size={20} /></button>
-          <div className="user-avatar">{userAvatar?.emoji || '≡ƒæñ'}</div>
+          <div className="user-avatar">{userAvatar?.emoji || '🤖'}</div>
         </div>
       </header>
 
@@ -946,7 +999,7 @@ export default function NexusAI() {
             {Object.entries(TOOLS).map(([key, tool]) => {
               const Icon = tool.icon;
               return (
-                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security'].includes(key)) setShowToolContent(true); }}>
+                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation'].includes(key)) setShowToolContent(true); else setShowToolContent(false); }}>
                   <Icon size={18} />
                   <span>{tool.name}</span>
                 </button>
@@ -1104,8 +1157,37 @@ export default function NexusAI() {
             </div>
           )}
 
+          {/* ── New Full-Screen Dashboard Panels ── */}
+          {activeTool === 'analytics' && (
+            <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              <AnalyticsDashboard />
+            </div>
+          )}
+
+          {activeTool === 'security' && !showToolContent && (
+            <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              <SecurityDashboardFull />
+            </div>
+          )}
+
+          {activeTool === 'gamedev' && showToolContent && (
+            <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              <GameDevDashboard />
+            </div>
+          )}
+
+          {activeTool === 'dashboard' && (
+            <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+              {currentUser ? (
+                <RoleDashboard userRole={currentUser.role || 'user'} currentUser={currentUser} />
+              ) : (
+                <AuthForms onAuth={(data) => setCurrentUser(data.user)} />
+              )}
+            </div>
+          )}
+
           {/* Messages */}
-          <div className="messages-container">
+          <div className="messages-container" style={{ display: ['analytics','security','gamedev','dashboard'].includes(activeTool) && activeTool !== 'gamedev' ? 'none' : undefined }}>
             {messages.length === 0 ? (
               <div className="welcome">
                 <div className="welcome-icon"><Sparkles size={48} /></div>
@@ -1208,6 +1290,36 @@ export default function NexusAI() {
           </div>
         </div>
       )}
+
+      {/* Auth Modal */}
+      {isAuthOpen && (
+        <div
+          className="modal-overlay"
+          onClick={() => setIsAuthOpen(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+        >
+          <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 420, background: '#111', borderRadius: 20, border: '1px solid #2a2a2a', overflow: 'hidden' }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '12px 16px 0' }}>
+              <button onClick={() => setIsAuthOpen(false)} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer' }}>
+                <X size={18} />
+              </button>
+            </div>
+            <AuthForms
+              onAuth={(data) => {
+                setCurrentUser(data.user);
+                setIsAuthOpen(false);
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Payment Modal */}
+      <PaymentModal
+        isOpen={isPaymentOpen}
+        onClose={() => setIsPaymentOpen(false)}
+        currentPlan="free"
+      />
 
       {/* Security Modal */}
       {isSecurityOpen && (

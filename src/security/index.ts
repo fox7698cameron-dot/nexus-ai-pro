@@ -82,11 +82,19 @@ export class CryptoService {
       ['deriveKey']
     );
 
+    // Salt is derived from a per-session random nonce stored in sessionStorage,
+    // or falls back to a random value. Never hardcode a static salt.
+    const saltSource =
+      (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('__nexus_salt')) ||
+      Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
+    if (typeof sessionStorage !== 'undefined' && !sessionStorage.getItem('__nexus_salt')) {
+      try { sessionStorage.setItem('__nexus_salt', saltSource); } catch {}
+    }
     return crypto.subtle.deriveKey(
       {
         name: 'PBKDF2',
         hash: 'SHA-256',
-        salt: new TextEncoder().encode('nexus-ai-salt'),
+        salt: new TextEncoder().encode(saltSource),
         iterations: 100000
       },
       importedKey,

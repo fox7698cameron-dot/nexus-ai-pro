@@ -8,11 +8,17 @@ const Store = require('electron-store');
 const keytar = require('keytar');
 const ElectronSecurityService = require('./electron-security-service');
 
-// Initialize secure storage
-const store = new Store({
-  encryptionKey: 'nexus-ai-pro-encryption-key-v2',
-  name: 'nexus-ai-config'
-});
+// Initialize secure storage — key retrieved from OS keychain, never hardcoded
+async function initStore() {
+  let encKey = await keytar.getPassword(SERVICE_NAME, 'store-encryption-key').catch(() => null);
+  if (!encKey) {
+    encKey = require('crypto').randomBytes(32).toString('hex');
+    await keytar.setPassword(SERVICE_NAME, 'store-encryption-key', encKey).catch(() => {});
+  }
+  return new Store({ encryptionKey: encKey, name: 'nexus-ai-config' });
+}
+let store;
+initStore().then(s => { store = s; });
 
 // Service name for keychain
 const SERVICE_NAME = 'NexusAIPro';

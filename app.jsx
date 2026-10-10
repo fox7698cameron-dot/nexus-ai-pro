@@ -1,9 +1,19 @@
 /* app.jsx
-   Updated: make UI more responsive for mobile/desktop, persist model selection, chats, memories, settings,
-   ensure AES-256 label present, and small responsive CSS tweaks.
+   Updated: 2026-10-10 — added analytics, game-dev, payment, auth, integration,
+   enhanced security dashboards; i18n support; role-based routing.
 */
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense, lazy } from 'react';
 import { securityService } from './src/security-service.js';
+
+// ── Lazy-loaded dashboard modules ─────────────────────────────────────────────
+const AnalyticsDashboard      = lazy(() => import('./src/components/AnalyticsDashboard.jsx'));
+const GameDevDashboard        = lazy(() => import('./src/components/GameDevDashboard.jsx'));
+const PaymentSystem           = lazy(() => import('./src/components/PaymentSystem.jsx'));
+const AuthSystem              = lazy(() => import('./src/components/AuthSystem.jsx'));
+const IntegrationHub          = lazy(() => import('./src/components/IntegrationHub.jsx'));
+const SecurityDashboardEnh    = lazy(() => import('./src/components/SecurityDashboardEnhanced.jsx'));
+import { useI18n } from './src/i18n/i18n.js';
+import { LocaleSelector } from './src/i18n/LocaleSelector.jsx';
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
   Settings, Menu, X, Plus, Trash2, Download, Upload,
@@ -453,16 +463,22 @@ const AI_MODELS = {
 // TOOL CATEGORIES
 // ============================================
 const TOOLS = {
-  chat: { name: 'Chat', icon: MessageSquare, description: 'Conversational AI' },
-  code: { name: 'Code', icon: Code, description: 'Code generation & debugging' },
-  image: { name: 'Image Gen', icon: ImagePlus, description: 'AI image generation' },
-  video: { name: 'Video Gen', icon: Clapperboard, description: 'AI video creation' },
-  gamedev: { name: 'Game Dev', icon: Gamepad2, description: 'Game development suite' },
-  appdev: { name: 'App Dev', icon: Smartphone, description: 'Application development' },
-  automation: { name: 'Automation', icon: Workflow, description: 'N8N-style workflows' },
-  deploy: { name: 'Deploy', icon: Rocket, description: 'App deployment' },
-  security: { name: 'Security', icon: Shield, description: 'Security analysis' },
-  schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' }
+  chat:        { name: 'Chat',        icon: MessageSquare, description: 'Conversational AI' },
+  code:        { name: 'Code',        icon: Code,          description: 'Code generation & debugging' },
+  image:       { name: 'Image Gen',   icon: ImagePlus,     description: 'AI image generation' },
+  video:       { name: 'Video Gen',   icon: Clapperboard,  description: 'AI video creation' },
+  gamedev:     { name: 'Game Dev',    icon: Gamepad2,      description: 'Game development suite' },
+  appdev:      { name: 'App Dev',     icon: Smartphone,    description: 'Application development' },
+  automation:  { name: 'Automation',  icon: Workflow,      description: 'N8N-style workflows' },
+  deploy:      { name: 'Deploy',      icon: Rocket,        description: 'App deployment' },
+  security:    { name: 'Security',    icon: Shield,        description: 'Security analysis' },
+  schedule:    { name: 'Schedule',    icon: Calendar,      description: 'Task scheduling' },
+  analytics:   { name: 'Analytics',   icon: BarChart3,     description: 'Social media analytics', dashboard: true },
+  gametracker: { name: 'Game Track',  icon: Gamepad2,      description: 'Real-time game project tracker', dashboard: true },
+  payments:    { name: 'Billing',     icon: Database,      description: 'Subscriptions & payments', dashboard: true },
+  auth:        { name: 'Auth',        icon: Fingerprint,   description: 'Sign in / account management', dashboard: true },
+  integrations:{ name: 'Integrations',icon: Puzzle,        description: 'Cloud & DevOps connectors', dashboard: true },
+  securityenh: { name: 'Security+',   icon: ShieldCheck,   description: 'Enhanced security dashboard', dashboard: true },
 };
 
 // ============================================
@@ -946,7 +962,7 @@ export default function NexusAI() {
             {Object.entries(TOOLS).map(([key, tool]) => {
               const Icon = tool.icon;
               return (
-                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security'].includes(key)) setShowToolContent(true); }}>
+                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security', 'analytics', 'gametracker', 'payments', 'auth', 'integrations', 'securityenh'].includes(key)) setShowToolContent(true); else setShowToolContent(false); }}>
                   <Icon size={18} />
                   <span>{tool.name}</span>
                 </button>
@@ -1101,6 +1117,50 @@ export default function NexusAI() {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* New dashboard panels (lazy-loaded) */}
+          {activeTool === 'analytics' && (
+            <div className="tool-content full-dashboard">
+              <Suspense fallback={<div className="p-8 text-center text-gray-400">Loading Analytics…</div>}>
+                <AnalyticsDashboard socket={null} />
+              </Suspense>
+            </div>
+          )}
+          {activeTool === 'gametracker' && (
+            <div className="tool-content full-dashboard">
+              <Suspense fallback={<div className="p-8 text-center text-gray-400">Loading Game Tracker…</div>}>
+                <GameDevDashboard socket={null} />
+              </Suspense>
+            </div>
+          )}
+          {activeTool === 'payments' && (
+            <div className="tool-content full-dashboard">
+              <Suspense fallback={<div className="p-8 text-center text-gray-400">Loading Billing…</div>}>
+                <PaymentSystem />
+              </Suspense>
+            </div>
+          )}
+          {activeTool === 'auth' && (
+            <div className="tool-content full-dashboard">
+              <Suspense fallback={<div className="p-8 text-center text-gray-400">Loading Auth…</div>}>
+                <AuthSystem />
+              </Suspense>
+            </div>
+          )}
+          {activeTool === 'integrations' && (
+            <div className="tool-content full-dashboard">
+              <Suspense fallback={<div className="p-8 text-center text-gray-400">Loading Integrations…</div>}>
+                <IntegrationHub />
+              </Suspense>
+            </div>
+          )}
+          {activeTool === 'securityenh' && (
+            <div className="tool-content full-dashboard">
+              <Suspense fallback={<div className="p-8 text-center text-gray-400">Loading Security…</div>}>
+                <SecurityDashboardEnh socket={null} />
+              </Suspense>
             </div>
           )}
 

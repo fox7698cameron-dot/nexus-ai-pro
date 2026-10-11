@@ -1,6 +1,7 @@
 // ================================================
 // NEXUS AI PRO - Enhanced Backend Server
 // Military-Grade Security & Multi-Model AI Platform
+// Updated: 2026-10-11
 // ================================================
 
 import express from 'express';
@@ -15,6 +16,7 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import apiRouter from './src/api/routes.js';
 
 dotenv.config();
 
@@ -833,6 +835,9 @@ const workflowEngine = new WorkflowEngine();
 // ================================================
 // API ROUTES
 // ================================================
+
+// Mount modular API router (auth, payments, analytics, game, admin)
+app.use('/api', apiRouter);
 
 // Health check
 app.get('/api/health', (req, res) => {

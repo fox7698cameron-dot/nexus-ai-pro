@@ -15,6 +15,13 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import cookieParser from 'cookie-parser';
+import { authRouter } from './src/routes/auth.js';
+import { analyticsRouter } from './src/routes/analytics.js';
+import { projectsRouter } from './src/routes/projects.js';
+import { gamedevRouter } from './src/routes/gamedev.js';
+import { paymentsRouter } from './src/routes/payments.js';
+import { adminRouter } from './src/routes/admin.js';
 
 dotenv.config();
 
@@ -330,6 +337,7 @@ app.use(cors({
 // Body parsing with size limits
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(cookieParser());
 
 // Request ID and timing
 app.use((req, res, next) => {
@@ -1099,6 +1107,23 @@ app.get('/api/templates/app', (req, res) => {
 });
 
 // ================================================
+// NEW FEATURE ROUTES
+// ================================================
+
+// Inject io into routers for real-time events
+analyticsRouter.io = null;
+projectsRouter.io = null;
+gamedevRouter.io = null;
+paymentsRouter.io = null;
+
+app.use('/api/auth', authRouter);
+app.use('/api/analytics', analyticsRouter);
+app.use('/api/projects', projectsRouter);
+app.use('/api/gamedev', gamedevRouter);
+app.use('/api/payments', paymentsRouter);
+app.use('/api/admin', adminRouter);
+
+// ================================================
 // WEBSOCKET HANDLING
 // ================================================
 
@@ -1115,8 +1140,13 @@ io.use((socket, next) => {
   }
 });
 
+// Wire io into feature routers for real-time events
+analyticsRouter.io = io;
+projectsRouter.io = io;
+gamedevRouter.io = io;
+paymentsRouter.io = io;
+
 io.on('connection', (socket) => {
-  console.log(`Client connected: ${socket.id}`);
   security.logAudit('SOCKET_CONNECT', { socketId: socket.id, userId: socket.userId });
 
   // Voice call handling

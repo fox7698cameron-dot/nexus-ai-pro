@@ -1,9 +1,17 @@
-/* app.jsx
-   Updated: make UI more responsive for mobile/desktop, persist model selection, chats, memories, settings,
-   ensure AES-256 label present, and small responsive CSS tweaks.
-*/
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+// app.jsx
+// Nexus AI Pro — Full-Stack MVP Dashboard
+// Updated: 2026-10-13
+
+import React, { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react';
 import { securityService } from './src/security-service.js';
+
+// Lazy-loaded dashboards (code-split for performance)
+const AnalyticsDashboard = lazy(() => import('./src/components/AnalyticsDashboard.jsx'));
+const ProjectTracker = lazy(() => import('./src/components/ProjectTracker.jsx'));
+const EnhancedSecurityDashboard = lazy(() => import('./src/components/EnhancedSecurityDashboard.jsx'));
+const ConnectorsDashboard = lazy(() => import('./src/components/ConnectorsDashboard.jsx'));
+const AuthDashboard = lazy(() => import('./src/components/AuthDashboard.jsx'));
+const CheckoutDashboard = lazy(() => import('./src/components/CheckoutDashboard.jsx'));
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
   Settings, Menu, X, Plus, Trash2, Download, Upload,
@@ -455,13 +463,18 @@ const AI_MODELS = {
 const TOOLS = {
   chat: { name: 'Chat', icon: MessageSquare, description: 'Conversational AI' },
   code: { name: 'Code', icon: Code, description: 'Code generation & debugging' },
+  analytics: { name: 'Analytics', icon: BarChart3, description: 'Social media analytics' },
+  projects: { name: 'Projects', icon: GitBranch, description: 'Project & game dev tracking' },
   image: { name: 'Image Gen', icon: ImagePlus, description: 'AI image generation' },
   video: { name: 'Video Gen', icon: Clapperboard, description: 'AI video creation' },
   gamedev: { name: 'Game Dev', icon: Gamepad2, description: 'Game development suite' },
   appdev: { name: 'App Dev', icon: Smartphone, description: 'Application development' },
   automation: { name: 'Automation', icon: Workflow, description: 'N8N-style workflows' },
+  connectors: { name: 'Connectors', icon: Network, description: 'Cloud & API integrations' },
   deploy: { name: 'Deploy', icon: Rocket, description: 'App deployment' },
-  security: { name: 'Security', icon: Shield, description: 'Security analysis' },
+  security: { name: 'Security', icon: Shield, description: 'Security & threat analysis' },
+  auth: { name: 'Auth', icon: Fingerprint, description: 'Authentication & accounts' },
+  billing: { name: 'Billing', icon: Database, description: 'Subscriptions & payments' },
   schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' }
 };
 
@@ -946,7 +959,7 @@ export default function NexusAI() {
             {Object.entries(TOOLS).map(([key, tool]) => {
               const Icon = tool.icon;
               return (
-                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security'].includes(key)) setShowToolContent(true); }}>
+                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security', 'analytics', 'projects', 'connectors', 'auth', 'billing'].includes(key)) setShowToolContent(true); else setShowToolContent(false); }}>
                   <Icon size={18} />
                   <span>{tool.name}</span>
                 </button>
@@ -1101,6 +1114,60 @@ export default function NexusAI() {
                   </div>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Analytics Dashboard */}
+          {showToolContent && activeTool === 'analytics' && (
+            <div className="tool-content full-dashboard">
+              <Suspense fallback={<div style={{padding:32,color:'#888',textAlign:'center'}}>Loading Analytics...</div>}>
+                <AnalyticsDashboard />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Project Tracker */}
+          {showToolContent && activeTool === 'projects' && (
+            <div className="tool-content full-dashboard">
+              <Suspense fallback={<div style={{padding:32,color:'#888',textAlign:'center'}}>Loading Project Tracker...</div>}>
+                <ProjectTracker />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Connectors */}
+          {showToolContent && activeTool === 'connectors' && (
+            <div className="tool-content full-dashboard">
+              <Suspense fallback={<div style={{padding:32,color:'#888',textAlign:'center'}}>Loading Connectors...</div>}>
+                <ConnectorsDashboard />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Auth Dashboard */}
+          {showToolContent && activeTool === 'auth' && (
+            <div className="tool-content full-dashboard">
+              <Suspense fallback={<div style={{padding:32,color:'#888',textAlign:'center'}}>Loading Auth...</div>}>
+                <AuthDashboard />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Billing / Checkout */}
+          {showToolContent && activeTool === 'billing' && (
+            <div className="tool-content full-dashboard">
+              <Suspense fallback={<div style={{padding:32,color:'#888',textAlign:'center'}}>Loading Checkout...</div>}>
+                <CheckoutDashboard />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Enhanced Security Dashboard */}
+          {showToolContent && activeTool === 'security_enhanced' && (
+            <div className="tool-content full-dashboard">
+              <Suspense fallback={<div style={{padding:32,color:'#888',textAlign:'center'}}>Loading Security...</div>}>
+                <EnhancedSecurityDashboard />
+              </Suspense>
             </div>
           )}
 
@@ -1816,6 +1883,14 @@ export default function NexusAI() {
         .spin { animation: spin 1s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         
+        /* Full-height dashboard panels */
+        .full-dashboard {
+          flex: 1;
+          overflow-y: auto;
+          padding: 0;
+          background: var(--bg-2);
+        }
+
         /* Security Dashboard Styles */
         .security-dashboard {
           display: flex;

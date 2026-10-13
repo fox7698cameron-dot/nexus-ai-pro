@@ -15,6 +15,8 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 
 dotenv.config();
 
@@ -1096,6 +1098,241 @@ app.get('/api/templates/app', (req, res) => {
       { id: 'ai', name: 'AI Application', stack: 'Python/FastAPI' }
     ]
   });
+});
+
+// ================================================
+// ANALYTICS API — Social Media Dashboard
+// ================================================
+
+app.get('/api/analytics/platforms', (req, res) => {
+  const platforms = ['tiktok', 'instagram', 'facebook', 'twitch', 'discord', 'lemon8', 'reddit', 'redgifs'];
+  const data = {};
+  for (const p of platforms) {
+    data[p] = {
+      views: Math.floor(Math.random() * 5000000),
+      likes: Math.floor(Math.random() * 500000),
+      followers: Math.floor(Math.random() * 1000000),
+      engagement: (Math.random() * 10 + 2).toFixed(2),
+      reach: Math.floor(Math.random() * 8000000),
+      updatedAt: Date.now()
+    };
+  }
+  res.json({ success: true, data });
+});
+
+app.get('/api/analytics/:platform', (req, res) => {
+  const { platform } = req.params;
+  const { range = '7d' } = req.query;
+  res.json({
+    success: true,
+    platform,
+    range,
+    metrics: {
+      views: Math.floor(Math.random() * 5000000),
+      likes: Math.floor(Math.random() * 500000),
+      reach: Math.floor(Math.random() * 8000000),
+      retention: Math.floor(Math.random() * 40) + 40,
+      growth: (Math.random() * 20 - 5).toFixed(1)
+    },
+    timeseries: Array.from({ length: 14 }, (_, i) => ({
+      date: new Date(Date.now() - (13 - i) * 86400000).toISOString().split('T')[0],
+      views: Math.floor(Math.random() * 200000)
+    }))
+  });
+});
+
+// ================================================
+// AUTH API — User Registration, Login, 2FA
+// ================================================
+
+const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
+
+if (!JWT_SECRET || !JWT_REFRESH_SECRET) {
+  console.warn('[AUTH] JWT_SECRET and JWT_REFRESH_SECRET must be set in environment. Auth endpoints will be unavailable.');
+}
+
+const BCRYPT_ROUNDS = 14;
+const userStore = new Map();
+
+function requireAuth(req, res, next) {
+  const auth = req.headers['authorization'] || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+  if (!token) return res.status(401).json({ error: 'Authentication required' });
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch {
+    res.status(401).json({ error: 'Invalid or expired token' });
+  }
+}
+
+app.post('/api/auth/register', authLimiter, async (req, res) => {
+  if (!JWT_SECRET) return res.status(503).json({ error: 'Auth service unavailable' });
+
+  const { username, email, password, role = 'user', language = 'en' } = req.body;
+
+  if (!username || !email || !password) {
+    return res.status(400).json({ error: 'Username, email, and password are required' });
+  }
+
+  if (password.length < 13) {
+    return res.status(400).json({ error: 'Password must be at least 13 characters' });
+  }
+
+  const passwordPattern = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?~`]).{13,}$/;
+  if (!passwordPattern.test(password)) {
+    return res.status(400).json({ error: 'Password must include uppercase, lowercase, number, and special character' });
+  }
+
+  const allowedRoles = ['user', 'moderator', 'developer', 'admin'];
+  if (!allowedRoles.includes(role)) {
+    return res.status(400).json({ error: 'Invalid role' });
+  }
+
+  if (userStore.has(email.toLowerCase())) {
+    return res.status(409).json({ error: 'Email already registered' });
+  }
+
+  const userId = uuidv4();
+  const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+
+  userStore.set(email.toLowerCase(), {
+    id: userId,
+    username: username.normalize('NFC').trim(),
+    email: email.toLowerCase(),
+    passwordHash,
+    role,
+    language,
+    createdAt: Date.now(),
+    mfaEnabled: false
+  });
+
+  security.logAudit('USER_REGISTER', { userId, email: email.toLowerCase(), role });
+
+  const token = jwt.sign({ userId, role, email: email.toLowerCase() }, JWT_SECRET, { expiresIn: '1h' });
+  const refreshToken = jwt.sign({ userId }, JWT_REFRESH_SECRET, { expiresIn: '30d' });
+
+  res.status(201).json({ success: true, token, refreshToken, userId, role });
+});
+
+app.post('/api/auth/login', authLimiter, async (req, res) => {
+  if (!JWT_SECRET) return res.status(503).json({ error: 'Auth service unavailable' });
+
+  const { email, password } = req.body;
+  if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+
+  const user = userStore.get(email.toLowerCase());
+  if (!user) {
+    await new Promise(r => setTimeout(r, 200 + Math.random() * 100));
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
+
+  const valid = await bcrypt.compare(password, user.passwordHash);
+  if (!valid) {
+    security.logAudit('LOGIN_FAIL', { email: email.toLowerCase() });
+    await new Promise(r => setTimeout(r, 200 + Math.random() * 100));
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
+
+  security.logAudit('LOGIN_SUCCESS', { userId: user.id, role: user.role });
+
+  const token = jwt.sign({ userId: user.id, role: user.role, email: user.email }, JWT_SECRET, { expiresIn: '1h' });
+  const refreshToken = jwt.sign({ userId: user.id }, JWT_REFRESH_SECRET, { expiresIn: '30d' });
+
+  res.json({ success: true, token, refreshToken, role: user.role, username: user.username });
+});
+
+app.post('/api/auth/refresh', (req, res) => {
+  if (!JWT_REFRESH_SECRET) return res.status(503).json({ error: 'Auth service unavailable' });
+
+  const { refreshToken } = req.body;
+  if (!refreshToken) return res.status(400).json({ error: 'Refresh token required' });
+  try {
+    const payload = jwt.verify(refreshToken, JWT_REFRESH_SECRET);
+    const user = [...userStore.values()].find(u => u.id === payload.userId);
+    if (!user) return res.status(401).json({ error: 'User not found' });
+    const token = jwt.sign({ userId: user.id, role: user.role, email: user.email }, JWT_SECRET, { expiresIn: '1h' });
+    res.json({ success: true, token });
+  } catch {
+    res.status(401).json({ error: 'Invalid refresh token' });
+  }
+});
+
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  const user = [...userStore.values()].find(u => u.id === req.user.userId);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  const { passwordHash: _, ...safe } = user;
+  res.json({ success: true, user: safe });
+});
+
+// ================================================
+// PROJECT TRACKING API
+// ================================================
+
+const projectStore = new Map();
+
+app.post('/api/projects', requireAuth, (req, res) => {
+  const { name, type, engine, platform, language } = req.body;
+  if (!name || !type) return res.status(400).json({ error: 'Name and type required' });
+
+  const project = {
+    id: uuidv4(),
+    userId: req.user.userId,
+    name,
+    type,
+    engine: engine || null,
+    platform: platform || 'Multi-platform',
+    language: language || null,
+    progress: 0,
+    status: 'active',
+    commits: 0,
+    builds: 0,
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  };
+  projectStore.set(project.id, project);
+  res.status(201).json({ success: true, project });
+});
+
+app.get('/api/projects', requireAuth, (req, res) => {
+  const projects = [...projectStore.values()].filter(p => p.userId === req.user.userId);
+  res.json({ success: true, projects });
+});
+
+app.put('/api/projects/:id', requireAuth, (req, res) => {
+  const project = projectStore.get(req.params.id);
+  if (!project || project.userId !== req.user.userId) {
+    return res.status(404).json({ error: 'Project not found' });
+  }
+  const updates = req.body;
+  const forbidden = ['id', 'userId', 'createdAt'];
+  for (const k of forbidden) delete updates[k];
+  const updated = { ...project, ...updates, updatedAt: Date.now() };
+  projectStore.set(project.id, updated);
+  res.json({ success: true, project: updated });
+});
+
+// ================================================
+// CONNECTORS API
+// ================================================
+
+app.get('/api/connectors', (req, res) => {
+  const connectors = [
+    { key: 'azure', name: 'Microsoft Azure', category: 'cloud', status: 'available' },
+    { key: 'aws', name: 'Amazon Web Services', category: 'cloud', status: 'available' },
+    { key: 'google', name: 'Google Cloud', category: 'cloud', status: 'available' },
+    { key: 'github', name: 'GitHub', category: 'devtools', status: 'available' },
+    { key: 'slack', name: 'Slack', category: 'communication', status: 'available' },
+    { key: 'redis', name: 'Redis', category: 'database', status: 'available' }
+  ];
+  res.json({ success: true, connectors });
+});
+
+app.post('/api/connectors/:key/test', requireAuth, (req, res) => {
+  const { key } = req.params;
+  const latency = Math.floor(Math.random() * 60) + 10;
+  res.json({ success: true, connector: key, healthy: true, latency, testedAt: Date.now() });
 });
 
 // ================================================

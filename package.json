@@ -49,6 +49,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "stripe": "^14.0.0",
     "@capacitor/android": "^6.2.0",
     "@capacitor/app": "^6.0.1",
     "@capacitor/camera": "^6.1.0",
@@ -100,8 +101,12 @@
     "workbox-window": "^7.3.0"
   },
   "overrides": {
-    "esbuild": "^0.24.2",
-    "rollup": "^4.29.1"
+    "esbuild": "^0.25.0",
+    "rollup": "^4.29.1",
+    "tar": "^7.4.3",
+    "braces": "^3.0.3",
+    "micromatch": "^4.0.8",
+    "postcss-selector-parser": "^7.1.6"
   },
   "capacitor": {
     "appId": "com.cameronfox.nexusaipro",

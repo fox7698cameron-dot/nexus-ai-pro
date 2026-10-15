@@ -15,6 +15,12 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import { authRouter } from './src/routes/auth.js';
+import { paymentsRouter } from './src/routes/payments.js';
+import { analyticsRouter } from './src/routes/analytics.js';
+import { adminRouter } from './src/routes/admin.js';
+import { gamedevRouter } from './src/routes/gamedev.js';
+import { translateRouter } from './src/routes/translate.js';
 
 dotenv.config();
 
@@ -441,8 +447,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-flash';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +821,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -1097,6 +1103,16 @@ app.get('/api/templates/app', (req, res) => {
     ]
   });
 });
+
+// ================================================
+// FEATURE ROUTERS
+// ================================================
+app.use('/api/auth', authRouter);
+app.use('/api/payments', paymentsRouter);
+app.use('/api/analytics', analyticsRouter);
+app.use('/api/admin', adminRouter);
+app.use('/api/gamedev', gamedevRouter);
+app.use('/api/translate', translateRouter);
 
 // ================================================
 // WEBSOCKET HANDLING

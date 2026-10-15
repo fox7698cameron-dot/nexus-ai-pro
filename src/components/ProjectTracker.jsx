@@ -1,422 +1,316 @@
 // ProjectTracker.jsx | Nexus AI Pro | Created: 2026-10-15 | Project Tracking
+// Real-time coding project tracker with Kanban, CI/CD status, and platform integrations
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  GitBranch, CheckCircle, Circle, Clock, Users,
-  Activity, Play, Pause, Archive, RefreshCw,
-  AlertCircle, ChevronRight, Plus, Search,
-  Server, Globe, Cpu
+  GitBranch, Play, Check, Clock, AlertTriangle, Plus, RefreshCw,
+  Github, Globe, Cloud, Cpu, Users, Calendar, Tag, ChevronRight,
+  Archive, Pause, Rocket, Code, Box, Layers, Activity
 } from 'lucide-react';
 
-// ============================================
-// CONSTANTS
-// ============================================
+const STATUSES = Object.freeze({
+  TODO: 'todo',
+  IN_PROGRESS: 'in_progress',
+  DONE: 'done',
+});
 
-const PROJECT_STATUS = {
+const PROJECT_STATUS = Object.freeze({
   ACTIVE: 'active',
   PAUSED: 'paused',
   COMPLETED: 'completed',
-  ARCHIVED: 'archived'
+  ARCHIVED: 'archived',
+});
+
+const STATUS_COLORS = {
+  [PROJECT_STATUS.ACTIVE]: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
+  [PROJECT_STATUS.PAUSED]: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400',
+  [PROJECT_STATUS.COMPLETED]: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+  [PROJECT_STATUS.ARCHIVED]: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400',
 };
 
-const KANBAN_COLUMNS = [
-  { id: 'todo', label: 'To Do', color: 'text-gray-500' },
-  { id: 'inprogress', label: 'In Progress', color: 'text-blue-500' },
-  { id: 'done', label: 'Done', color: 'text-green-500' }
-];
-
-const CI_STATUS = {
-  PASSING: 'passing',
-  FAILING: 'failing',
-  RUNNING: 'running',
-  PENDING: 'pending'
+const BUILD_STATUS_ICONS = {
+  passing: { icon: <Check className="w-3 h-3" />, color: 'text-green-500', label: 'Passing' },
+  failing: { icon: <AlertTriangle className="w-3 h-3" />, color: 'text-red-500', label: 'Failing' },
+  building: { icon: <RefreshCw className="w-3 h-3 animate-spin" />, color: 'text-yellow-500', label: 'Building' },
+  unknown: { icon: <Clock className="w-3 h-3" />, color: 'text-gray-400', label: 'Unknown' },
 };
 
-// ============================================
-// MOCK DATA
-// ============================================
-
-const MOCK_PROJECTS = [
+const DEMO_PROJECTS = [
   {
     id: 'p1',
-    name: 'Nexus AI Pro',
-    description: 'Military-grade AI platform',
+    name: 'Nexus AI Core',
+    description: 'Multi-model AI platform backend',
     status: PROJECT_STATUS.ACTIVE,
-    stack: ['React', 'Node.js', 'Socket.io', 'Tailwind'],
-    vcs: { provider: 'github', url: 'github.com/cameronfox/nexus-ai-pro', connected: true },
-    ci: CI_STATUS.PASSING,
-    progress: 78,
-    timeTracked: '342h',
-    sprint: {
-      todo: [
-        { id: 't1', title: 'Add WebRTC video chat', priority: 'high' },
-        { id: 't2', title: 'iOS push notification fix', priority: 'medium' }
-      ],
-      inprogress: [
-        { id: 't3', title: 'Analytics dashboard v2', priority: 'high' },
-        { id: 't4', title: 'Auth biometrics', priority: 'medium' }
-      ],
-      done: [
-        { id: 't5', title: 'Payment integration', priority: 'high' },
-        { id: 't6', title: 'Security dashboard', priority: 'high' }
-      ]
+    stack: ['Node.js', 'React', 'PostgreSQL', 'Redis'],
+    buildStatus: 'passing',
+    progress: 68,
+    integration: 'github',
+    repo: 'fox7698cameron-dot/nexus-ai-pro',
+    team: 3,
+    dueDate: Date.now() + 86400000 * 20,
+    tasks: {
+      [STATUSES.TODO]: [{ id: 't1', title: 'Add Redis caching layer' }, { id: 't2', title: 'Write integration tests' }],
+      [STATUSES.IN_PROGRESS]: [{ id: 't3', title: 'Analytics dashboard' }, { id: 't4', title: 'Payment integration' }],
+      [STATUSES.DONE]: [{ id: 't5', title: 'Auth system' }, { id: 't6', title: 'Security dashboard' }],
     },
-    milestones: [
-      { name: 'MVP Launch', done: true, date: '2025-06-01' },
-      { name: 'v2.0 Release', done: true, date: '2026-01-15' },
-      { name: 'Mobile App', done: false, date: '2026-11-30' }
-    ],
-    team: ['CF', 'AJ', 'SR', 'ML', 'PW', 'GR']
   },
   {
     id: 'p2',
-    name: 'n8n Automation Studio',
-    description: 'Workflow automation engine',
+    name: 'Mobile App v2',
+    description: 'Cross-platform iOS/Android app',
     status: PROJECT_STATUS.ACTIVE,
-    stack: ['TypeScript', 'Vue.js', 'PostgreSQL'],
-    vcs: { provider: 'github', url: 'github.com/cameronfox/n8n-studio', connected: true },
-    ci: CI_STATUS.RUNNING,
-    progress: 45,
-    timeTracked: '128h',
-    sprint: {
-      todo: [
-        { id: 't7', title: 'Webhook trigger nodes', priority: 'high' },
-        { id: 't8', title: 'Scheduled cron jobs', priority: 'medium' }
-      ],
-      inprogress: [
-        { id: 't9', title: 'Visual canvas editor', priority: 'high' }
-      ],
-      done: [
-        { id: 't10', title: 'Core node library', priority: 'high' }
-      ]
+    stack: ['React Native', 'TypeScript', 'Capacitor'],
+    buildStatus: 'building',
+    progress: 34,
+    integration: 'bitbucket',
+    repo: 'nexus/mobile-v2',
+    team: 2,
+    dueDate: Date.now() + 86400000 * 45,
+    tasks: {
+      [STATUSES.TODO]: [{ id: 't7', title: 'Biometric auth' }, { id: 't8', title: 'Push notifications' }, { id: 't9', title: 'Offline mode' }],
+      [STATUSES.IN_PROGRESS]: [{ id: 't10', title: 'UI component library' }],
+      [STATUSES.DONE]: [{ id: 't11', title: 'Project setup' }],
     },
-    milestones: [
-      { name: 'Alpha Release', done: true, date: '2026-07-01' },
-      { name: 'Beta Launch', done: false, date: '2026-12-15' }
-    ],
-    team: ['CF', 'SR']
   },
   {
     id: 'p3',
-    name: 'Avatar Creator SDK',
-    description: '3D avatar generation toolkit',
+    name: 'Data Pipeline',
+    description: 'ETL pipeline for analytics',
     status: PROJECT_STATUS.PAUSED,
-    stack: ['Three.js', 'WebGL', 'WASM'],
-    vcs: { provider: 'bitbucket', url: 'bitbucket.org/cameronfox/avatar-sdk', connected: true },
-    ci: CI_STATUS.PENDING,
-    progress: 30,
-    timeTracked: '67h',
-    sprint: {
-      todo: [
-        { id: 't11', title: 'Cloth simulation', priority: 'low' }
-      ],
-      inprogress: [],
-      done: [
-        { id: 't12', title: 'Base mesh generator', priority: 'high' }
-      ]
+    stack: ['Python', 'Apache Spark', 'AWS'],
+    buildStatus: 'failing',
+    progress: 51,
+    integration: 'azure',
+    repo: 'nexus/data-pipeline',
+    team: 1,
+    dueDate: Date.now() + 86400000 * 10,
+    tasks: {
+      [STATUSES.TODO]: [{ id: 't12', title: 'Fix memory leak' }],
+      [STATUSES.IN_PROGRESS]: [],
+      [STATUSES.DONE]: [{ id: 't13', title: 'Schema design' }, { id: 't14', title: 'Source connectors' }],
     },
-    milestones: [
-      { name: 'Proof of Concept', done: true, date: '2026-04-01' },
-      { name: 'SDK v1.0', done: false, date: '2027-02-01' }
-    ],
-    team: ['AJ', 'GR']
   },
-  {
-    id: 'p4',
-    name: 'DevOps Pipeline CLI',
-    description: 'CI/CD tooling for teams',
-    status: PROJECT_STATUS.COMPLETED,
-    stack: ['Go', 'Docker', 'K8s'],
-    vcs: { provider: 'azure', url: 'dev.azure.com/cameronfox/devops-cli', connected: false },
-    ci: CI_STATUS.PASSING,
-    progress: 100,
-    timeTracked: '211h',
-    sprint: {
-      todo: [],
-      inprogress: [],
-      done: [
-        { id: 't13', title: 'All milestones complete', priority: 'high' }
-      ]
-    },
-    milestones: [
-      { name: 'v1.0 Released', done: true, date: '2026-09-01' }
-    ],
-    team: ['CF', 'ML']
-  }
 ];
 
-// ============================================
-// HELPERS
-// ============================================
+const INTEGRATION_ICONS = {
+  github: <Github className="w-4 h-4" />,
+  bitbucket: <GitBranch className="w-4 h-4" />,
+  azure: <Cloud className="w-4 h-4" />,
+};
 
-function statusColor(status) {
-  switch (status) {
-    case PROJECT_STATUS.ACTIVE: return 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400';
-    case PROJECT_STATUS.PAUSED: return 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400';
-    case PROJECT_STATUS.COMPLETED: return 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400';
-    case PROJECT_STATUS.ARCHIVED: return 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400';
-    default: return 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400';
+/** @param {{ userId?: string }} props */
+export default function ProjectTracker({ userId }) {
+  const [projects, setProjects] = useState(DEMO_PROJECTS);
+  const [selectedProject, setSelectedProject] = useState(null);
+  const [filterStatus, setFilterStatus] = useState('');
+  const [view, setView] = useState('cards'); // 'cards' | 'kanban'
+  const [newTask, setNewTask] = useState({ title: '', status: STATUSES.TODO });
+  const [loading, setLoading] = useState(false);
+  const [draggedTask, setDraggedTask] = useState(null);
+
+  const filtered = projects.filter(p => !filterStatus || p.status === filterStatus);
+  const active = selectedProject ? projects.find(p => p.id === selectedProject) : null;
+
+  const moveTask = useCallback((projectId, taskId, fromStatus, toStatus) => {
+    setProjects(prev => prev.map(p => {
+      if (p.id !== projectId) return p;
+      const task = p.tasks[fromStatus].find(t => t.id === taskId);
+      if (!task) return p;
+      return {
+        ...p,
+        tasks: {
+          ...p.tasks,
+          [fromStatus]: p.tasks[fromStatus].filter(t => t.id !== taskId),
+          [toStatus]: [...p.tasks[toStatus], task],
+        },
+        progress: calculateProgress({ ...p, tasks: { ...p.tasks, [fromStatus]: p.tasks[fromStatus].filter(t => t.id !== taskId), [toStatus]: [...p.tasks[toStatus], task] } }),
+      };
+    }));
+  }, []);
+
+  function calculateProgress(project) {
+    const total = Object.values(project.tasks).flat().length;
+    const done = project.tasks[STATUSES.DONE].length;
+    return total === 0 ? 0 : Math.round((done / total) * 100);
   }
-}
 
-function statusIcon(status) {
-  switch (status) {
-    case PROJECT_STATUS.ACTIVE: return <Play size={10} />;
-    case PROJECT_STATUS.PAUSED: return <Pause size={10} />;
-    case PROJECT_STATUS.COMPLETED: return <CheckCircle size={10} />;
-    case PROJECT_STATUS.ARCHIVED: return <Archive size={10} />;
-    default: return <Circle size={10} />;
-  }
-}
-
-function ciStatusBadge(status) {
-  switch (status) {
-    case CI_STATUS.PASSING:
-      return <span className="flex items-center gap-1 text-xs text-green-500"><CheckCircle size={10} /> Passing</span>;
-    case CI_STATUS.FAILING:
-      return <span className="flex items-center gap-1 text-xs text-red-500"><AlertCircle size={10} /> Failing</span>;
-    case CI_STATUS.RUNNING:
-      return <span className="flex items-center gap-1 text-xs text-blue-500 animate-pulse"><RefreshCw size={10} className="animate-spin" /> Running</span>;
-    default:
-      return <span className="flex items-center gap-1 text-xs text-gray-400"><Circle size={10} /> Pending</span>;
-  }
-}
-
-function vcsIcon(provider) {
-  switch (provider) {
-    case 'github': return <span className="text-xs font-mono text-gray-500">GH</span>;
-    case 'bitbucket': return <span className="text-xs font-mono text-blue-400">BB</span>;
-    case 'azure': return <span className="text-xs font-mono text-blue-500">AZ</span>;
-    default: return <GitBranch size={12} />;
-  }
-}
-
-function priorityColor(p) {
-  switch (p) {
-    case 'high': return 'border-l-red-400';
-    case 'medium': return 'border-l-yellow-400';
-    default: return 'border-l-gray-300';
-  }
-}
-
-// ============================================
-// SUB-COMPONENTS
-// ============================================
-
-/**
- * @param {{ task: object }} props
- */
-function KanbanCard({ task }) {
-  return (
-    <div className={`bg-white dark:bg-gray-700 rounded-lg p-2.5 shadow-sm border-l-4 ${priorityColor(task.priority)} cursor-default`}>
-      <p className="text-xs text-gray-800 dark:text-gray-200">{task.title}</p>
-      <span className={`text-xs mt-1 block capitalize ${
-        task.priority === 'high' ? 'text-red-400' : task.priority === 'medium' ? 'text-yellow-400' : 'text-gray-400'
-      }`}>{task.priority}</span>
-    </div>
-  );
-}
-
-/**
- * @param {{ project: object }} props
- */
-function ProjectCard({ project }) {
-  const [showKanban, setShowKanban] = useState(false);
+  const addTask = useCallback((projectId) => {
+    if (!newTask.title.trim()) return;
+    const task = { id: `t-${Date.now()}`, title: newTask.title.trim() };
+    setProjects(prev => prev.map(p => {
+      if (p.id !== projectId) return p;
+      return { ...p, tasks: { ...p.tasks, [newTask.status]: [...p.tasks[newTask.status], task] } };
+    }));
+    setNewTask({ title: '', status: STATUSES.TODO });
+  }, [newTask]);
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
-      <div className="p-4">
-        {/* Header */}
-        <div className="flex items-start justify-between mb-2">
-          <div>
-            <h3 className="font-semibold text-gray-900 dark:text-white">{project.name}</h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{project.description}</p>
-          </div>
-          <span className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium capitalize ${statusColor(project.status)}`}>
-            {statusIcon(project.status)} {project.status}
-          </span>
-        </div>
-
-        {/* Tech stack */}
-        <div className="flex flex-wrap gap-1 mb-3">
-          {project.stack.map(s => (
-            <span key={s} className="text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400">
-              {s}
-            </span>
-          ))}
-        </div>
-
-        {/* Progress bar */}
-        <div className="mb-3">
-          <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
-            <span>Progress</span>
-            <span>{project.progress}%</span>
-          </div>
-          <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-blue-500 rounded-full transition-all"
-              style={{ width: `${project.progress}%` }}
-            />
-          </div>
-        </div>
-
-        {/* VCS + CI row */}
-        <div className="flex items-center gap-3 mb-3 text-xs">
-          <div className="flex items-center gap-1">
-            {vcsIcon(project.vcs.provider)}
-            <span className={project.vcs.connected ? 'text-green-500' : 'text-gray-400'}>
-              {project.vcs.connected ? 'Connected' : 'Disconnected'}
-            </span>
-          </div>
-          <span className="text-gray-300 dark:text-gray-600">·</span>
-          {ciStatusBadge(project.ci)}
-          <span className="ml-auto flex items-center gap-1 text-gray-500 dark:text-gray-400">
-            <Clock size={10} /> {project.timeTracked}
-          </span>
-        </div>
-
-        {/* Milestones */}
-        <div className="mb-3">
-          {project.milestones.map((m, i) => (
-            <div key={i} className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
-              {m.done
-                ? <CheckCircle size={10} className="text-green-500" />
-                : <Circle size={10} className="text-gray-400" />}
-              <span className={m.done ? 'line-through' : ''}>{m.name}</span>
-              <span className="ml-auto text-gray-400">{m.date}</span>
-            </div>
-          ))}
-        </div>
-
-        {/* Team avatars */}
-        <div className="flex items-center justify-between">
-          <div className="flex -space-x-1.5">
-            {project.team.slice(0, 5).map((m, i) => (
-              <div key={i} className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold border-2 border-white dark:border-gray-800" title={m}>
-                {m[0]}
-              </div>
-            ))}
-            {project.team.length > 5 && (
-              <div className="w-6 h-6 rounded-full bg-gray-400 flex items-center justify-center text-white text-xs border-2 border-white dark:border-gray-800">
-                +{project.team.length - 5}
-              </div>
-            )}
-          </div>
-          <button
-            onClick={() => setShowKanban(v => !v)}
-            className="flex items-center gap-1 text-xs text-blue-500 hover:text-blue-600 transition-colors"
-          >
-            Sprint Board
-            <ChevronRight size={12} className={`transition-transform ${showKanban ? 'rotate-90' : ''}`} />
-          </button>
-        </div>
-      </div>
-
-      {/* Kanban board */}
-      {showKanban && (
-        <div className="border-t border-gray-100 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-700/30">
-          <div className="grid grid-cols-3 gap-3">
-            {KANBAN_COLUMNS.map(col => {
-              const tasks = project.sprint[col.id] || [];
-              return (
-                <div key={col.id}>
-                  <h4 className={`text-xs font-semibold mb-2 ${col.color}`}>
-                    {col.label} ({tasks.length})
-                  </h4>
-                  <div className="space-y-2 min-h-8">
-                    {tasks.map(task => (
-                      <KanbanCard key={task.id} task={task} />
-                    ))}
-                    {tasks.length === 0 && (
-                      <div className="text-xs text-gray-400 italic">Empty</div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ============================================
-// MAIN COMPONENT
-// ============================================
-
-/**
- * ProjectTracker — real-time coding project tracking with kanban sprint boards
- * @param {{ className?: string }} props
- */
-export default function ProjectTracker({ className = '' }) {
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-
-  const filtered = MOCK_PROJECTS.filter(p => {
-    const matchSearch = !search || p.name.toLowerCase().includes(search.toLowerCase());
-    const matchStatus = statusFilter === 'all' || p.status === statusFilter;
-    return matchSearch && matchStatus;
-  });
-
-  const activeCount = MOCK_PROJECTS.filter(p => p.status === PROJECT_STATUS.ACTIVE).length;
-
-  return (
-    <div className={`min-h-screen bg-gray-50 dark:bg-gray-900 p-4 sm:p-6 ${className}`}>
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-            <GitBranch className="text-blue-500" size={24} />
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+      <div className="max-w-7xl mx-auto p-4 md:p-6">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-3">
+          <h1 className="text-2xl font-bold flex items-center gap-2">
+            <Code className="w-6 h-6 text-blue-500" />
             Project Tracker
           </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            {activeCount} active · {MOCK_PROJECTS.length} total projects
-          </p>
-        </div>
-
-        <button className="flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors">
-          <Plus size={14} /> New Project
-        </button>
-      </div>
-
-      {/* Filter bar */}
-      <div className="flex flex-wrap gap-3 mb-6">
-        <div className="relative flex-1 min-w-48">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search projects…"
-            className="w-full pl-8 pr-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
-          />
-        </div>
-        <div className="flex bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-1 gap-1">
-          {['all', ...Object.values(PROJECT_STATUS)].map(s => (
-            <button
-              key={s}
-              onClick={() => setStatusFilter(s)}
-              className={`px-3 py-1 rounded-md text-xs font-medium capitalize transition-colors ${
-                statusFilter === s
-                  ? 'bg-blue-500 text-white'
-                  : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-              }`}
+          <div className="flex gap-2 flex-wrap">
+            <select
+              value={filterStatus}
+              onChange={e => setFilterStatus(e.target.value)}
+              className="text-sm px-3 py-1.5 border rounded-lg dark:bg-gray-800 dark:border-gray-600"
             >
-              {s}
-            </button>
-          ))}
+              <option value="">All Status</option>
+              {Object.values(PROJECT_STATUS).map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
+            </select>
+            <div className="flex border rounded-lg overflow-hidden dark:border-gray-600">
+              {['cards', 'kanban'].map(v => (
+                <button
+                  key={v}
+                  onClick={() => setView(v)}
+                  className={`px-3 py-1.5 text-sm ${view === v ? 'bg-blue-500 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300'}`}
+                >
+                  {v === 'cards' ? <Layers className="w-4 h-4" /> : <Box className="w-4 h-4" />}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
-      </div>
 
-      {/* Project grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {filtered.map(p => (
-          <ProjectCard key={p.id} project={p} />
-        ))}
-        {filtered.length === 0 && (
-          <div className="col-span-2 text-center py-12 text-gray-400">
-            No projects match your filters.
+        {view === 'cards' && !selectedProject && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filtered.map(project => (
+              <div
+                key={project.id}
+                onClick={() => setSelectedProject(project.id)}
+                className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-sm cursor-pointer hover:shadow-md transition-shadow border border-transparent hover:border-blue-500/30"
+              >
+                <div className="flex justify-between items-start mb-2">
+                  <h3 className="font-semibold">{project.name}</h3>
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[project.status]}`}>
+                    {project.status.replace('_', ' ')}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500 mb-3">{project.description}</p>
+                <div className="flex flex-wrap gap-1 mb-3">
+                  {project.stack.slice(0, 3).map(tech => (
+                    <span key={tech} className="text-xs px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-gray-600 dark:text-gray-300">
+                      {tech}
+                    </span>
+                  ))}
+                  {project.stack.length > 3 && <span className="text-xs text-gray-400">+{project.stack.length - 3}</span>}
+                </div>
+                <div className="mb-3">
+                  <div className="flex justify-between text-xs mb-1">
+                    <span>Progress</span><span>{project.progress}%</span>
+                  </div>
+                  <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
+                    <div className="bg-blue-500 h-1.5 rounded-full transition-all" style={{ width: `${project.progress}%` }} />
+                  </div>
+                </div>
+                <div className="flex items-center justify-between text-xs text-gray-400">
+                  <div className={`flex items-center gap-1 ${BUILD_STATUS_ICONS[project.buildStatus]?.color}`}>
+                    {BUILD_STATUS_ICONS[project.buildStatus]?.icon}
+                    CI: {BUILD_STATUS_ICONS[project.buildStatus]?.label}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {INTEGRATION_ICONS[project.integration]}
+                    <span>{project.repo}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {(view === 'kanban' || selectedProject) && active && (
+          <div>
+            <div className="flex items-center gap-2 mb-4">
+              <button
+                onClick={() => setSelectedProject(null)}
+                className="text-sm text-blue-500 hover:text-blue-600 flex items-center gap-1"
+              >
+                ← Back
+              </button>
+              <span className="text-gray-400">/</span>
+              <span className="font-medium">{active.name}</span>
+              <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[active.status]}`}>
+                {active.status.replace('_', ' ')}
+              </span>
+            </div>
+
+            {/* Task input */}
+            <div className="flex gap-2 mb-4">
+              <input
+                type="text"
+                placeholder="Add new task..."
+                value={newTask.title}
+                onChange={e => setNewTask(prev => ({ ...prev, title: e.target.value }))}
+                onKeyDown={e => e.key === 'Enter' && addTask(active.id)}
+                className="flex-1 text-sm px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600"
+              />
+              <select
+                value={newTask.status}
+                onChange={e => setNewTask(prev => ({ ...prev, status: e.target.value }))}
+                className="text-sm px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-600"
+              >
+                <option value={STATUSES.TODO}>To Do</option>
+                <option value={STATUSES.IN_PROGRESS}>In Progress</option>
+                <option value={STATUSES.DONE}>Done</option>
+              </select>
+              <button
+                onClick={() => addTask(active.id)}
+                className="px-3 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Kanban columns */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {Object.entries({ 'To Do': STATUSES.TODO, 'In Progress': STATUSES.IN_PROGRESS, 'Done': STATUSES.DONE }).map(([label, status]) => (
+                <div key={status} className="bg-gray-100 dark:bg-gray-800 rounded-xl p-3">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-medium text-sm">{label}</h3>
+                    <span className="text-xs bg-white dark:bg-gray-700 px-2 py-0.5 rounded-full">
+                      {active.tasks[status].length}
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {active.tasks[status].map(task => (
+                      <div key={task.id} className="bg-white dark:bg-gray-700 rounded-lg p-3 shadow-sm">
+                        <p className="text-sm">{task.title}</p>
+                        <div className="flex gap-1 mt-2">
+                          {status !== STATUSES.TODO && (
+                            <button
+                              onClick={() => moveTask(active.id, task.id, status, status === STATUSES.IN_PROGRESS ? STATUSES.TODO : STATUSES.IN_PROGRESS)}
+                              className="text-xs text-gray-400 hover:text-gray-600"
+                            >
+                              ←
+                            </button>
+                          )}
+                          {status !== STATUSES.DONE && (
+                            <button
+                              onClick={() => moveTask(active.id, task.id, status, status === STATUSES.TODO ? STATUSES.IN_PROGRESS : STATUSES.DONE)}
+                              className="text-xs text-blue-400 hover:text-blue-600 ml-auto"
+                            >
+                              →
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {view === 'kanban' && !selectedProject && (
+          <div className="text-center py-12 text-gray-400">
+            <p>Select a project from Cards view to see its Kanban board</p>
+            <button onClick={() => setView('cards')} className="mt-2 text-blue-500 hover:text-blue-600 text-sm">
+              Switch to Cards
+            </button>
           </div>
         )}
       </div>

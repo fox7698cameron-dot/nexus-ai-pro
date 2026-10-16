@@ -5,6 +5,12 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { securityService } from './src/security-service.js';
 import {
+  AuthSystem, DashboardRouter,
+  AnalyticsDashboard, SecurityDashboardFull,
+  PaymentCheckout, CloudConnectors,
+  checkPassword, ROLES,
+} from './src/components/index.js';
+import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
   Settings, Menu, X, Plus, Trash2, Download, Upload,
   Brain, Sparkles, Zap, Globe, Bot, MessageSquare,
@@ -85,7 +91,7 @@ const SUBSCRIPTION_TIERS = {
     color: 'from-purple-400 to-pink-600',
     textColor: 'text-purple-700',
     bgColor: 'bg-purple-50',
-    models: Object.keys(AI_MODELS),
+    models: [],  // all models; populated lazily from AI_MODELS keys
     features: ['Everything in Pro', 'Custom models', 'API access', 'Dedicated support', 'SLA guarantee'],
     badge: '👑',
     reasoningTime: '🔬 Expert',
@@ -462,6 +468,10 @@ const TOOLS = {
   automation: { name: 'Automation', icon: Workflow, description: 'N8N-style workflows' },
   deploy: { name: 'Deploy', icon: Rocket, description: 'App deployment' },
   security: { name: 'Security', icon: Shield, description: 'Security analysis' },
+  analytics: { name: 'Analytics', icon: BarChart3, description: 'Social & project analytics' },
+  payments: { name: 'Payments', icon: TrendingUp, description: 'Checkout & subscriptions' },
+  connectors: { name: 'Connectors', icon: Cloud, description: 'Cloud & game connectors' },
+  dashboard: { name: 'Dashboard', icon: User, description: 'Role-based dashboard' },
   schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' }
 };
 
@@ -598,6 +608,10 @@ const WORKFLOW_NODES = {
 // MAIN APP COMPONENT
 // ============================================
 export default function NexusAI() {
+  // Auth state
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+
   // State
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -841,6 +855,19 @@ export default function NexusAI() {
     return groups;
   }, []);
 
+  const handleLogin = (user) => {
+    setCurrentUser(user);
+    setIsAuthenticated(true);
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <AuthSystem
+        onAuthChange={(user) => { if (user) handleLogin(user); }}
+      />
+    );
+  }
+
   return (
     <div className="nexus-app">
       {/* Header */}
@@ -864,7 +891,7 @@ export default function NexusAI() {
 
         <div className="header-center">
           <button className="model-selector-btn" onClick={() => setIsModelSelectorOpen(!isModelSelectorOpen)}>
-            <span className="model-icon">{AI_MODELS[selectedModel]?.icon}</span>
+            <span className="model-icon">{AI_MODELS[selectedModel]?.emoji}</span>
             <span className="model-name">{AI_MODELS[selectedModel]?.name}</span>
             <ChevronDown size={16} className={isModelSelectorOpen ? 'rotated' : ''} />
           </button>
@@ -885,7 +912,7 @@ export default function NexusAI() {
                         className={`model-option ${selectedModel === model.key ? 'active' : ''}`}
                         onClick={() => { setSelectedModel(model.key); setIsModelSelectorOpen(false); }}
                       >
-                        <span className="model-emoji">{model.icon}</span>
+                        <span className="model-emoji">{model.emoji}</span>
                         <div className="model-info">
                           <span className="model-name">{model.name}</span>
                           <span className="model-provider">{model.provider}</span>
@@ -915,7 +942,8 @@ export default function NexusAI() {
           <button className="icon-btn" onClick={() => setIsMemoryOpen(!isMemoryOpen)}><Brain size={20} /></button>
           <button className="icon-btn" onClick={() => setIsCallActive(true)}><Phone size={20} /></button>
           <button className="icon-btn" onClick={() => setIsSettingsOpen(true)}><Settings size={20} /></button>
-          <div className="user-avatar">{userAvatar?.emoji || '≡ƒæñ'}</div>
+          <div className="user-avatar" title={currentUser?.username || 'User'}>{userAvatar?.emoji || '👤'}</div>
+          <button className="icon-btn logout-btn" title="Sign out" onClick={() => { setIsAuthenticated(false); setCurrentUser(null); }}><X size={18} /></button>
         </div>
       </header>
 
@@ -946,7 +974,7 @@ export default function NexusAI() {
             {Object.entries(TOOLS).map(([key, tool]) => {
               const Icon = tool.icon;
               return (
-                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security'].includes(key)) setShowToolContent(true); }}>
+                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security', 'analytics', 'payments', 'connectors', 'dashboard'].includes(key)) setShowToolContent(true); else setShowToolContent(false); }}>
                   <Icon size={18} />
                   <span>{tool.name}</span>
                 </button>
@@ -988,119 +1016,47 @@ export default function NexusAI() {
                   <button key={key} className={`template-card ${appTemplate === key ? 'active' : ''}`} onClick={() => setAppTemplate(key)}>
                     <span className="template-icon">{t.icon}</span>
                     <span className="template-name">{t.name}</span>
-                    <span className="template-meta">{t.stack}</span>
+                    <span className="template-meta">{t.language}</span>
                   </button>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Security Dashboard */}
+          {/* Security panel is now handled by SecurityDashboardFull above */}
+
+          {/* Analytics Panel */}
+          {showToolContent && activeTool === 'analytics' && (
+            <div className="tool-content full-panel">
+              <AnalyticsDashboard user={currentUser} />
+            </div>
+          )}
+
+          {/* Payments Panel */}
+          {showToolContent && activeTool === 'payments' && (
+            <div className="tool-content full-panel">
+              <PaymentCheckout user={currentUser} />
+            </div>
+          )}
+
+          {/* Connectors Panel */}
+          {showToolContent && activeTool === 'connectors' && (
+            <div className="tool-content full-panel">
+              <CloudConnectors user={currentUser} />
+            </div>
+          )}
+
+          {/* Role Dashboard Panel */}
+          {showToolContent && activeTool === 'dashboard' && (
+            <div className="tool-content full-panel">
+              <DashboardRouter user={currentUser || { role: 'user' }} />
+            </div>
+          )}
+
+          {/* Full Security Dashboard Panel */}
           {showToolContent && activeTool === 'security' && (
-            <div className="tool-content security-dashboard">
-              <div className="panel-header">
-                <ShieldCheck size={18} />
-                <h3>Security Dashboard</h3>
-              </div>
-              
-              <div className="security-grid">
-                {/* Overall Score */}
-                <div className="security-card score-card">
-                  <div className="score-circle">
-                    <div className="score-value">{securityScan.overallScore}</div>
-                    <div className="score-label">Security Score</div>
-                  </div>
-                  <div className="score-status">
-                    <div className="status-item">
-                      <ShieldCheck size={16} style={{ color: '#10b981' }} />
-                      <span>Encryption: {securityScan.encryptionStatus.toUpperCase()}</span>
-                    </div>
-                    <div className="status-item">
-                      <Lock size={16} style={{ color: '#3b82f6' }} />
-                      <span>AES-256-GCM Active</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Scan Button */}
-                <div className="security-card action-card">
-                  <button 
-                    className={`scan-btn ${securityScan.isScanning ? 'scanning' : ''}`}
-                    onClick={runSecurityScan}
-                    disabled={securityScan.isScanning}
-                  >
-                    {securityScan.isScanning ? (
-                      <>
-                        <Loader2 size={18} className="spin" />
-                        Scanning...
-                      </>
-                    ) : (
-                      <>
-                        <Zap size={18} />
-                        Run Full Scan
-                      </>
-                    )}
-                  </button>
-                  {securityScan.lastScanTime && (
-                    <div className="scan-time">
-                      Last scan: {new Date(securityScan.lastScanTime).toLocaleTimeString()}
-                    </div>
-                  )}
-                </div>
-
-                {/* Vulnerabilities */}
-                <div className="security-card vulnerabilities-card">
-                  <h4><AlertTriangle size={16} /> Vulnerabilities</h4>
-                  <div className="vuln-list">
-                    {securityScan.vulnerabilities.length > 0 ? (
-                      securityScan.vulnerabilities.map(vuln => (
-                        <div key={vuln.id} className={`vuln-item severity-${vuln.severity} status-${vuln.status}`}>
-                          <div className="vuln-header">
-                            <span className={`severity-badge ${vuln.severity}`}>{vuln.severity.toUpperCase()}</span>
-                            <span className="vuln-name">{vuln.name}</span>
-                            <span className={`status-badge ${vuln.status}`}>{vuln.status.toUpperCase()}</span>
-                          </div>
-                          <div className="vuln-desc">{vuln.description}</div>
-                          {vuln.status !== 'patched' && (
-                            <button 
-                              className="patch-btn"
-                              onClick={() => patchVulnerability(vuln.id)}
-                            >
-                              <Wrench size={14} /> Patch Now
-                            </button>
-                          )}
-                        </div>
-                      ))
-                    ) : (
-                      <div className="empty-state">No vulnerabilities detected</div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Threats */}
-                <div className="security-card threats-card">
-                  <h4><Network size={16} /> Recent Threats</h4>
-                  <div className="threat-list">
-                    {securityScan.threats.length > 0 ? (
-                      securityScan.threats.map((threat, idx) => (
-                        <div key={idx} className={`threat-item status-${threat.status}`}>
-                          <div className="threat-status">
-                            {threat.status === 'blocked' && <ShieldAlert size={16} style={{ color: '#ef4444' }} />}
-                            {threat.status === 'prevented' && <ShieldCheck size={16} style={{ color: '#10b981' }} />}
-                            {threat.status === 'filtered' && <Eye size={16} style={{ color: '#f59e0b' }} />}
-                          </div>
-                          <div className="threat-info">
-                            <div className="threat-type">{threat.type}</div>
-                            <div className="threat-time">{threat.status.toUpperCase()} ΓÇó {new Date(threat.timestamp).toLocaleTimeString()}</div>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="empty-state">No threats detected</div>
-                    )}
-                  </div>
-                </div>
-              </div>
+            <div className="tool-content full-panel">
+              <SecurityDashboardFull user={currentUser} />
             </div>
           )}
 
@@ -1113,14 +1069,14 @@ export default function NexusAI() {
                 <p>Military-grade encrypted AI ΓÇó 40+ Models</p>
                 <div className="model-badges">
                   {Object.entries(AI_MODELS).slice(0, 12).map(([key, m]) => (
-                    <span key={key} className="badge" onClick={() => setSelectedModel(key)}>{m.icon} {m.name}</span>
+                    <span key={key} className="badge" onClick={() => setSelectedModel(key)}>{m.emoji} {m.name}</span>
                   ))}
                 </div>
               </div>
             ) : (
               messages.map(msg => (
                 <div key={msg.id} className={`message ${msg.role}`}>
-                  <div className="message-avatar">{msg.role === 'user' ? userAvatar?.emoji : AI_MODELS[msg.model]?.icon || '≡ƒñû'}</div>
+                  <div className="message-avatar">{msg.role === 'user' ? userAvatar?.emoji : AI_MODELS[msg.model]?.emoji || '🤖'}</div>
                   <div className="message-body">
                     <div className="message-header">
                       <span className="sender">{msg.role === 'user' ? 'You' : AI_MODELS[msg.model]?.name}</span>
@@ -1134,7 +1090,7 @@ export default function NexusAI() {
             )}
             {isLoading && (
               <div className="message assistant">
-                <div className="message-avatar">{AI_MODELS[selectedModel]?.icon}</div>
+                <div className="message-avatar">{AI_MODELS[selectedModel]?.emoji}</div>
                 <div className="message-body">
                   <div className="typing"><span></span><span></span><span></span></div>
                 </div>
@@ -1163,7 +1119,7 @@ export default function NexusAI() {
               </button>
             </div>
             <div className="input-footer">
-              <span className="model-tag">{AI_MODELS[selectedModel]?.icon} {AI_MODELS[selectedModel]?.name}</span>
+              <span className="model-tag">{AI_MODELS[selectedModel]?.emoji} {AI_MODELS[selectedModel]?.name}</span>
               <span className="tool-tag">{TOOLS[activeTool]?.name}</span>
               <span className="secure"><Lock size={12} /> End-to-end encrypted</span>
             </div>
@@ -1230,7 +1186,7 @@ export default function NexusAI() {
       {isCallActive && (
         <div className="call-overlay">
           <div className="call-panel">
-            <div className="call-avatar">{AI_MODELS[selectedModel]?.icon}</div>
+            <div className="call-avatar">{AI_MODELS[selectedModel]?.emoji}</div>
             <h3>Speaking with {AI_MODELS[selectedModel]?.name}</h3>
             <div className="call-actions">
               <button className="end-call" onClick={() => setIsCallActive(false)}><PhoneOff size={24} /></button>
@@ -1254,6 +1210,12 @@ export default function NexusAI() {
           --text-3: #666666;
           --border: #2a2a2a;
           --accent: #888888;
+
+          /* AuthSystem / sub-component CSS vars */
+          --fg: #ffffff;
+          --fg-muted: #a0a0a0;
+          --card: #111111;
+          --input: #1a1a1a;
           
           /* Bold Gradient Colors */
           --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f472b6 100%);
@@ -1398,7 +1360,7 @@ export default function NexusAI() {
         }
         .model-selector-btn:hover { border-color: var(--accent); }
         .model-selector-btn svg.rotated { transform: rotate(180deg); }
-        .model-emoji { font-size: 1.2rem; }
+        .model-emoji, .model-icon { font-size: 1.2rem; }
         
         .model-dropdown {
           position: absolute;
@@ -2136,11 +2098,26 @@ export default function NexusAI() {
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
         
+        /* Full panel (analytics, payments, connectors, dashboard, security) */
+        .full-panel {
+          flex: 1;
+          overflow-y: auto;
+          padding: 0;
+          background: var(--bg-1);
+          border-bottom: none;
+          max-height: calc(100vh - 120px);
+        }
+
+        /* Logout */
+        .logout-btn { color: #ef4444 !important; }
+        .logout-btn:hover { background: rgba(239,68,68,0.1) !important; }
+
         @media (max-width: 768px) {
           .sidebar { position: fixed; z-index: 500; height: calc(100vh - 60px); top: 60px; left: 0; }
           .memory-panel { position: fixed; z-index: 500; height: calc(100vh - 60px); top: 60px; right: 0; }
           .tool-btn span { display: none; }
           .model-dropdown { width: 300px; left: 0; transform: none; }
+          .full-panel { max-height: calc(100vh - 100px); }
         }
 
         /* Accessibility: larger tap areas */

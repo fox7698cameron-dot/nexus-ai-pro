@@ -8,6 +8,8 @@
  * Form factors: desktop, mobile, tablet
  */
 
+import { useState, useEffect } from 'react';
+
 // ── Platform detection ────────────────────────────────────────────────────────
 export const PLATFORMS = {
   WEB:      'web',
@@ -85,8 +87,8 @@ export const BREAKPOINTS = {
 
 export function useResponsive() {
   if (typeof window === 'undefined') return { width: 1280, isMobile: false, isTablet: false, isDesktop: true };
-  const [width, setWidth] = React.useState(window.innerWidth);
-  React.useEffect(() => {
+  const [width, setWidth] = useState(window.innerWidth);
+  useEffect(() => {
     const handler = () => setWidth(window.innerWidth);
     window.addEventListener('resize', handler, { passive: true });
     return () => window.removeEventListener('resize', handler);

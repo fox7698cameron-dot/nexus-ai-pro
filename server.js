@@ -1,6 +1,8 @@
 // ================================================
 // NEXUS AI PRO - Enhanced Backend Server
 // Military-Grade Security & Multi-Model AI Platform
+// © 2025-2026 Cameron Fox. All rights reserved.
+// Updated: 2026-10-17
 // ================================================
 
 import express from 'express';
@@ -15,6 +17,12 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+
+// Route modules
+import authRouter from './src/routes/auth.js';
+import analyticsRouter from './src/routes/analytics.js';
+import gamedevRouter from './src/routes/gamedev.js';
+import paymentsRouter from './src/routes/payments.js';
 
 dotenv.config();
 
@@ -441,8 +449,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-pro';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +823,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -874,7 +882,7 @@ app.get('/api/security/dashboard', async (req, res) => {
   try {
     const status = security.getSecurityStatus();
     const recentLogs = security.auditLog.slice(-10);
-    const threatsSummary = recentLogs.filter(l => l.type.includes('THREAT') || l.type.includes('ATTACK'));
+    const threatsSummary = recentLogs.filter(l => (l.event || '').includes('THREAT') || (l.event || '').includes('ATTACK'));
     
     res.json({
       overallScore: status.securityScore || 92,
@@ -887,7 +895,7 @@ app.get('/api/security/dashboard', async (req, res) => {
         { id: 3, name: 'TLS/SSL Configuration', severity: 'high', status: 'resolved' }
       ],
       threats: threatsSummary.slice(0, 5).map(log => ({
-        type: log.type,
+        type: log.event,
         status: 'blocked',
         timestamp: log.timestamp
       })),
@@ -901,7 +909,7 @@ app.get('/api/security/dashboard', async (req, res) => {
 // Security alerts endpoint
 app.get('/api/security/alerts', (req, res) => {
   const alerts = security.auditLog
-    .filter(l => l.type.includes('ERROR') || l.type.includes('THREAT') || l.type.includes('ATTACK'))
+    .filter(l => (l.event || '').includes('ERROR') || (l.event || '').includes('THREAT') || (l.event || '').includes('ATTACK'))
     .slice(-20);
   
   res.json({
@@ -1065,6 +1073,41 @@ app.post('/api/upload', upload.array('files', 10), (req, res) => {
   });
   res.json({ files });
 });
+
+// ================================================
+// MOUNTED ROUTE MODULES
+// ================================================
+app.use('/api/auth', authRouter);
+app.use('/api/analytics', analyticsRouter);
+app.use('/api/gamedev', gamedevRouter);
+app.use('/api/payments/webhook', express.raw({ type: 'application/json' }), paymentsRouter);
+app.use('/api/payments', paymentsRouter);
+
+// Real-time analytics via WebSocket
+io.on('connection', (socket) => {
+  socket.on('analytics:subscribe', ({ platform }) => {
+    socket.join(`analytics:${platform}`);
+    // Emit initial mock data
+    const mockMetrics = { platform, views: Math.floor(Math.random() * 100000), timestamp: Date.now() };
+    socket.emit('analytics:update', mockMetrics);
+  });
+  socket.on('analytics:unsubscribe', ({ platform }) => {
+    socket.leave(`analytics:${platform}`);
+  });
+});
+
+// Broadcast real-time analytics updates every 30s
+setInterval(() => {
+  const platforms = ['tiktok', 'instagram', 'facebook', 'twitch', 'discord', 'lemon8', 'reddit', 'redgifs'];
+  for (const platform of platforms) {
+    io.to(`analytics:${platform}`).emit('analytics:update', {
+      platform,
+      views: Math.floor(Math.random() * 1000),
+      likes: Math.floor(Math.random() * 100),
+      timestamp: Date.now()
+    });
+  }
+}, 30000);
 
 // Game dev templates
 app.get('/api/templates/game', (req, res) => {

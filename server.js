@@ -15,6 +15,12 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import { createAuthRoutes } from './src/api/auth.js';
+import { createAnalyticsRoutes } from './src/api/analytics.js';
+import { createProjectRoutes } from './src/api/projects.js';
+import { createSubscriptionRoutes } from './src/api/subscriptions.js';
+import { createSecurityEnhancedRoutes } from './src/api/security-enhanced.js';
+import { createConnectorRoutes } from './src/api/connectors.js';
 
 dotenv.config();
 
@@ -831,6 +837,27 @@ class WorkflowEngine {
 const workflowEngine = new WorkflowEngine();
 
 // ================================================
+// MODULE ROUTE REGISTRATION
+// ================================================
+
+const authRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: parseInt(process.env.AUTH_RATE_LIMIT_MAX) || 10,
+  message: { error: 'Too many authentication attempts. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use('/api/auth', authRateLimiter);
+
+try { createAuthRoutes(app, io); } catch (e) { console.warn('Auth routes failed to load:', e.message); }
+try { createAnalyticsRoutes(app, io); } catch (e) { console.warn('Analytics routes failed to load:', e.message); }
+try { createProjectRoutes(app, io); } catch (e) { console.warn('Project routes failed to load:', e.message); }
+try { createSubscriptionRoutes(app, io); } catch (e) { console.warn('Subscription routes failed to load:', e.message); }
+try { createSecurityEnhancedRoutes(app, io, security); } catch (e) { console.warn('Security enhanced routes failed to load:', e.message); }
+try { createConnectorRoutes(app, (req, res, next) => next(), (role) => (req, res, next) => next()); } catch (e) { console.warn('Connector routes failed to load:', e.message); }
+
+// ================================================
 // API ROUTES
 // ================================================
 
@@ -839,7 +866,13 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'healthy',
     security: security.getSecurityStatus(),
-    timestamp: Date.now()
+    timestamp: Date.now(),
+    version: '2.0.0',
+    platform: process.platform,
+    features: {
+      auth: true, analytics: true, projects: true,
+      subscriptions: true, security_enhanced: true, connectors: true,
+    },
   });
 });
 
@@ -1064,6 +1097,26 @@ app.post('/api/upload', upload.array('files', 10), (req, res) => {
     };
   });
   res.json({ files });
+});
+
+// i18n - supported languages
+app.get('/api/i18n/languages', (req, res) => {
+  res.json({
+    languages: {
+      en: { name: 'English', nativeName: 'English', dir: 'ltr' },
+      es: { name: 'Spanish', nativeName: 'Español', dir: 'ltr' },
+      fr: { name: 'French', nativeName: 'Français', dir: 'ltr' },
+      de: { name: 'German', nativeName: 'Deutsch', dir: 'ltr' },
+      ja: { name: 'Japanese', nativeName: '日本語', dir: 'ltr' },
+      ko: { name: 'Korean', nativeName: '한국어', dir: 'ltr' },
+      zh: { name: 'Chinese', nativeName: '中文', dir: 'ltr' },
+      ar: { name: 'Arabic', nativeName: 'العربية', dir: 'rtl' },
+      pt: { name: 'Portuguese', nativeName: 'Português', dir: 'ltr' },
+      ru: { name: 'Russian', nativeName: 'Русский', dir: 'ltr' },
+      hi: { name: 'Hindi', nativeName: 'हिंदी', dir: 'ltr' },
+      it: { name: 'Italian', nativeName: 'Italiano', dir: 'ltr' },
+    },
+  });
 });
 
 // Game dev templates

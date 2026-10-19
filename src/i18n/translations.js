@@ -1,0 +1,438 @@
+// src/i18n/translations.js
+// Created: 2026-10-19
+// Multi-language and regional support with auto-translate stubs
+
+export const SUPPORTED_LANGUAGES = {
+  en: { name: 'English', nativeName: 'English', dir: 'ltr', locale: 'en-US' },
+  es: { name: 'Spanish', nativeName: 'Español', dir: 'ltr', locale: 'es-ES' },
+  fr: { name: 'French', nativeName: 'Français', dir: 'ltr', locale: 'fr-FR' },
+  de: { name: 'German', nativeName: 'Deutsch', dir: 'ltr', locale: 'de-DE' },
+  ja: { name: 'Japanese', nativeName: '日本語', dir: 'ltr', locale: 'ja-JP' },
+  ko: { name: 'Korean', nativeName: '한국어', dir: 'ltr', locale: 'ko-KR' },
+  zh: { name: 'Chinese', nativeName: '中文', dir: 'ltr', locale: 'zh-CN' },
+  ar: { name: 'Arabic', nativeName: 'العربية', dir: 'rtl', locale: 'ar-SA' },
+  pt: { name: 'Portuguese', nativeName: 'Português', dir: 'ltr', locale: 'pt-BR' },
+  ru: { name: 'Russian', nativeName: 'Русский', dir: 'ltr', locale: 'ru-RU' },
+  hi: { name: 'Hindi', nativeName: 'हिंदी', dir: 'ltr', locale: 'hi-IN' },
+  it: { name: 'Italian', nativeName: 'Italiano', dir: 'ltr', locale: 'it-IT' },
+};
+
+export const translations = {
+  en: {
+    auth: {
+      login: 'Sign In',
+      register: 'Create Account',
+      logout: 'Sign Out',
+      email: 'Email Address',
+      password: 'Password',
+      confirmPassword: 'Confirm Password',
+      username: 'Username',
+      forgotPassword: 'Forgot Password?',
+      rememberMe: 'Remember Me',
+      noAccount: "Don't have an account?",
+      hasAccount: 'Already have an account?',
+      mfaTitle: 'Two-Factor Authentication',
+      mfaCode: 'Enter 6-digit code',
+      biometricPrompt: 'Use biometric authentication',
+      passwordStrength: 'Password Strength',
+      passwordWeak: 'Weak',
+      passwordFair: 'Fair',
+      passwordStrong: 'Strong',
+      passwordVeryStrong: 'Very Strong',
+      passwordRequirements: 'Minimum 13 characters, uppercase, lowercase, number, special character',
+    },
+    analytics: {
+      title: 'Analytics Dashboard',
+      totalFollowers: 'Total Followers',
+      totalReach: 'Total Reach',
+      impressions: 'Impressions',
+      engagementRate: 'Engagement Rate',
+      viewRetention: 'View Retention',
+      likes: 'Likes',
+      shares: 'Shares',
+      comments: 'Comments',
+      realtime: 'Real-Time',
+      connected: 'Connected',
+      disconnected: 'Disconnected',
+    },
+    security: {
+      title: 'Security Dashboard',
+      score: 'Security Score',
+      threats: 'Active Threats',
+      scan: 'Run Scan',
+      scanning: 'Scanning...',
+      noThreats: 'No active threats detected',
+      encryption: 'Encryption Status',
+      auditLog: 'Audit Log',
+      network: 'Network Monitor',
+      exportLog: 'Export Log',
+    },
+    projects: {
+      title: 'Project Dashboard',
+      newProject: 'New Project',
+      type: 'Project Type',
+      status: 'Status',
+      progress: 'Progress',
+      lastUpdated: 'Last Updated',
+      coding: 'Coding',
+      gameDev: 'Game Development',
+      arvr: 'AR/VR',
+      modeling3d: '3D Modeling',
+    },
+    subscription: {
+      title: 'Subscription',
+      currentPlan: 'Current Plan',
+      upgrade: 'Upgrade',
+      downgrade: 'Downgrade',
+      cancel: 'Cancel Subscription',
+      paymentMethod: 'Payment Method',
+      billingHistory: 'Billing History',
+      cryptoPayment: 'Pay with Crypto',
+      giftCard: 'Redeem Gift Card',
+    },
+    admin: {
+      title: 'Admin Dashboard',
+      users: 'User Management',
+      developers: 'Developer Panel',
+      moderators: 'Moderator Panel',
+      system: 'System Status',
+      connectors: 'Connector Management',
+    },
+    common: {
+      save: 'Save',
+      cancel: 'Cancel',
+      delete: 'Delete',
+      edit: 'Edit',
+      close: 'Close',
+      confirm: 'Confirm',
+      loading: 'Loading...',
+      error: 'Error',
+      success: 'Success',
+      warning: 'Warning',
+      info: 'Information',
+      export: 'Export',
+      import: 'Import',
+      configure: 'Configure',
+      refresh: 'Refresh',
+      search: 'Search',
+      filter: 'Filter',
+      sort: 'Sort',
+      noData: 'No data available',
+    },
+  },
+  es: {
+    auth: {
+      login: 'Iniciar Sesión',
+      register: 'Crear Cuenta',
+      logout: 'Cerrar Sesión',
+      email: 'Correo Electrónico',
+      password: 'Contraseña',
+      confirmPassword: 'Confirmar Contraseña',
+      username: 'Nombre de Usuario',
+      forgotPassword: '¿Olvidaste tu contraseña?',
+      rememberMe: 'Recordarme',
+      noAccount: '¿No tienes una cuenta?',
+      hasAccount: '¿Ya tienes una cuenta?',
+      mfaTitle: 'Autenticación de Dos Factores',
+      mfaCode: 'Ingresa el código de 6 dígitos',
+      biometricPrompt: 'Usar autenticación biométrica',
+      passwordStrength: 'Fortaleza de Contraseña',
+      passwordWeak: 'Débil',
+      passwordFair: 'Regular',
+      passwordStrong: 'Fuerte',
+      passwordVeryStrong: 'Muy Fuerte',
+      passwordRequirements: 'Mínimo 13 caracteres, mayúscula, minúscula, número, carácter especial',
+    },
+    analytics: {
+      title: 'Panel de Análisis',
+      totalFollowers: 'Total de Seguidores',
+      totalReach: 'Alcance Total',
+      impressions: 'Impresiones',
+      engagementRate: 'Tasa de Engagement',
+      viewRetention: 'Retención de Vistas',
+      likes: 'Me Gusta',
+      shares: 'Compartidos',
+      comments: 'Comentarios',
+      realtime: 'Tiempo Real',
+      connected: 'Conectado',
+      disconnected: 'Desconectado',
+    },
+    security: {
+      title: 'Panel de Seguridad',
+      score: 'Puntuación de Seguridad',
+      threats: 'Amenazas Activas',
+      scan: 'Ejecutar Escaneo',
+      scanning: 'Escaneando...',
+      noThreats: 'No se detectaron amenazas activas',
+      encryption: 'Estado de Cifrado',
+      auditLog: 'Registro de Auditoría',
+      network: 'Monitor de Red',
+      exportLog: 'Exportar Registro',
+    },
+    projects: {
+      title: 'Panel de Proyectos',
+      newProject: 'Nuevo Proyecto',
+      type: 'Tipo de Proyecto',
+      status: 'Estado',
+      progress: 'Progreso',
+      lastUpdated: 'Última Actualización',
+      coding: 'Programación',
+      gameDev: 'Desarrollo de Juegos',
+      arvr: 'AR/VR',
+      modeling3d: 'Modelado 3D',
+    },
+    subscription: {
+      title: 'Suscripción',
+      currentPlan: 'Plan Actual',
+      upgrade: 'Mejorar',
+      downgrade: 'Degradar',
+      cancel: 'Cancelar Suscripción',
+      paymentMethod: 'Método de Pago',
+      billingHistory: 'Historial de Facturación',
+      cryptoPayment: 'Pagar con Cripto',
+      giftCard: 'Canjear Tarjeta de Regalo',
+    },
+    admin: {
+      title: 'Panel de Administración',
+      users: 'Gestión de Usuarios',
+      developers: 'Panel de Desarrolladores',
+      moderators: 'Panel de Moderadores',
+      system: 'Estado del Sistema',
+      connectors: 'Gestión de Conectores',
+    },
+    common: {
+      save: 'Guardar',
+      cancel: 'Cancelar',
+      delete: 'Eliminar',
+      edit: 'Editar',
+      close: 'Cerrar',
+      confirm: 'Confirmar',
+      loading: 'Cargando...',
+      error: 'Error',
+      success: 'Éxito',
+      warning: 'Advertencia',
+      info: 'Información',
+      export: 'Exportar',
+      import: 'Importar',
+      configure: 'Configurar',
+      refresh: 'Actualizar',
+      search: 'Buscar',
+      filter: 'Filtrar',
+      sort: 'Ordenar',
+      noData: 'No hay datos disponibles',
+    },
+  },
+  fr: {
+    auth: {
+      login: 'Se Connecter',
+      register: 'Créer un Compte',
+      logout: 'Se Déconnecter',
+      email: 'Adresse Email',
+      password: 'Mot de Passe',
+      confirmPassword: 'Confirmer le Mot de Passe',
+      username: "Nom d'Utilisateur",
+      forgotPassword: 'Mot de passe oublié?',
+      rememberMe: 'Se Souvenir de Moi',
+      noAccount: "Vous n'avez pas de compte?",
+      hasAccount: 'Vous avez déjà un compte?',
+      mfaTitle: 'Authentification à Deux Facteurs',
+      mfaCode: 'Entrez le code à 6 chiffres',
+      biometricPrompt: "Utiliser l'authentification biométrique",
+      passwordStrength: 'Force du Mot de Passe',
+      passwordWeak: 'Faible',
+      passwordFair: 'Moyen',
+      passwordStrong: 'Fort',
+      passwordVeryStrong: 'Très Fort',
+      passwordRequirements: 'Minimum 13 caractères, majuscule, minuscule, chiffre, caractère spécial',
+    },
+    common: {
+      save: 'Enregistrer', cancel: 'Annuler', delete: 'Supprimer', edit: 'Modifier',
+      close: 'Fermer', confirm: 'Confirmer', loading: 'Chargement...', error: 'Erreur',
+      success: 'Succès', warning: 'Avertissement', info: 'Information',
+      export: 'Exporter', import: 'Importer', configure: 'Configurer',
+      refresh: 'Actualiser', search: 'Rechercher', filter: 'Filtrer', sort: 'Trier',
+      noData: 'Aucune donnée disponible',
+    },
+  },
+  de: {
+    auth: {
+      login: 'Anmelden',
+      register: 'Konto Erstellen',
+      logout: 'Abmelden',
+      email: 'E-Mail-Adresse',
+      password: 'Passwort',
+      confirmPassword: 'Passwort Bestätigen',
+      username: 'Benutzername',
+      forgotPassword: 'Passwort Vergessen?',
+      rememberMe: 'Angemeldet Bleiben',
+      noAccount: 'Kein Konto vorhanden?',
+      hasAccount: 'Bereits ein Konto?',
+      mfaTitle: 'Zwei-Faktor-Authentifizierung',
+      mfaCode: '6-stelligen Code eingeben',
+      biometricPrompt: 'Biometrische Authentifizierung verwenden',
+      passwordStrength: 'Passwortstärke',
+      passwordWeak: 'Schwach',
+      passwordFair: 'Mäßig',
+      passwordStrong: 'Stark',
+      passwordVeryStrong: 'Sehr Stark',
+      passwordRequirements: 'Mindestens 13 Zeichen, Großbuchstabe, Kleinbuchstabe, Zahl, Sonderzeichen',
+    },
+    common: {
+      save: 'Speichern', cancel: 'Abbrechen', delete: 'Löschen', edit: 'Bearbeiten',
+      close: 'Schließen', confirm: 'Bestätigen', loading: 'Wird geladen...', error: 'Fehler',
+      success: 'Erfolg', warning: 'Warnung', info: 'Information',
+      export: 'Exportieren', import: 'Importieren', configure: 'Konfigurieren',
+      refresh: 'Aktualisieren', search: 'Suchen', filter: 'Filtern', sort: 'Sortieren',
+      noData: 'Keine Daten verfügbar',
+    },
+  },
+  ja: {
+    auth: {
+      login: 'ログイン',
+      register: 'アカウント作成',
+      logout: 'ログアウト',
+      email: 'メールアドレス',
+      password: 'パスワード',
+      confirmPassword: 'パスワード確認',
+      username: 'ユーザー名',
+      forgotPassword: 'パスワードを忘れた方',
+      rememberMe: 'ログイン状態を保持',
+      noAccount: 'アカウントをお持ちでない方',
+      hasAccount: 'すでにアカウントをお持ちの方',
+      mfaTitle: '二要素認証',
+      mfaCode: '6桁のコードを入力',
+      biometricPrompt: '生体認証を使用',
+      passwordStrength: 'パスワード強度',
+      passwordWeak: '弱い',
+      passwordFair: '普通',
+      passwordStrong: '強い',
+      passwordVeryStrong: '非常に強い',
+      passwordRequirements: '最低13文字、大文字・小文字・数字・特殊文字を含む',
+    },
+    common: {
+      save: '保存', cancel: 'キャンセル', delete: '削除', edit: '編集',
+      close: '閉じる', confirm: '確認', loading: '読み込み中...', error: 'エラー',
+      success: '成功', warning: '警告', info: '情報',
+      export: 'エクスポート', import: 'インポート', configure: '設定',
+      refresh: '更新', search: '検索', filter: 'フィルター', sort: '並び替え',
+      noData: 'データがありません',
+    },
+  },
+  ko: {
+    auth: {
+      login: '로그인',
+      register: '계정 만들기',
+      logout: '로그아웃',
+      email: '이메일 주소',
+      password: '비밀번호',
+      confirmPassword: '비밀번호 확인',
+      username: '사용자 이름',
+      forgotPassword: '비밀번호를 잊으셨나요?',
+      rememberMe: '로그인 상태 유지',
+      noAccount: '계정이 없으신가요?',
+      hasAccount: '이미 계정이 있으신가요?',
+      mfaTitle: '이중 인증',
+      mfaCode: '6자리 코드 입력',
+      biometricPrompt: '생체 인증 사용',
+      passwordStrength: '비밀번호 강도',
+      passwordWeak: '약함',
+      passwordFair: '보통',
+      passwordStrong: '강함',
+      passwordVeryStrong: '매우 강함',
+      passwordRequirements: '최소 13자, 대문자, 소문자, 숫자, 특수문자 포함',
+    },
+    common: {
+      save: '저장', cancel: '취소', delete: '삭제', edit: '편집',
+      close: '닫기', confirm: '확인', loading: '로딩 중...', error: '오류',
+      success: '성공', warning: '경고', info: '정보',
+      export: '내보내기', import: '가져오기', configure: '구성',
+      refresh: '새로고침', search: '검색', filter: '필터', sort: '정렬',
+      noData: '사용 가능한 데이터 없음',
+    },
+  },
+  zh: {
+    auth: {
+      login: '登录',
+      register: '创建账户',
+      logout: '退出登录',
+      email: '电子邮件',
+      password: '密码',
+      confirmPassword: '确认密码',
+      username: '用户名',
+      forgotPassword: '忘记密码？',
+      rememberMe: '记住我',
+      noAccount: '没有账户？',
+      hasAccount: '已有账户？',
+      mfaTitle: '双因素认证',
+      mfaCode: '输入6位验证码',
+      biometricPrompt: '使用生物识别认证',
+      passwordStrength: '密码强度',
+      passwordWeak: '弱',
+      passwordFair: '中',
+      passwordStrong: '强',
+      passwordVeryStrong: '非常强',
+      passwordRequirements: '最少13个字符，含大写字母、小写字母、数字、特殊字符',
+    },
+    common: {
+      save: '保存', cancel: '取消', delete: '删除', edit: '编辑',
+      close: '关闭', confirm: '确认', loading: '加载中...', error: '错误',
+      success: '成功', warning: '警告', info: '信息',
+      export: '导出', import: '导入', configure: '配置',
+      refresh: '刷新', search: '搜索', filter: '筛选', sort: '排序',
+      noData: '暂无数据',
+    },
+  },
+};
+
+export function getTranslation(lang, key) {
+  const parts = key.split('.');
+  let current = translations[lang] || translations.en;
+  for (const part of parts) {
+    if (current === undefined) return key;
+    current = current[part];
+  }
+  return current || key;
+}
+
+export function detectBrowserLanguage() {
+  const lang = navigator.language?.split('-')[0] || 'en';
+  return SUPPORTED_LANGUAGES[lang] ? lang : 'en';
+}
+
+export function formatCurrency(amount, currencyCode, locale) {
+  try {
+    return new Intl.NumberFormat(locale || 'en-US', {
+      style: 'currency',
+      currency: currencyCode || 'USD',
+    }).format(amount);
+  } catch {
+    return `${currencyCode} ${amount}`;
+  }
+}
+
+export function formatDate(timestamp, lang) {
+  const locale = SUPPORTED_LANGUAGES[lang]?.locale || 'en-US';
+  try {
+    return new Intl.DateTimeFormat(locale, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(timestamp));
+  } catch {
+    return new Date(timestamp).toISOString();
+  }
+}
+
+export function getTextDirection(lang) {
+  return SUPPORTED_LANGUAGES[lang]?.dir || 'ltr';
+}
+
+export async function autoTranslate(text, targetLang, sourceLang = 'en') {
+  if (targetLang === sourceLang || !text) return text;
+  if (translations[targetLang]) return text;
+  return text;
+}
+
+export default translations;

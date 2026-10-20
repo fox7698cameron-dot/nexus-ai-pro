@@ -3,6 +3,8 @@
 // Military-Grade Security & Multi-Model AI Platform
 // ================================================
 
+// File: server.js
+// Updated: 2026-10-20
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -15,6 +17,11 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import { registerAuthRoutes } from './src/server/routes/auth.js';
+import { registerAnalyticsRoutes } from './src/server/routes/analytics.js';
+import { registerGameDevRoutes } from './src/server/routes/gamedev.js';
+import { registerPaymentRoutes } from './src/server/routes/payments.js';
+import { registerEnhancedSecurityRoutes } from './src/server/routes/security-enhanced.js';
 
 dotenv.config();
 
@@ -441,8 +448,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-pro';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +822,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -1097,6 +1104,15 @@ app.get('/api/templates/app', (req, res) => {
     ]
   });
 });
+
+// ================================================
+// REGISTER EXTENDED ROUTES
+// ================================================
+registerAuthRoutes(app, security);
+registerAnalyticsRoutes(app, security);
+registerGameDevRoutes(app, security);
+registerPaymentRoutes(app, security);
+registerEnhancedSecurityRoutes(app, security);
 
 // ================================================
 // WEBSOCKET HANDLING

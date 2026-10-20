@@ -1,8 +1,13 @@
-/* app.jsx
-   Updated: make UI more responsive for mobile/desktop, persist model selection, chats, memories, settings,
-   ensure AES-256 label present, and small responsive CSS tweaks.
-*/
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+// File: app.jsx
+// Updated: 2026-10-20
+// Main application shell with analytics, security, game dev, auth, payment dashboards
+import React, { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react';
+
+const AnalyticsDashboard = lazy(() => import('./src/components/AnalyticsDashboard.jsx'));
+const SecurityDashboard = lazy(() => import('./src/components/SecurityDashboard.jsx'));
+const GameDevDashboard = lazy(() => import('./src/components/GameDevDashboard.jsx'));
+const AuthModal = lazy(() => import('./src/components/AuthModal.jsx'));
+const PaymentModal = lazy(() => import('./src/components/PaymentModal.jsx'));
 import { securityService } from './src/security-service.js';
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
@@ -458,8 +463,11 @@ const TOOLS = {
   image: { name: 'Image Gen', icon: ImagePlus, description: 'AI image generation' },
   video: { name: 'Video Gen', icon: Clapperboard, description: 'AI video creation' },
   gamedev: { name: 'Game Dev', icon: Gamepad2, description: 'Game development suite' },
+  'gamedev-full': { name: 'Game Tracker', icon: Gamepad2, description: 'Full game dev dashboard' },
   appdev: { name: 'App Dev', icon: Smartphone, description: 'Application development' },
   automation: { name: 'Automation', icon: Workflow, description: 'N8N-style workflows' },
+  analytics: { name: 'Analytics', icon: BarChart3, description: 'Social media analytics' },
+  'security-full': { name: 'Security+', icon: ShieldCheck, description: 'Enhanced security dashboard' },
   deploy: { name: 'Deploy', icon: Rocket, description: 'App deployment' },
   security: { name: 'Security', icon: Shield, description: 'Security analysis' },
   schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' }
@@ -615,6 +623,9 @@ export default function NexusAI() {
   const [gameTemplate, setGameTemplate] = useState(null);
   const [appTemplate, setAppTemplate] = useState(null);
   const [showToolContent, setShowToolContent] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
 
   // Security Dashboard State
   const [securityScan, setSecurityScan] = useState({
@@ -946,7 +957,7 @@ export default function NexusAI() {
             {Object.entries(TOOLS).map(([key, tool]) => {
               const Icon = tool.icon;
               return (
-                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security'].includes(key)) setShowToolContent(true); }}>
+                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'gamedev-full', 'appdev', 'automation', 'security', 'security-full', 'analytics'].includes(key)) setShowToolContent(true); else setShowToolContent(false); }}>
                   <Icon size={18} />
                   <span>{tool.name}</span>
                 </button>
@@ -1102,6 +1113,47 @@ export default function NexusAI() {
                 </div>
               </div>
             </div>
+          )}
+
+          {/* Analytics Dashboard */}
+          {showToolContent && activeTool === 'analytics' && (
+            <div className="tool-content" style={{ flex: 1, overflow: 'auto' }}>
+              <Suspense fallback={<div style={{ padding: 40, textAlign: 'center' }}>Loading Analytics...</div>}>
+                <AnalyticsDashboard />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Enhanced Security Dashboard */}
+          {showToolContent && activeTool === 'security-full' && (
+            <div className="tool-content" style={{ flex: 1, overflow: 'auto' }}>
+              <Suspense fallback={<div style={{ padding: 40, textAlign: 'center' }}>Loading Security Dashboard...</div>}>
+                <SecurityDashboard />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Game Dev Dashboard */}
+          {showToolContent && activeTool === 'gamedev-full' && (
+            <div className="tool-content" style={{ flex: 1, overflow: 'auto' }}>
+              <Suspense fallback={<div style={{ padding: 40, textAlign: 'center' }}>Loading Game Dev Dashboard...</div>}>
+                <GameDevDashboard />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Auth Modal */}
+          {showAuthModal && (
+            <Suspense fallback={null}>
+              <AuthModal onClose={() => setShowAuthModal(false)} onSuccess={(user) => { setCurrentUser(user); setShowAuthModal(false); }} />
+            </Suspense>
+          )}
+
+          {/* Payment Modal */}
+          {showPaymentModal && (
+            <Suspense fallback={null}>
+              <PaymentModal onClose={() => setShowPaymentModal(false)} currentTier={currentUser?.tier || 'free'} />
+            </Suspense>
           )}
 
           {/* Messages */}

@@ -441,8 +441,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-pro';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -1095,6 +1094,194 @@ app.get('/api/templates/app', (req, res) => {
       { id: 'ecommerce', name: 'E-Commerce', stack: 'Shopify/Custom' },
       { id: 'ai', name: 'AI Application', stack: 'Python/FastAPI' }
     ]
+  });
+});
+
+// ================================================
+// ANALYTICS ENDPOINTS (social media metrics)
+// ================================================
+
+app.get('/api/analytics/platforms', (req, res) => {
+  res.json({
+    platforms: ['tiktok', 'instagram', 'facebook', 'twitch', 'discord', 'lemon8', 'reddit', 'redgifs'],
+    supportedMetrics: ['views', 'likes', 'reach', 'retention', 'followers', 'shares', 'comments'],
+  });
+});
+
+app.post('/api/analytics/connect', (req, res) => {
+  const { platform } = req.body;
+  const ALLOWED_PLATFORMS = ['tiktok', 'instagram', 'facebook', 'twitch', 'discord', 'lemon8', 'reddit', 'redgifs'];
+  if (!platform || !ALLOWED_PLATFORMS.includes(platform)) {
+    return res.status(400).json({ error: 'Invalid platform' });
+  }
+  // OAuth token would be handled here - never log the raw token
+  security.logAudit('PLATFORM_CONNECT', { platform, userId: req.headers['x-user-id'] || 'anonymous' });
+  res.json({ success: true, platform, connected: true });
+});
+
+// ================================================
+// AUTH ENDPOINTS
+// ================================================
+
+app.post('/api/auth/register', authLimiter, async (req, res) => {
+  const { email, username, password, role } = req.body;
+  if (!email || !username || !password) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+  // Password policy: 13+ chars
+  if (typeof password !== 'string' || password.length < 13) {
+    return res.status(400).json({ error: 'Password must be at least 13 characters' });
+  }
+  const SAFE_ROLES = ['user', 'dev'];
+  const assignedRole = SAFE_ROLES.includes(role) ? role : 'user';
+
+  try {
+    const bcryptjs = await import('bcryptjs');
+    const passwordHash = await bcryptjs.default.hash(password, 14);
+    const userId = uuidv4();
+    const userData = { id: userId, email, username, role: assignedRole, passwordHash, createdAt: Date.now() };
+    dataService.store('users', userId, userData);
+    security.logAudit('USER_REGISTERED', { userId, email, role: assignedRole });
+    res.json({ success: true, userId, role: assignedRole });
+  } catch (err) {
+    res.status(500).json({ error: 'Registration failed' });
+  }
+});
+
+app.post('/api/auth/login', authLimiter, async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Missing credentials' });
+  }
+  const threats = security.detectThreat(req);
+  if (threats.length > 0) {
+    return res.status(403).json({ error: 'Request blocked' });
+  }
+  // Demo auth - in production, look up user from database
+  security.logAudit('LOGIN_ATTEMPT', { email });
+  res.json({ success: true, requiresMFA: true, message: 'MFA verification required' });
+});
+
+app.post('/api/auth/mfa/verify', authLimiter, async (req, res) => {
+  const { code, method } = req.body;
+  if (!code || typeof code !== 'string' || code.length !== 6 || !/^\d{6}$/.test(code)) {
+    return res.status(400).json({ error: 'Invalid MFA code format' });
+  }
+  const ALLOWED_METHODS = ['totp', 'sms', 'email'];
+  if (!ALLOWED_METHODS.includes(method)) {
+    return res.status(400).json({ error: 'Invalid MFA method' });
+  }
+  // TOTP verification would use speakeasy/otplib in production
+  const jwtMod = await import('jsonwebtoken').catch(() => null);
+  const jwtLib = jwtMod?.default;
+  const jwtSecret = process.env.JWT_SECRET;
+  const token = (jwtLib && jwtSecret)
+    ? jwtLib.sign({ sub: uuidv4(), role: 'user', mfa: true }, jwtSecret, { expiresIn: '24h' })
+    : security.generateSecureToken();
+  security.logAudit('MFA_VERIFIED', { method });
+  res.json({ success: true, token });
+});
+
+// ================================================
+// SUBSCRIPTION/PAYMENT ENDPOINTS
+// ================================================
+
+app.post('/api/subscription/create-checkout', async (req, res) => {
+  const { planId, paymentMethod } = req.body;
+  const VALID_PLANS = ['free', 'pro', 'enterprise'];
+  const VALID_METHODS = ['card', 'crypto', 'gift'];
+  if (!VALID_PLANS.includes(planId)) {
+    return res.status(400).json({ error: 'Invalid plan' });
+  }
+  if (!VALID_METHODS.includes(paymentMethod)) {
+    return res.status(400).json({ error: 'Invalid payment method' });
+  }
+  // Stripe session would be created server-side using process.env.STRIPE_SECRET_KEY
+  // The client key (publishable) is safe for the frontend
+  security.logAudit('CHECKOUT_INITIATED', { planId, paymentMethod });
+  res.json({
+    success: true,
+    sessionId: uuidv4(),
+    // In production: return Stripe session URL
+    message: 'Checkout session created. Complete payment via Stripe.',
+  });
+});
+
+app.post('/api/subscription/gift-card/redeem', async (req, res) => {
+  const { code } = req.body;
+  if (!code || typeof code !== 'string' || !/^[A-Z0-9]{12,16}$/.test(code)) {
+    return res.status(400).json({ error: 'Invalid gift card code format' });
+  }
+  security.logAudit('GIFT_CARD_REDEEM_ATTEMPT', { codeHash: security.hash(code) });
+  res.json({ success: true, planId: 'pro', message: 'Gift card redeemed successfully' });
+});
+
+// ================================================
+// GAME DEV ENDPOINTS
+// ================================================
+
+app.get('/api/gamedev/projects', (req, res) => {
+  const userId = req.headers['x-user-id'];
+  const projects = dataService.list('workflows', { type: 'gamedev' });
+  res.json({ projects });
+});
+
+app.post('/api/gamedev/projects', (req, res) => {
+  const { name, type, engine, platforms } = req.body;
+  const VALID_TYPES = ['game', 'arvr', '3d', 'mobile_game', 'web_game'];
+  const VALID_ENGINES = ['unreal', 'unity', 'godot', 'blender', 'unreal5', 'cry'];
+  if (!name || typeof name !== 'string') {
+    return res.status(400).json({ error: 'Project name required' });
+  }
+  if (!VALID_TYPES.includes(type)) {
+    return res.status(400).json({ error: 'Invalid project type' });
+  }
+  if (!VALID_ENGINES.includes(engine)) {
+    return res.status(400).json({ error: 'Invalid engine' });
+  }
+  const id = uuidv4();
+  const project = { id, name, type, engine, platforms: Array.isArray(platforms) ? platforms : [], createdAt: Date.now(), progress: 0, status: 'active' };
+  dataService.store('workflows', id, { ...project, type: 'gamedev' });
+  res.json({ success: true, project });
+});
+
+// ================================================
+// TRANSLATION ENDPOINT (proxies to translation service)
+// ================================================
+
+app.post('/api/translate', async (req, res) => {
+  const { strings, targetLang } = req.body;
+  const SUPPORTED_LANGS = ['en', 'es', 'fr', 'de', 'pt', 'ja', 'ko', 'zh', 'ar', 'hi', 'ru', 'it', 'nl', 'sv', 'pl'];
+  if (!targetLang || !SUPPORTED_LANGS.includes(targetLang)) {
+    return res.status(400).json({ error: 'Unsupported language' });
+  }
+  if (!strings || typeof strings !== 'object') {
+    return res.status(400).json({ error: 'Invalid strings object' });
+  }
+  if (targetLang === 'en') {
+    return res.json({ translated: strings, lang: 'en' });
+  }
+  // In production: proxy to LibreTranslate or DeepL using server-side API key
+  // Return English as fallback since we don't have keys here
+  res.json({ translated: strings, lang: targetLang, note: 'Translation service not configured; returning source strings' });
+});
+
+// ================================================
+// PLATFORM CONNECTORS (Azure, AWS, Google, Slack, GitHub, etc.)
+// ================================================
+
+app.get('/api/connectors', (req, res) => {
+  res.json({
+    connectors: [
+      { id: 'azure', name: 'Microsoft Azure', status: 'available', configured: !!process.env.AZURE_CLIENT_ID },
+      { id: 'aws', name: 'Amazon Web Services', status: 'available', configured: !!process.env.AWS_ACCESS_KEY_ID },
+      { id: 'google', name: 'Google Cloud', status: 'available', configured: !!process.env.GOOGLE_API_KEY },
+      { id: 'slack', name: 'Slack', status: 'available', configured: !!process.env.SLACK_BOT_TOKEN },
+      { id: 'github', name: 'GitHub', status: 'available', configured: !!process.env.GITHUB_TOKEN },
+      { id: 'zoom', name: 'Zoom', status: 'available', configured: !!process.env.ZOOM_API_KEY },
+      { id: 'adobe', name: 'Adobe Creative Cloud', status: 'available', configured: !!process.env.ADOBE_CLIENT_ID },
+      { id: 'bitbucket', name: 'Bitbucket', status: 'available', configured: !!process.env.BITBUCKET_TOKEN },
+    ],
   });
 });
 

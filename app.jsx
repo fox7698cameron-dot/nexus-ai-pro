@@ -1,9 +1,15 @@
-/* app.jsx
-   Updated: make UI more responsive for mobile/desktop, persist model selection, chats, memories, settings,
-   ensure AES-256 label present, and small responsive CSS tweaks.
-*/
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+// app.jsx
+// Updated: 2026-10-21 - added analytics, security v2, game dev, auth, subscription, i18n dashboards
+import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense, lazy } from 'react';
 import { securityService } from './src/security-service.js';
+
+// Lazy-load heavy dashboards for performance
+const AnalyticsDashboard = lazy(() => import('./src/components/AnalyticsDashboard.jsx'));
+const SecurityDashboardV2 = lazy(() => import('./src/components/SecurityDashboardV2.jsx'));
+const GameDevDashboard = lazy(() => import('./src/components/GameDevDashboard.jsx'));
+const AuthSystem = lazy(() => import('./src/components/AuthSystem.jsx'));
+const SubscriptionCheckout = lazy(() => import('./src/components/SubscriptionCheckout.jsx'));
+const AdminDashboard = lazy(() => import('./src/components/AdminDashboard.jsx'));
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
   Settings, Menu, X, Plus, Trash2, Download, Upload,
@@ -462,7 +468,11 @@ const TOOLS = {
   automation: { name: 'Automation', icon: Workflow, description: 'N8N-style workflows' },
   deploy: { name: 'Deploy', icon: Rocket, description: 'App deployment' },
   security: { name: 'Security', icon: Shield, description: 'Security analysis' },
-  schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' }
+  schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' },
+  analytics: { name: 'Analytics', icon: BarChart3, description: 'Social media analytics' },
+  auth: { name: 'Auth', icon: Fingerprint, description: 'Authentication & accounts' },
+  subscription: { name: 'Upgrade', icon: Star, description: 'Plans & billing' },
+  admin: { name: 'Admin', icon: Users, description: 'Admin dashboard' },
 };
 
 // ============================================
@@ -946,7 +956,7 @@ export default function NexusAI() {
             {Object.entries(TOOLS).map(([key, tool]) => {
               const Icon = tool.icon;
               return (
-                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security'].includes(key)) setShowToolContent(true); }}>
+                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security', 'analytics', 'auth', 'subscription', 'admin'].includes(key)) setShowToolContent(true); }}>
                   <Icon size={18} />
                   <span>{tool.name}</span>
                 </button>
@@ -995,8 +1005,17 @@ export default function NexusAI() {
             </div>
           )}
 
-          {/* Security Dashboard */}
+          {/* Security Dashboard V2 */}
           {showToolContent && activeTool === 'security' && (
+            <div className="tool-content security-dashboard" style={{ padding: 0, overflow: 'auto', maxHeight: '80vh' }}>
+              <Suspense fallback={<div style={{ padding: 24, color: '#666' }}>Loading Security Dashboard...</div>}>
+                <SecurityDashboardV2 />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Security Dashboard Legacy (hidden but kept for compatibility) */}
+          {false && activeTool === 'security_legacy' && (
             <div className="tool-content security-dashboard">
               <div className="panel-header">
                 <ShieldCheck size={18} />
@@ -1223,6 +1242,51 @@ export default function NexusAI() {
               <div className="security-card"><Fingerprint size={24} /><h4>Auth</h4><p>Multi-Factor</p></div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Analytics Dashboard */}
+      {showToolContent && activeTool === 'analytics' && (
+        <div className="tool-content" style={{ padding: 0, overflow: 'auto', maxHeight: '80vh' }}>
+          <Suspense fallback={<div style={{ padding: 24, color: '#666' }}>Loading Analytics Dashboard...</div>}>
+            <AnalyticsDashboard />
+          </Suspense>
+        </div>
+      )}
+
+      {/* Game Dev Dashboard (full) */}
+      {showToolContent && activeTool === 'gamedev_full' && (
+        <div className="tool-content" style={{ padding: 0, overflow: 'auto', maxHeight: '80vh' }}>
+          <Suspense fallback={<div style={{ padding: 24, color: '#666' }}>Loading Game Dev Dashboard...</div>}>
+            <GameDevDashboard />
+          </Suspense>
+        </div>
+      )}
+
+      {/* Auth Dashboard */}
+      {showToolContent && activeTool === 'auth' && (
+        <div className="tool-content" style={{ padding: 0, overflow: 'auto', maxHeight: '80vh' }}>
+          <Suspense fallback={<div style={{ padding: 24, color: '#666' }}>Loading Auth System...</div>}>
+            <AuthSystem onAuthenticated={(session) => console.log('Authenticated:', session?.role)} />
+          </Suspense>
+        </div>
+      )}
+
+      {/* Subscription Checkout */}
+      {showToolContent && activeTool === 'subscription' && (
+        <div className="tool-content" style={{ padding: 0, overflow: 'auto', maxHeight: '80vh' }}>
+          <Suspense fallback={<div style={{ padding: 24, color: '#666' }}>Loading Subscription...</div>}>
+            <SubscriptionCheckout />
+          </Suspense>
+        </div>
+      )}
+
+      {/* Admin Dashboard */}
+      {showToolContent && activeTool === 'admin' && (
+        <div className="tool-content" style={{ padding: 0, overflow: 'hidden', maxHeight: '80vh' }}>
+          <Suspense fallback={<div style={{ padding: 24, color: '#666' }}>Loading Admin Dashboard...</div>}>
+            <AdminDashboard role="admin" />
+          </Suspense>
         </div>
       )}
 

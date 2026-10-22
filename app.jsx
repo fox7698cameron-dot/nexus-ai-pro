@@ -2,8 +2,16 @@
    Updated: make UI more responsive for mobile/desktop, persist model selection, chats, memories, settings,
    ensure AES-256 label present, and small responsive CSS tweaks.
 */
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, Suspense, lazy } from 'react';
 import { securityService } from './src/security-service.js';
+
+// Lazy-loaded dashboards (code-split for performance)
+const AuthSystem = lazy(() => import('./src/auth/AuthSystem.jsx'));
+const AnalyticsDashboard = lazy(() => import('./src/dashboards/AnalyticsDashboard.jsx'));
+const SecurityDashboard = lazy(() => import('./src/dashboards/SecurityDashboard.jsx'));
+const ProjectTrackingDashboard = lazy(() => import('./src/dashboards/ProjectTrackingDashboard.jsx'));
+const PaymentSystem = lazy(() => import('./src/payments/PaymentSystem.jsx'));
+
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
   Settings, Menu, X, Plus, Trash2, Download, Upload,
@@ -461,7 +469,10 @@ const TOOLS = {
   appdev: { name: 'App Dev', icon: Smartphone, description: 'Application development' },
   automation: { name: 'Automation', icon: Workflow, description: 'N8N-style workflows' },
   deploy: { name: 'Deploy', icon: Rocket, description: 'App deployment' },
-  security: { name: 'Security', icon: Shield, description: 'Security analysis' },
+  security: { name: 'Security', icon: Shield, description: 'Real-time security dashboard' },
+  analytics: { name: 'Analytics', icon: BarChart3, description: 'Social media analytics' },
+  projects: { name: 'Projects', icon: GitBranch, description: 'Project & game tracking' },
+  billing: { name: 'Billing', icon: Database, description: 'Subscription & payments' },
   schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' }
 };
 
@@ -597,7 +608,8 @@ const WORKFLOW_NODES = {
 // ============================================
 // MAIN APP COMPONENT
 // ============================================
-export default function NexusAI() {
+// Props from AppWrapper: authUser (object) and onLogout (function)
+export default function NexusAI({ authUser = null, onLogout }) {
   // State
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -946,7 +958,7 @@ export default function NexusAI() {
             {Object.entries(TOOLS).map(([key, tool]) => {
               const Icon = tool.icon;
               return (
-                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security'].includes(key)) setShowToolContent(true); }}>
+                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security', 'analytics', 'projects', 'billing'].includes(key)) setShowToolContent(true); }}>
                   <Icon size={18} />
                   <span>{tool.name}</span>
                 </button>
@@ -996,111 +1008,39 @@ export default function NexusAI() {
           )}
 
           {/* Security Dashboard */}
+          {/* Analytics Dashboard */}
+          {showToolContent && activeTool === 'analytics' && (
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              <Suspense fallback={<div style={{ padding: '20px', color: '#9ca3af' }}>Loading Analytics...</div>}>
+                <AnalyticsDashboard />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Project Tracking Dashboard */}
+          {showToolContent && activeTool === 'projects' && (
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              <Suspense fallback={<div style={{ padding: '20px', color: '#9ca3af' }}>Loading Projects...</div>}>
+                <ProjectTrackingDashboard />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Billing / Payments */}
+          {showToolContent && activeTool === 'billing' && (
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              <Suspense fallback={<div style={{ padding: '20px', color: '#9ca3af' }}>Loading Billing...</div>}>
+                <PaymentSystem currentPlan="free" userId={authUser?.id} onPlanChange={() => {}} />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Enhanced Security Dashboard */}
           {showToolContent && activeTool === 'security' && (
-            <div className="tool-content security-dashboard">
-              <div className="panel-header">
-                <ShieldCheck size={18} />
-                <h3>Security Dashboard</h3>
-              </div>
-              
-              <div className="security-grid">
-                {/* Overall Score */}
-                <div className="security-card score-card">
-                  <div className="score-circle">
-                    <div className="score-value">{securityScan.overallScore}</div>
-                    <div className="score-label">Security Score</div>
-                  </div>
-                  <div className="score-status">
-                    <div className="status-item">
-                      <ShieldCheck size={16} style={{ color: '#10b981' }} />
-                      <span>Encryption: {securityScan.encryptionStatus.toUpperCase()}</span>
-                    </div>
-                    <div className="status-item">
-                      <Lock size={16} style={{ color: '#3b82f6' }} />
-                      <span>AES-256-GCM Active</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Scan Button */}
-                <div className="security-card action-card">
-                  <button 
-                    className={`scan-btn ${securityScan.isScanning ? 'scanning' : ''}`}
-                    onClick={runSecurityScan}
-                    disabled={securityScan.isScanning}
-                  >
-                    {securityScan.isScanning ? (
-                      <>
-                        <Loader2 size={18} className="spin" />
-                        Scanning...
-                      </>
-                    ) : (
-                      <>
-                        <Zap size={18} />
-                        Run Full Scan
-                      </>
-                    )}
-                  </button>
-                  {securityScan.lastScanTime && (
-                    <div className="scan-time">
-                      Last scan: {new Date(securityScan.lastScanTime).toLocaleTimeString()}
-                    </div>
-                  )}
-                </div>
-
-                {/* Vulnerabilities */}
-                <div className="security-card vulnerabilities-card">
-                  <h4><AlertTriangle size={16} /> Vulnerabilities</h4>
-                  <div className="vuln-list">
-                    {securityScan.vulnerabilities.length > 0 ? (
-                      securityScan.vulnerabilities.map(vuln => (
-                        <div key={vuln.id} className={`vuln-item severity-${vuln.severity} status-${vuln.status}`}>
-                          <div className="vuln-header">
-                            <span className={`severity-badge ${vuln.severity}`}>{vuln.severity.toUpperCase()}</span>
-                            <span className="vuln-name">{vuln.name}</span>
-                            <span className={`status-badge ${vuln.status}`}>{vuln.status.toUpperCase()}</span>
-                          </div>
-                          <div className="vuln-desc">{vuln.description}</div>
-                          {vuln.status !== 'patched' && (
-                            <button 
-                              className="patch-btn"
-                              onClick={() => patchVulnerability(vuln.id)}
-                            >
-                              <Wrench size={14} /> Patch Now
-                            </button>
-                          )}
-                        </div>
-                      ))
-                    ) : (
-                      <div className="empty-state">No vulnerabilities detected</div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Threats */}
-                <div className="security-card threats-card">
-                  <h4><Network size={16} /> Recent Threats</h4>
-                  <div className="threat-list">
-                    {securityScan.threats.length > 0 ? (
-                      securityScan.threats.map((threat, idx) => (
-                        <div key={idx} className={`threat-item status-${threat.status}`}>
-                          <div className="threat-status">
-                            {threat.status === 'blocked' && <ShieldAlert size={16} style={{ color: '#ef4444' }} />}
-                            {threat.status === 'prevented' && <ShieldCheck size={16} style={{ color: '#10b981' }} />}
-                            {threat.status === 'filtered' && <Eye size={16} style={{ color: '#f59e0b' }} />}
-                          </div>
-                          <div className="threat-info">
-                            <div className="threat-type">{threat.type}</div>
-                            <div className="threat-time">{threat.status.toUpperCase()} ΓÇó {new Date(threat.timestamp).toLocaleTimeString()}</div>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="empty-state">No threats detected</div>
-                    )}
-                  </div>
-                </div>
-              </div>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              <Suspense fallback={<div style={{ padding: '20px', color: '#9ca3af' }}>Loading Security...</div>}>
+                <SecurityDashboard />
+              </Suspense>
             </div>
           )}
 

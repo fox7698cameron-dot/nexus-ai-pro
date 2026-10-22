@@ -15,6 +15,7 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import { router as authRouter, authenticateToken } from './src/auth/authRoutes.js';
 
 dotenv.config();
 
@@ -441,7 +442,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
+    const model = options.model || 'gemini-1.5-pro';
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
@@ -1163,6 +1164,183 @@ setInterval(async () => {
     await security.autoPatch();
   }
 }, 60 * 60 * 1000); // Every hour
+
+// ================================================
+// AUTH ROUTES
+// ================================================
+app.use('/api/auth', authRouter);
+
+// ================================================
+// PAYMENT ROUTES (Stripe)
+// ================================================
+
+// Stripe is loaded dynamically to avoid startup errors when key is missing
+let stripe = null;
+if (process.env.STRIPE_SECRET_KEY) {
+  try {
+    const stripeModule = await import('stripe').catch(() => null);
+    if (stripeModule) {
+      stripe = stripeModule.default(process.env.STRIPE_SECRET_KEY);
+    }
+  } catch {
+    console.log('[payments] Stripe not installed — payment routes in demo mode');
+  }
+}
+
+const invoiceStore = new Map();
+
+app.post('/api/payments/subscribe', authenticateToken, async (req, res) => {
+  try {
+    const { planId, payment } = req.body;
+    if (!planId || !payment) {
+      return res.status(400).json({ error: 'planId and payment required' });
+    }
+
+    const PLAN_PRICES = { pro: 999, enterprise: 4999 };
+    const amount = PLAN_PRICES[planId];
+    if (!amount) {
+      return res.status(400).json({ error: 'Invalid plan' });
+    }
+
+    let result = { success: false };
+
+    if (stripe && payment.type === 'card') {
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount,
+        currency: 'usd',
+        payment_method_types: ['card'],
+        metadata: { userId: req.user.id, planId },
+      });
+      result = { success: true, clientSecret: paymentIntent.client_secret, planId };
+    } else {
+      // Demo / non-card flow
+      result = { success: true, planId, demo: true, message: 'Demo mode — no real charge' };
+    }
+
+    const invoice = {
+      id: uuidv4(),
+      userId: req.user.id,
+      description: `${planId.charAt(0).toUpperCase() + planId.slice(1)} Plan - Monthly`,
+      amount: (amount / 100).toFixed(2),
+      date: new Date().toISOString().slice(0, 10),
+      status: 'paid',
+      method: payment.type,
+    };
+    const userInvoices = invoiceStore.get(req.user.id) || [];
+    userInvoices.unshift(invoice);
+    invoiceStore.set(req.user.id, userInvoices);
+
+    security.logAudit('PAYMENT', { userId: req.user.id, planId, method: payment.type });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/payments/history', authenticateToken, (req, res) => {
+  const invoices = invoiceStore.get(req.user.id) || [];
+  res.json({ invoices });
+});
+
+app.post('/api/payments/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+  if (!stripe || !process.env.STRIPE_WEBHOOK_SECRET) {
+    return res.json({ received: true });
+  }
+  try {
+    const sig = req.headers['stripe-signature'];
+    const event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    security.logAudit('STRIPE_WEBHOOK', { type: event.type });
+    res.json({ received: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ================================================
+// ANALYTICS API (social media metrics cache)
+// ================================================
+const analyticsCache = new Map();
+
+app.get('/api/analytics/platforms', authenticateToken, (req, res) => {
+  const cached = analyticsCache.get(req.user.id);
+  if (cached && (Date.now() - cached.ts) < 60000) {
+    return res.json(cached.data);
+  }
+  // Return empty — client generates mock data if this endpoint returns nothing
+  res.json({ platforms: [], lastUpdated: Date.now() });
+});
+
+app.post('/api/analytics/connect', authenticateToken, (req, res) => {
+  const { platform, credentials } = req.body;
+  if (!platform) return res.status(400).json({ error: 'platform required' });
+  security.logAudit('ANALYTICS_CONNECT', { userId: req.user.id, platform });
+  res.json({ success: true, platform, status: 'connected', message: 'OAuth flow would start here in production' });
+});
+
+// ================================================
+// MULTI-LANGUAGE / I18N API
+// ================================================
+const i18nStrings = {
+  en: { greeting: 'Welcome', logout: 'Logout', settings: 'Settings' },
+  es: { greeting: 'Bienvenido', logout: 'Cerrar sesión', settings: 'Configuración' },
+  fr: { greeting: 'Bienvenue', logout: 'Déconnexion', settings: 'Paramètres' },
+  de: { greeting: 'Willkommen', logout: 'Abmelden', settings: 'Einstellungen' },
+  ja: { greeting: 'ようこそ', logout: 'ログアウト', settings: '設定' },
+  ko: { greeting: '환영합니다', logout: '로그아웃', settings: '설정' },
+  zh: { greeting: '欢迎', logout: '退出', settings: '设置' },
+  pt: { greeting: 'Bem-vindo', logout: 'Sair', settings: 'Configurações' },
+  ar: { greeting: 'أهلاً', logout: 'تسجيل خروج', settings: 'الإعدادات' },
+  ru: { greeting: 'Добро пожаловать', logout: 'Выйти', settings: 'Настройки' },
+};
+
+app.get('/api/i18n/:locale', (req, res) => {
+  const { locale } = req.params;
+  const lang = locale.split('-')[0].toLowerCase();
+  const strings = i18nStrings[lang] || i18nStrings['en'];
+  res.json({ locale, strings });
+});
+
+// ================================================
+// PROJECT TRACKING API
+// ================================================
+const projectStore = new Map();
+
+app.get('/api/projects', authenticateToken, (req, res) => {
+  const projects = projectStore.get(req.user.id) || [];
+  res.json({ projects });
+});
+
+app.post('/api/projects', authenticateToken, (req, res) => {
+  const { name, type, platforms, description } = req.body;
+  if (!name || !type) return res.status(400).json({ error: 'name and type required' });
+  const project = {
+    id: uuidv4(),
+    userId: req.user.id,
+    name,
+    type,
+    platforms: platforms || [],
+    description: description || '',
+    progress: 0,
+    status: 'active',
+    buildStatus: 'pending',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  const projects = projectStore.get(req.user.id) || [];
+  projects.push(project);
+  projectStore.set(req.user.id, projects);
+  security.logAudit('PROJECT_CREATED', { userId: req.user.id, projectId: project.id });
+  res.status(201).json({ project });
+});
+
+app.patch('/api/projects/:id', authenticateToken, (req, res) => {
+  const projects = projectStore.get(req.user.id) || [];
+  const idx = projects.findIndex(p => p.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'Project not found' });
+  projects[idx] = { ...projects[idx], ...req.body, updatedAt: new Date().toISOString() };
+  projectStore.set(req.user.id, projects);
+  res.json({ project: projects[idx] });
+});
 
 // ================================================
 // ERROR HANDLING

@@ -15,6 +15,10 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import authRouter, { authMiddleware } from './src/api/auth.js';
+import paymentsRouter from './src/api/payments.js';
+import analyticsRouter, { startAnalyticsLoop } from './src/api/analytics.js';
+import projectsRouter, { setIo as setProjectsIo } from './src/api/projects.js';
 
 dotenv.config();
 
@@ -275,6 +279,10 @@ const io = new Server(httpServer, {
   },
   pingTimeout: 60000
 });
+
+// Wire Socket.IO into new feature modules
+startAnalyticsLoop(io);
+setProjectsIo(io);
 
 // ================================================
 // MIDDLEWARE STACK
@@ -1163,6 +1171,15 @@ setInterval(async () => {
     await security.autoPatch();
   }
 }, 60 * 60 * 1000); // Every hour
+
+// ================================================
+// FEATURE API ROUTES
+// ================================================
+
+app.use('/api/auth', authRouter);
+app.use('/api/payments', authMiddleware, paymentsRouter);
+app.use('/api/analytics', authMiddleware, analyticsRouter);
+app.use('/api/projects', authMiddleware, projectsRouter);
 
 // ================================================
 // ERROR HANDLING

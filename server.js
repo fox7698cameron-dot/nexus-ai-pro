@@ -15,6 +15,7 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import { AuthManager, validatePassword, validateUsername, ROLES } from './src/auth/AuthManager.js';
 
 dotenv.config();
 
@@ -264,6 +265,7 @@ class SecurityModule {
 }
 
 const security = new SecurityModule();
+const authManager = new AuthManager(security);
 
 // ================================================
 // SOCKET.IO WITH ENCRYPTION
@@ -1163,6 +1165,172 @@ setInterval(async () => {
     await security.autoPatch();
   }
 }, 60 * 60 * 1000); // Every hour
+
+// ================================================
+// AUTH ROUTES
+// ================================================
+app.post('/api/auth/register', authLimiter, async (req, res) => {
+  try {
+    const { username, email, password, role } = req.body;
+    const result = await authManager.register({ username, email, password, role });
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    res.status(201).json({ userId: result.userId, role: result.role });
+  } catch (err) {
+    security.logAudit('REGISTER_ERROR', { error: err.message });
+    res.status(500).json({ error: 'Registration failed.' });
+  }
+});
+
+app.post('/api/auth/login', authLimiter, async (req, res) => {
+  try {
+    const { email, password, mfaToken, biometricToken } = req.body;
+    const result = await authManager.login({ email, password, mfaToken, biometricToken });
+    if (!result.ok) {
+      if (result.mfaRequired) return res.status(200).json({ mfaRequired: true });
+      return res.status(401).json({ error: result.error });
+    }
+    res.json({ accessToken: result.accessToken, refreshToken: result.refreshToken, user: result.user });
+  } catch (err) {
+    security.logAudit('LOGIN_ERROR', { error: err.message });
+    res.status(500).json({ error: 'Login failed.' });
+  }
+});
+
+app.post('/api/auth/refresh', (req, res) => {
+  const { refreshToken } = req.body;
+  if (!refreshToken) return res.status(400).json({ error: 'Refresh token required.' });
+  const result = authManager.refreshSession(refreshToken);
+  if (!result.ok) return res.status(401).json({ error: result.error });
+  res.json({ accessToken: result.accessToken, refreshToken: result.refreshToken });
+});
+
+app.post('/api/auth/mfa/setup', (req, res) => {
+  const payload = authManager.verifyToken(req.headers.authorization?.slice(7));
+  if (!payload) return res.status(401).json({ error: 'Authentication required.' });
+  const result = authManager.setupMFA(payload.id);
+  if (!result.ok) return res.status(400).json({ error: result.error });
+  res.json({ secret: result.secret, uri: result.uri });
+});
+
+app.post('/api/auth/mfa/confirm', (req, res) => {
+  const payload = authManager.verifyToken(req.headers.authorization?.slice(7));
+  if (!payload) return res.status(401).json({ error: 'Authentication required.' });
+  const { token } = req.body;
+  const result = authManager.confirmMFA(payload.id, token);
+  if (!result.ok) return res.status(400).json({ error: result.error });
+  res.json({ ok: true });
+});
+
+app.get('/api/auth/me', (req, res) => {
+  const payload = authManager.verifyToken(req.headers.authorization?.slice(7));
+  if (!payload) return res.status(401).json({ error: 'Authentication required.' });
+  const user = authManager.users.get(payload.id);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+  res.json(authManager._publicUser(user));
+});
+
+// ================================================
+// TRANSLATION ROUTE
+// ================================================
+app.post('/api/translate', async (req, res) => {
+  const { text, source = 'en', target } = req.body;
+  if (!text || !target) return res.status(400).json({ error: 'text and target required.' });
+  if (source === target) return res.json({ translated: text });
+
+  const apiKey = process.env.DEEPL_API_KEY || process.env.GOOGLE_TRANSLATE_API_KEY;
+  if (!apiKey) {
+    // Return original text when no translation API configured
+    return res.json({ translated: text, note: 'Translation API not configured.' });
+  }
+
+  try {
+    // Prefer DeepL if DEEPL_API_KEY is set
+    if (process.env.DEEPL_API_KEY) {
+      const dlRes = await fetch('https://api-free.deepl.com/v2/translate', {
+        method: 'POST',
+        headers: { 'Authorization': `DeepL-Auth-Key ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: [text], source_lang: source.toUpperCase(), target_lang: target.toUpperCase() }),
+      });
+      const dlData = await dlRes.json();
+      return res.json({ translated: dlData.translations?.[0]?.text || text });
+    }
+
+    // Fall back to Google Translate
+    const gtUrl = `https://translation.googleapis.com/language/translate/v2?key=${apiKey}`;
+    const gtRes = await fetch(gtUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: text, source, target, format: 'text' }),
+    });
+    const gtData = await gtRes.json();
+    res.json({ translated: gtData.data?.translations?.[0]?.translatedText || text });
+  } catch (err) {
+    security.logAudit('TRANSLATE_ERROR', { error: err.message });
+    res.json({ translated: text });
+  }
+});
+
+// ================================================
+// ANALYTICS ROUTES (server-side aggregation)
+// ================================================
+app.get('/api/analytics/summary', (req, res) => {
+  // In production, connect to platform APIs using keys from env
+  res.json({
+    note: 'Connect platform API keys via env vars: TIKTOK_API_KEY, INSTAGRAM_ACCESS_TOKEN, etc.',
+    platforms: ['tiktok', 'instagram', 'facebook', 'twitch', 'discord', 'lemon8', 'reddit', 'redgifs'],
+    status: 'mock',
+    updatedAt: Date.now(),
+  });
+});
+
+// ================================================
+// PAYMENT ROUTES (Stripe webhook must use raw body)
+// ================================================
+app.post('/api/payments/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  if (!sig) return res.status(400).json({ error: 'Missing signature.' });
+
+  try {
+    const { PaymentService } = await import('./src/payments/PaymentManager.js');
+    const svc = new PaymentService(security);
+    await svc.handleWebhook(req.body, sig);
+    res.json({ received: true });
+  } catch (err) {
+    security.logAudit('WEBHOOK_ERROR', { error: err.message });
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/payments/checkout', async (req, res) => {
+  const payload = authManager.verifyToken(req.headers.authorization?.slice(7));
+  if (!payload) return res.status(401).json({ error: 'Authentication required.' });
+
+  const { planId, successUrl, cancelUrl } = req.body;
+  try {
+    const { PaymentService } = await import('./src/payments/PaymentManager.js');
+    const svc = new PaymentService(security);
+    const session = await svc.createCheckoutSession({
+      planId,
+      userId: payload.id,
+      email: payload.email,
+      successUrl: successUrl || `${process.env.APP_URL || 'http://localhost:5173'}/payment/success`,
+      cancelUrl: cancelUrl || `${process.env.APP_URL || 'http://localhost:5173'}/payment/cancel`,
+    });
+    res.json(session);
+  } catch (err) {
+    security.logAudit('CHECKOUT_ERROR', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/payments/gift-card/redeem', async (req, res) => {
+  const payload = authManager.verifyToken(req.headers.authorization?.slice(7));
+  if (!payload) return res.status(401).json({ error: 'Authentication required.' });
+  const { code } = req.body;
+  if (!code) return res.status(400).json({ error: 'Gift card code required.' });
+  // Gift card store is per-process; in production wire to DB
+  res.json({ ok: false, error: 'Gift card redemption requires database integration.' });
+});
 
 // ================================================
 // ERROR HANDLING

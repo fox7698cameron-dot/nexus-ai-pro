@@ -441,8 +441,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-pro';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -1096,6 +1095,233 @@ app.get('/api/templates/app', (req, res) => {
       { id: 'ai', name: 'AI Application', stack: 'Python/FastAPI' }
     ]
   });
+});
+
+// ================================================
+// AUTH ROUTES
+// ================================================
+
+// Lazy-loaded auth service (avoids crash if JWT_SECRET missing at import time)
+let _authService = null;
+async function getAuthService() {
+  if (!_authService) {
+    try {
+      const mod = await import('./src/auth/AuthService.js');
+      _authService = mod.authService;
+    } catch { _authService = null; }
+  }
+  return _authService;
+}
+
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { authService } = await import('./src/auth/AuthService.js');
+    const result = await authService.register(req.body);
+    if (result.success) {
+      security.logAudit('USER_REGISTERED', { userId: result.userId, username: result.username });
+      res.status(201).json({ success: true, userId: result.userId, username: result.username, role: result.role });
+    } else {
+      res.status(400).json({ error: result.error });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/login', authLimiter, async (req, res) => {
+  try {
+    const { authService } = await import('./src/auth/AuthService.js');
+    const { identifier, password, mfaToken } = req.body;
+    const result = await authService.login(identifier, password, mfaToken);
+    if (result.success) {
+      res.json(result);
+    } else if (result.requiresMfa) {
+      res.status(202).json({ requiresMfa: true, challengeId: result.challengeId });
+    } else {
+      res.status(401).json({ error: result.error });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/auth/biometric/register', async (req, res) => {
+  try {
+    const { authService } = await import('./src/auth/AuthService.js');
+    const result = authService.registerBiometric(req.body.userId, req.body.credential);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================================================
+// ANALYTICS ROUTES
+// ================================================
+
+app.get('/api/analytics/social', (req, res) => {
+  // Returns mock structure; connect real OAuth tokens per platform in production
+  const platforms = ['tiktok', 'instagram', 'facebook', 'twitch', 'discord', 'lemon8', 'reddit', 'redgifs'];
+  const data = {};
+  for (const p of platforms) {
+    data[p] = {
+      reach: Math.floor(Math.random() * 500_000 + 50_000),
+      likes: Math.floor(Math.random() * 50_000 + 5_000),
+      comments: Math.floor(Math.random() * 5_000 + 500),
+      shares: Math.floor(Math.random() * 2_000 + 200),
+      retention: Math.floor(Math.random() * 40 + 40),
+      impressions: Math.floor(Math.random() * 1_000_000 + 100_000),
+      followers: Math.floor(Math.random() * 100_000 + 10_000),
+      live: p === 'twitch' || p === 'discord',
+      retention_data: Array.from({ length: 10 }, (_, i) => ({
+        label: `${i * 10}%`,
+        value: Math.max(5, 100 - i * 9 + Math.random() * 10)
+      }))
+    };
+  }
+  res.json({ platforms, timestamp: Date.now() });
+});
+
+// ================================================
+// PROJECT TRACKING ROUTES
+// ================================================
+
+const projectStore = new Map();
+const achievementStore = new Map();
+
+app.post('/api/projects', (req, res) => {
+  const id = uuidv4();
+  const project = {
+    id, userId: req.body.userId || 'anonymous',
+    name: req.body.name, type: req.body.type || 'coding',
+    engine: req.body.engine || null,
+    platforms: req.body.platforms || [],
+    progress: 0, milestones: req.body.milestones || [],
+    metrics: { commits: 0, builds: 0, playtests: 0, bugs: 0, features: 0 },
+    createdAt: Date.now(), updatedAt: Date.now()
+  };
+  projectStore.set(id, project);
+  res.status(201).json(project);
+});
+
+app.get('/api/projects', (req, res) => {
+  const userId = req.query.userId;
+  const projects = [...projectStore.values()].filter(p => !userId || p.userId === userId);
+  res.json({ projects });
+});
+
+app.get('/api/projects/:id', (req, res) => {
+  const project = projectStore.get(req.params.id);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  res.json(project);
+});
+
+app.patch('/api/projects/:id/metrics', (req, res) => {
+  const project = projectStore.get(req.params.id);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  project.metrics = { ...project.metrics, ...req.body };
+  project.updatedAt = Date.now();
+  res.json(project);
+});
+
+app.get('/api/achievements', (req, res) => {
+  const userId = req.query.userId;
+  const achievements = [...achievementStore.values()].filter(a => !userId || a.userId === userId);
+  res.json({ achievements });
+});
+
+// ================================================
+// PAYMENT ROUTES
+// ================================================
+
+app.get('/api/payments/plans', (req, res) => {
+  res.json({
+    plans: [
+      { id: 'free', name: 'Free', priceUsd: 0, interval: null, features: ['5 chats/day', 'Basic models'] },
+      { id: 'pro', name: 'Pro', priceUsd: 9.99, interval: 'month', features: ['Unlimited chats', 'All models', '100MB uploads'] },
+      { id: 'enterprise', name: 'Enterprise', priceUsd: 14.99, interval: 'month', features: ['Everything in Pro', 'API access', 'SLA'] }
+    ],
+    paymentMethods: ['visa', 'mastercard', 'amex', 'discover', 'bitcoin', 'ethereum', 'usdc', 'gift_card']
+  });
+});
+
+app.post('/api/payments/gift-card/check', (req, res) => {
+  const { code } = req.body;
+  if (!code) return res.status(400).json({ error: 'Gift card code required' });
+  res.json({ valid: true, remainingCents: 1499, expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000 });
+});
+
+// ================================================
+// I18N ROUTES
+// ================================================
+
+app.get('/api/i18n/locales', (req, res) => {
+  res.json({
+    locales: [
+      { code: 'en', name: 'English', dir: 'ltr' },
+      { code: 'es', name: 'Español', dir: 'ltr' },
+      { code: 'fr', name: 'Français', dir: 'ltr' },
+      { code: 'de', name: 'Deutsch', dir: 'ltr' },
+      { code: 'ja', name: '日本語', dir: 'ltr' },
+      { code: 'zh-CN', name: '中文（简体）', dir: 'ltr' },
+      { code: 'ko', name: '한국어', dir: 'ltr' },
+      { code: 'ar', name: 'العربية', dir: 'rtl' },
+      { code: 'pt', name: 'Português', dir: 'ltr' },
+      { code: 'hi', name: 'हिन्दी', dir: 'ltr' }
+    ]
+  });
+});
+
+app.post('/api/i18n/translate', async (req, res) => {
+  const { text, targetLocale, sourceLocale = 'en' } = req.body;
+  if (!text || !targetLocale) return res.status(400).json({ error: 'text and targetLocale required' });
+
+  if (!process.env.GOOGLE_TRANSLATE_API_KEY) {
+    return res.json({ text, translated: text, note: 'Translation API not configured' });
+  }
+
+  try {
+    const response = await fetch(
+      `https://translation.googleapis.com/language/translate/v2?key=${process.env.GOOGLE_TRANSLATE_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ q: text, source: sourceLocale, target: targetLocale, format: 'text' })
+      }
+    );
+    const data = await response.json();
+    const translated = data?.data?.translations?.[0]?.translatedText ?? text;
+    res.json({ text, translated, targetLocale });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ================================================
+// CONNECTOR STATUS ROUTES
+// ================================================
+
+app.get('/api/connectors/status', async (req, res) => {
+  try {
+    const { connectorRegistry } = await import('./src/connectors/CloudConnectors.js');
+    res.json(connectorRegistry.getStatus());
+  } catch {
+    res.json({ error: 'Connector module not available' });
+  }
+});
+
+app.get('/api/connectors/gamedev/status', async (req, res) => {
+  try {
+    const { epicConnector, sonyConnector, xboxConnector, ubisoftConnector } = await import('./src/connectors/GameDevConnectors.js');
+    res.json({
+      epic: { configured: epicConnector.isConfigured },
+      psn: { configured: sonyConnector.isConfigured },
+      xbox: { configured: xboxConnector.isConfigured },
+      ubisoft: { configured: ubisoftConnector.isConfigured }
+    });
+  } catch {
+    res.json({ error: 'Game dev connector module not available' });
+  }
 });
 
 // ================================================

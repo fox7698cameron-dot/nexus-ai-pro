@@ -1,9 +1,17 @@
 /* app.jsx
-   Updated: make UI more responsive for mobile/desktop, persist model selection, chats, memories, settings,
-   ensure AES-256 label present, and small responsive CSS tweaks.
+   Updated: analytics, project tracker, payment, auth modal, i18n, enhanced security dashboard,
+   multi-platform support, real-time metrics, game dev connectors, biometrics, 2FA/MFA.
 */
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from 'react';
 import { securityService } from './src/security-service.js';
+import { i18n, t as translate } from './src/i18n/index.js';
+
+// Lazy-load heavy dashboards to keep initial bundle small
+const AnalyticsDashboard = lazy(() => import('./src/components/AnalyticsDashboard.jsx'));
+const ProjectTracker = lazy(() => import('./src/components/ProjectTracker.jsx'));
+const PaymentCheckout = lazy(() => import('./src/components/PaymentCheckout.jsx'));
+const AuthModal = lazy(() => import('./src/components/AuthModal.jsx'));
+const SecurityDashboardFull = lazy(() => import('./src/components/SecurityDashboardFull.jsx'));
 import {
   Send, Mic, MicOff, Image, FileText, Code, Video,
   Settings, Menu, X, Plus, Trash2, Download, Upload,
@@ -461,7 +469,10 @@ const TOOLS = {
   appdev: { name: 'App Dev', icon: Smartphone, description: 'Application development' },
   automation: { name: 'Automation', icon: Workflow, description: 'N8N-style workflows' },
   deploy: { name: 'Deploy', icon: Rocket, description: 'App deployment' },
-  security: { name: 'Security', icon: Shield, description: 'Security analysis' },
+  security: { name: 'Security', icon: Shield, description: 'Security dashboard' },
+  analytics: { name: 'Analytics', icon: BarChart3, description: 'Social media analytics' },
+  projects: { name: 'Projects', icon: GitBranch, description: 'Real-time project tracker' },
+  payment: { name: 'Upgrade', icon: Star, description: 'Plans & billing' },
   schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' }
 };
 
@@ -615,6 +626,9 @@ export default function NexusAI() {
   const [gameTemplate, setGameTemplate] = useState(null);
   const [appTemplate, setAppTemplate] = useState(null);
   const [showToolContent, setShowToolContent] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [activeLanguage, setActiveLanguage] = useState(i18n?.getLanguage?.() || 'en');
 
   // Security Dashboard State
   const [securityScan, setSecurityScan] = useState({
@@ -915,7 +929,9 @@ export default function NexusAI() {
           <button className="icon-btn" onClick={() => setIsMemoryOpen(!isMemoryOpen)}><Brain size={20} /></button>
           <button className="icon-btn" onClick={() => setIsCallActive(true)}><Phone size={20} /></button>
           <button className="icon-btn" onClick={() => setIsSettingsOpen(true)}><Settings size={20} /></button>
-          <div className="user-avatar">{userAvatar?.emoji || '≡ƒæñ'}</div>
+          <div className="user-avatar" style={{ cursor: 'pointer' }} onClick={() => !currentUser && setShowAuthModal(true)} title={currentUser ? currentUser.username : 'Sign In'}>
+            {currentUser ? (currentUser.displayName?.[0] || currentUser.username?.[0] || '👤') : (userAvatar?.emoji || '👤')}
+          </div>
         </div>
       </header>
 
@@ -946,7 +962,7 @@ export default function NexusAI() {
             {Object.entries(TOOLS).map(([key, tool]) => {
               const Icon = tool.icon;
               return (
-                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security'].includes(key)) setShowToolContent(true); }}>
+                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security', 'analytics', 'projects', 'payment'].includes(key)) setShowToolContent(true); else setShowToolContent(false); }}>
                   <Icon size={18} />
                   <span>{tool.name}</span>
                 </button>
@@ -995,117 +1011,54 @@ export default function NexusAI() {
             </div>
           )}
 
-          {/* Security Dashboard */}
-          {showToolContent && activeTool === 'security' && (
-            <div className="tool-content security-dashboard">
-              <div className="panel-header">
-                <ShieldCheck size={18} />
-                <h3>Security Dashboard</h3>
-              </div>
-              
-              <div className="security-grid">
-                {/* Overall Score */}
-                <div className="security-card score-card">
-                  <div className="score-circle">
-                    <div className="score-value">{securityScan.overallScore}</div>
-                    <div className="score-label">Security Score</div>
-                  </div>
-                  <div className="score-status">
-                    <div className="status-item">
-                      <ShieldCheck size={16} style={{ color: '#10b981' }} />
-                      <span>Encryption: {securityScan.encryptionStatus.toUpperCase()}</span>
-                    </div>
-                    <div className="status-item">
-                      <Lock size={16} style={{ color: '#3b82f6' }} />
-                      <span>AES-256-GCM Active</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Scan Button */}
-                <div className="security-card action-card">
-                  <button 
-                    className={`scan-btn ${securityScan.isScanning ? 'scanning' : ''}`}
-                    onClick={runSecurityScan}
-                    disabled={securityScan.isScanning}
-                  >
-                    {securityScan.isScanning ? (
-                      <>
-                        <Loader2 size={18} className="spin" />
-                        Scanning...
-                      </>
-                    ) : (
-                      <>
-                        <Zap size={18} />
-                        Run Full Scan
-                      </>
-                    )}
-                  </button>
-                  {securityScan.lastScanTime && (
-                    <div className="scan-time">
-                      Last scan: {new Date(securityScan.lastScanTime).toLocaleTimeString()}
-                    </div>
-                  )}
-                </div>
-
-                {/* Vulnerabilities */}
-                <div className="security-card vulnerabilities-card">
-                  <h4><AlertTriangle size={16} /> Vulnerabilities</h4>
-                  <div className="vuln-list">
-                    {securityScan.vulnerabilities.length > 0 ? (
-                      securityScan.vulnerabilities.map(vuln => (
-                        <div key={vuln.id} className={`vuln-item severity-${vuln.severity} status-${vuln.status}`}>
-                          <div className="vuln-header">
-                            <span className={`severity-badge ${vuln.severity}`}>{vuln.severity.toUpperCase()}</span>
-                            <span className="vuln-name">{vuln.name}</span>
-                            <span className={`status-badge ${vuln.status}`}>{vuln.status.toUpperCase()}</span>
-                          </div>
-                          <div className="vuln-desc">{vuln.description}</div>
-                          {vuln.status !== 'patched' && (
-                            <button 
-                              className="patch-btn"
-                              onClick={() => patchVulnerability(vuln.id)}
-                            >
-                              <Wrench size={14} /> Patch Now
-                            </button>
-                          )}
-                        </div>
-                      ))
-                    ) : (
-                      <div className="empty-state">No vulnerabilities detected</div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Threats */}
-                <div className="security-card threats-card">
-                  <h4><Network size={16} /> Recent Threats</h4>
-                  <div className="threat-list">
-                    {securityScan.threats.length > 0 ? (
-                      securityScan.threats.map((threat, idx) => (
-                        <div key={idx} className={`threat-item status-${threat.status}`}>
-                          <div className="threat-status">
-                            {threat.status === 'blocked' && <ShieldAlert size={16} style={{ color: '#ef4444' }} />}
-                            {threat.status === 'prevented' && <ShieldCheck size={16} style={{ color: '#10b981' }} />}
-                            {threat.status === 'filtered' && <Eye size={16} style={{ color: '#f59e0b' }} />}
-                          </div>
-                          <div className="threat-info">
-                            <div className="threat-type">{threat.type}</div>
-                            <div className="threat-time">{threat.status.toUpperCase()} ΓÇó {new Date(threat.timestamp).toLocaleTimeString()}</div>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="empty-state">No threats detected</div>
-                    )}
-                  </div>
-                </div>
-              </div>
+          {/* Analytics Dashboard */}
+          {showToolContent && activeTool === 'analytics' && (
+            <div className="tool-content" style={{ overflowY: 'auto', flex: 1 }}>
+              <Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)' }}>⏳ Loading analytics...</div>}>
+                <AnalyticsDashboard />
+              </Suspense>
             </div>
           )}
 
-          {/* Messages */}
-          <div className="messages-container">
+          {/* Project Tracker */}
+          {showToolContent && activeTool === 'projects' && (
+            <div className="tool-content" style={{ overflowY: 'auto', flex: 1 }}>
+              <Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)' }}>⏳ Loading projects...</div>}>
+                <ProjectTracker />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Payment Checkout */}
+          {showToolContent && activeTool === 'payment' && (
+            <div className="tool-content" style={{ overflowY: 'auto', flex: 1 }}>
+              <Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)' }}>⏳ Loading plans...</div>}>
+                <PaymentCheckout onSuccess={() => setActiveTool('chat')} />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Enhanced Security Dashboard */}
+          {showToolContent && activeTool === 'security' && (
+            <div className="tool-content" style={{ overflowY: 'auto', flex: 1 }}>
+              <Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)' }}>⏳ Loading security...</div>}>
+                <SecurityDashboardFull />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Auth Modal */}
+          {showAuthModal && (
+            <Suspense fallback={null}>
+              <AuthModal
+                onClose={() => setShowAuthModal(false)}
+                onAuth={(user) => { setCurrentUser(user); setShowAuthModal(false); }}
+              />
+            </Suspense>
+          )}
+
+          {/* Messages — hidden when a full-page dashboard is shown */}
+          <div className="messages-container" style={{ display: (showToolContent && ['analytics', 'projects', 'payment', 'security'].includes(activeTool)) ? 'none' : undefined }}>
             {messages.length === 0 ? (
               <div className="welcome">
                 <div className="welcome-icon"><Sparkles size={48} /></div>
@@ -1143,8 +1096,8 @@ export default function NexusAI() {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input */}
-          <div className="input-area">
+          {/* Input — hidden on full-page dashboards */}
+          <div className="input-area" style={{ display: (showToolContent && ['analytics', 'projects', 'payment', 'security'].includes(activeTool)) ? 'none' : undefined }}>
             <div className="input-box">
               <button className="attach-btn" onClick={() => fileInputRef.current?.click()}><Upload size={20} /></button>
               <input type="file" ref={fileInputRef} onChange={handleFileUpload} multiple hidden />

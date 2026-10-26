@@ -26,6 +26,7 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
+    target: ['chrome90', 'edge90', 'firefox88', 'safari15', 'es2021'],
     sourcemap: false,
     minify: 'terser',
     terserOptions: {

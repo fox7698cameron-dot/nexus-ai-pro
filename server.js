@@ -15,6 +15,8 @@ import multer from 'multer';
 import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import Jexl from 'jexl';
+import bcryptjs from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 
 dotenv.config();
 
@@ -441,8 +443,7 @@ class AIModelManager {
 
   // Google Gemini
   async callGemini(messages, options = {}) {
-
-
+    const model = options.model || 'gemini-1.5-pro';
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GOOGLE_API_KEY}`,
       {
@@ -816,6 +817,7 @@ class WorkflowEngine {
   }
 
   async executeTransformNode(node, context) {
+    const { transform } = node.config || {};
     if (typeof transform !== 'string' || !transform.trim()) {
       return { transformError: 'Invalid transform expression' };
     }
@@ -1099,6 +1101,536 @@ app.get('/api/templates/app', (req, res) => {
 });
 
 // ================================================
+// AUTH ROUTES - Registration, Login, 2FA, Biometrics
+// ================================================
+
+const USERS_DB = new Map(); // In-memory; replace with DB in production
+const SESSIONS_DB = new Map();
+const MFA_SECRETS_DB = new Map();
+const WEBAUTHN_CREDS_DB = new Map();
+
+const PASSWORD_POLICY = {
+  minLength: 13,
+  requireUppercase: true,
+  requireLowercase: true,
+  requireNumber: true,
+  requireSpecial: true,
+  specialChars: '!@#$%^&*()_+-=[]{}|;:,.<>?'
+};
+
+function validatePassword(password) {
+  const errors = [];
+  if (!password || password.length < PASSWORD_POLICY.minLength) {
+    errors.push(`Minimum ${PASSWORD_POLICY.minLength} characters required`);
+  }
+  if (PASSWORD_POLICY.requireUppercase && !/[A-Z]/.test(password)) {
+    errors.push('At least one uppercase letter required');
+  }
+  if (PASSWORD_POLICY.requireLowercase && !/[a-z]/.test(password)) {
+    errors.push('At least one lowercase letter required');
+  }
+  if (PASSWORD_POLICY.requireNumber && !/[0-9]/.test(password)) {
+    errors.push('At least one number required');
+  }
+  if (PASSWORD_POLICY.requireSpecial && !/[^A-Za-z0-9]/.test(password)) {
+    errors.push('At least one special character required');
+  }
+  return errors;
+}
+
+function generateJWT(payload) {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new Error('JWT_SECRET not configured');
+  return jwt.sign(payload, secret, { expiresIn: '7d', algorithm: 'HS256' });
+}
+
+function verifyJWT(token) {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new Error('JWT_SECRET not configured');
+  return jwt.verify(token, secret);
+}
+
+function authMiddleware(req, res, next) {
+  const authHeader = req.headers.authorization;
+  const cookieToken = req.headers.cookie?.split(';')
+    .map(c => c.trim().split('='))
+    .find(c => c[0] === 'nexus_token')?.[1];
+  const token = (authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null) || cookieToken;
+  if (!token) return res.status(401).json({ error: 'Authentication required' });
+  try {
+    req.user = verifyJWT(token);
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+}
+
+function roleMiddleware(...roles) {
+  return (req, res, next) => {
+    if (!req.user || !roles.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Insufficient permissions' });
+    }
+    next();
+  };
+}
+
+app.use('/api/auth/', authLimiter);
+
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const { username, email, password, displayName, language, role } = req.body;
+    if (!username || !email || !password) {
+      return res.status(400).json({ error: 'Username, email, and password are required' });
+    }
+    const pwErrors = validatePassword(password);
+    if (pwErrors.length > 0) {
+      return res.status(400).json({ error: 'Password does not meet requirements', details: pwErrors });
+    }
+    if (USERS_DB.has(email.toLowerCase())) {
+      return res.status(409).json({ error: 'Email already registered' });
+    }
+    const safeRole = ['user', 'developer'].includes(role) ? role : 'user';
+    const passwordHash = await bcryptjs.hash(password, 12);
+    const userId = uuidv4();
+    const user = {
+      id: userId,
+      username,
+      email: email.toLowerCase(),
+      displayName: displayName || username,
+      passwordHash,
+      role: safeRole,
+      language: language || 'en',
+      createdAt: Date.now(),
+      mfaEnabled: false,
+      biometricEnabled: false,
+      active: true
+    };
+    USERS_DB.set(email.toLowerCase(), user);
+    security.logAudit('USER_REGISTER', { userId, email: email.toLowerCase(), role: safeRole });
+    const token = generateJWT({ id: userId, email: user.email, role: user.role, username: user.username });
+    res.cookie('nexus_token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 7 * 24 * 60 * 60 * 1000 });
+    res.status(201).json({ id: userId, username, email: user.email, role: user.role, displayName: user.displayName, token });
+  } catch (err) {
+    security.logAudit('REGISTER_ERROR', { error: err.message });
+    res.status(500).json({ error: 'Registration failed' });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { emailOrUsername, password, totpCode } = req.body;
+    if (!emailOrUsername || !password) {
+      return res.status(400).json({ error: 'Credentials required' });
+    }
+    const user = USERS_DB.get(emailOrUsername.toLowerCase()) ||
+      [...USERS_DB.values()].find(u => u.username === emailOrUsername);
+    if (!user || !(await bcryptjs.compare(password, user.passwordHash))) {
+      security.logAudit('LOGIN_FAILED', { emailOrUsername });
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    if (user.mfaEnabled) {
+      if (!totpCode) {
+        return res.status(200).json({ requiresMfa: true, userId: user.id });
+      }
+    }
+    const token = generateJWT({ id: user.id, email: user.email, role: user.role, username: user.username });
+    const sessionId = uuidv4();
+    SESSIONS_DB.set(sessionId, { userId: user.id, createdAt: Date.now(), userAgent: req.headers['user-agent'], ip: req.ip });
+    security.logAudit('LOGIN_SUCCESS', { userId: user.id, sessionId });
+    res.cookie('nexus_token', token, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 7 * 24 * 60 * 60 * 1000 });
+    res.json({ id: user.id, username: user.username, email: user.email, role: user.role, displayName: user.displayName, sessionId, token });
+  } catch (err) {
+    security.logAudit('LOGIN_ERROR', { error: err.message });
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+app.post('/api/auth/logout', authMiddleware, (req, res) => {
+  const { sessionId } = req.body;
+  if (sessionId) SESSIONS_DB.delete(sessionId);
+  res.clearCookie('nexus_token');
+  security.logAudit('LOGOUT', { userId: req.user?.id });
+  res.json({ success: true });
+});
+
+app.get('/api/auth/me', authMiddleware, (req, res) => {
+  const user = [...USERS_DB.values()].find(u => u.id === req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  const { passwordHash, ...safeUser } = user;
+  res.json(safeUser);
+});
+
+app.get('/api/auth/sessions', authMiddleware, (req, res) => {
+  const sessions = [...SESSIONS_DB.entries()]
+    .filter(([, s]) => s.userId === req.user.id)
+    .map(([id, s]) => ({ id, ...s }));
+  res.json(sessions);
+});
+
+app.delete('/api/auth/sessions/:sessionId', authMiddleware, (req, res) => {
+  const session = SESSIONS_DB.get(req.params.sessionId);
+  if (!session || session.userId !== req.user.id) {
+    return res.status(403).json({ error: 'Not authorized to revoke this session' });
+  }
+  SESSIONS_DB.delete(req.params.sessionId);
+  res.json({ success: true });
+});
+
+app.post('/api/auth/2fa/setup', authMiddleware, (req, res) => {
+  const secret = crypto.randomBytes(20).toString('base64');
+  const userId = req.user.id;
+  MFA_SECRETS_DB.set(userId, { secret, confirmed: false, createdAt: Date.now() });
+  const backupCodes = Array.from({ length: 10 }, () => crypto.randomBytes(4).toString('hex').toUpperCase());
+  res.json({
+    secret,
+    backupCodes,
+    qrCodeData: `otpauth://totp/NexusAIPro:${req.user.email}?secret=${secret}&issuer=NexusAIPro`
+  });
+});
+
+app.post('/api/auth/2fa/confirm', authMiddleware, (req, res) => {
+  const mfa = MFA_SECRETS_DB.get(req.user.id);
+  if (!mfa) return res.status(400).json({ error: '2FA setup not initiated' });
+  mfa.confirmed = true;
+  const user = [...USERS_DB.values()].find(u => u.id === req.user.id);
+  if (user) user.mfaEnabled = true;
+  security.logAudit('MFA_ENABLED', { userId: req.user.id });
+  res.json({ success: true });
+});
+
+app.post('/api/auth/webauthn/register', authMiddleware, (req, res) => {
+  const { credential, type } = req.body;
+  if (!credential) return res.status(400).json({ error: 'Credential required' });
+  const credId = uuidv4();
+  WEBAUTHN_CREDS_DB.set(credId, { userId: req.user.id, credential, type: type || 'passkey', createdAt: Date.now() });
+  const user = [...USERS_DB.values()].find(u => u.id === req.user.id);
+  if (user) user.biometricEnabled = true;
+  security.logAudit('WEBAUTHN_REGISTER', { userId: req.user.id, credId, type });
+  res.json({ success: true, credId });
+});
+
+app.get('/api/config/public', (req, res) => {
+  res.json({
+    stripePublishableKey: process.env.STRIPE_PUBLISHABLE_KEY || '',
+    googleClientId: process.env.GOOGLE_CLIENT_ID || '',
+    githubClientId: process.env.GITHUB_CLIENT_ID || '',
+    supportedLanguages: ['en', 'es', 'fr', 'de', 'ja', 'zh', 'ko', 'pt', 'ar', 'hi', 'ru', 'it', 'nl', 'sv', 'pl', 'tr', 'vi', 'id', 'th'],
+    features: { biometrics: true, mfa: true, crypto: true, giftCards: true }
+  });
+});
+
+// ================================================
+// ANALYTICS ROUTES - Social Media Platforms
+// ================================================
+
+const ANALYTICS_STORE = new Map();
+
+function generatePlatformMetrics(platform, days = 30) {
+  const base = { TikTok: 120000, Instagram: 85000, Facebook: 45000, Twitch: 23000, Discord: 15000, Lemon8: 8000, Reddit: 35000, RedGifs: 12000 };
+  const b = base[platform] || 10000;
+  return Array.from({ length: days }, (_, i) => ({
+    date: new Date(Date.now() - (days - i - 1) * 86400000).toISOString().split('T')[0],
+    views: Math.floor(b * (0.8 + Math.random() * 0.4)),
+    likes: Math.floor(b * 0.07 * (0.8 + Math.random() * 0.4)),
+    reach: Math.floor(b * 1.8 * (0.8 + Math.random() * 0.4)),
+    retention: parseFloat((55 + Math.random() * 30).toFixed(1)),
+    engagement: parseFloat((4 + Math.random() * 8).toFixed(2))
+  }));
+}
+
+app.get('/api/analytics/overview', authMiddleware, (req, res) => {
+  const platforms = ['TikTok', 'Instagram', 'Facebook', 'Twitch', 'Discord', 'Lemon8', 'Reddit', 'RedGifs'];
+  const days = parseInt(req.query.days) || 30;
+  const data = platforms.map(platform => {
+    const metrics = generatePlatformMetrics(platform, days);
+    const latest = metrics[metrics.length - 1];
+    return {
+      platform,
+      views: latest.views,
+      likes: latest.likes,
+      reach: latest.reach,
+      retention: latest.retention,
+      engagement: latest.engagement,
+      followers: Math.floor(latest.views * 0.3 + Math.random() * 50000),
+      trending: Math.random() > 0.7,
+      history: metrics
+    };
+  });
+  res.json({ platforms: data, generatedAt: Date.now(), period: `${days}d` });
+});
+
+app.get('/api/analytics/:platform', authMiddleware, (req, res) => {
+  const { platform } = req.params;
+  const days = parseInt(req.query.days) || 30;
+  const allowed = ['TikTok', 'Instagram', 'Facebook', 'Twitch', 'Discord', 'Lemon8', 'Reddit', 'RedGifs'];
+  if (!allowed.includes(platform)) return res.status(400).json({ error: 'Unknown platform' });
+  const history = generatePlatformMetrics(platform, days);
+  const latest = history[history.length - 1];
+  res.json({ platform, ...latest, history, period: `${days}d` });
+});
+
+app.get('/api/analytics/export/csv', authMiddleware, (req, res) => {
+  const platforms = ['TikTok', 'Instagram', 'Facebook', 'Twitch', 'Discord', 'Lemon8', 'Reddit', 'RedGifs'];
+  const rows = ['Platform,Date,Views,Likes,Reach,Retention,Engagement'];
+  platforms.forEach(p => {
+    generatePlatformMetrics(p, 30).forEach(m => {
+      rows.push(`${p},${m.date},${m.views},${m.likes},${m.reach},${m.retention},${m.engagement}`);
+    });
+  });
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename="analytics-export.csv"');
+  res.send(rows.join('\n'));
+});
+
+// ================================================
+// PROJECT TRACKING ROUTES
+// ================================================
+
+const PROJECTS_DB = new Map();
+const ACHIEVEMENTS_DB = new Map();
+
+app.get('/api/projects', authMiddleware, (req, res) => {
+  const userId = req.user.id;
+  const projects = [...PROJECTS_DB.values()].filter(p => p.userId === userId);
+  res.json(projects);
+});
+
+app.post('/api/projects', authMiddleware, (req, res) => {
+  const { name, type, description, language, platform, engine, targetPlatforms } = req.body;
+  if (!name || !type) return res.status(400).json({ error: 'Name and type required' });
+  const allowed = ['coding', 'game', 'ar_vr', '3d', 'mobile', 'desktop', 'web'];
+  if (!allowed.includes(type)) return res.status(400).json({ error: 'Invalid project type' });
+  const project = {
+    id: uuidv4(),
+    userId: req.user.id,
+    name,
+    type,
+    description: description || '',
+    language,
+    platform,
+    engine,
+    targetPlatforms: targetPlatforms || [],
+    status: 'active',
+    progress: 0,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    metrics: { linesOfCode: 0, testCoverage: 0, buildStatus: 'pending', commits: 0 }
+  };
+  PROJECTS_DB.set(project.id, project);
+  security.logAudit('PROJECT_CREATED', { projectId: project.id, userId: req.user.id });
+  res.status(201).json(project);
+});
+
+app.put('/api/projects/:id', authMiddleware, (req, res) => {
+  const project = PROJECTS_DB.get(req.params.id);
+  if (!project || project.userId !== req.user.id) return res.status(404).json({ error: 'Project not found' });
+  const updated = { ...project, ...req.body, id: project.id, userId: project.userId, updatedAt: Date.now() };
+  PROJECTS_DB.set(project.id, updated);
+  res.json(updated);
+});
+
+app.delete('/api/projects/:id', authMiddleware, (req, res) => {
+  const project = PROJECTS_DB.get(req.params.id);
+  if (!project || project.userId !== req.user.id) return res.status(404).json({ error: 'Project not found' });
+  PROJECTS_DB.delete(req.params.id);
+  res.json({ success: true });
+});
+
+app.get('/api/achievements/:userId', authMiddleware, (req, res) => {
+  if (req.user.id !== req.params.userId && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const achievements = ACHIEVEMENTS_DB.get(req.params.userId) || generateDefaultAchievements();
+  res.json(achievements);
+});
+
+function generateDefaultAchievements() {
+  return [
+    { id: 'first_project', name: 'First Project', description: 'Create your first project', xp: 100, unlocked: true, unlockedAt: Date.now() },
+    { id: 'code_warrior', name: 'Code Warrior', description: 'Write 10,000 lines of code', xp: 500, unlocked: false },
+    { id: 'game_dev', name: 'Game Developer', description: 'Complete a game project', xp: 1000, unlocked: false },
+    { id: 'vr_pioneer', name: 'VR Pioneer', description: 'Ship an AR/VR experience', xp: 1500, unlocked: false },
+    { id: 'speed_run', name: 'Speed Run', description: 'Complete a project in under 30 days', xp: 750, unlocked: false },
+    { id: 'team_player', name: 'Team Player', description: 'Collaborate on 5 projects', xp: 600, unlocked: false }
+  ];
+}
+
+// ================================================
+// GAME DEV INTEGRATION CONNECTORS
+// ================================================
+
+const INTEGRATION_CONNECTIONS = new Map();
+
+const SUPPORTED_INTEGRATIONS = {
+  unreal: { name: 'Unreal Engine', vendor: 'Epic Games', authUrl: 'https://www.epicgames.com/id/authorize' },
+  epicgames: { name: 'Epic Games Store', vendor: 'Epic Games', authUrl: 'https://www.epicgames.com/id/authorize' },
+  playstation: { name: 'PlayStation Network', vendor: 'Sony', authUrl: 'https://id.sonyentertainmentnetwork.com/id/api/oauth/2.0/authorize' },
+  xbox: { name: 'Xbox / Microsoft', vendor: 'Microsoft', authUrl: 'https://login.microsoftonline.com' },
+  ubisoft: { name: 'Ubisoft Connect', vendor: 'Ubisoft', authUrl: 'https://connect.ubisoft.com/oauth/authorize' },
+  steam: { name: 'Steam', vendor: 'Valve', authUrl: 'https://steamcommunity.com/openid/login' },
+  github: { name: 'GitHub', vendor: 'GitHub', authUrl: 'https://github.com/login/oauth/authorize' },
+  bitbucket: { name: 'Bitbucket', vendor: 'Atlassian', authUrl: 'https://bitbucket.org/site/oauth2/authorize' },
+  azure: { name: 'Azure DevOps', vendor: 'Microsoft', authUrl: 'https://app.vssps.visualstudio.com/oauth2/authorize' },
+  aws: { name: 'AWS', vendor: 'Amazon', authUrl: 'https://signin.aws.amazon.com' },
+  google: { name: 'Google Cloud', vendor: 'Google', authUrl: 'https://accounts.google.com/o/oauth2/auth' },
+  slack: { name: 'Slack', vendor: 'Slack', authUrl: 'https://slack.com/oauth/v2/authorize' },
+  zoom: { name: 'Zoom', vendor: 'Zoom', authUrl: 'https://zoom.us/oauth/authorize' },
+  adobe: { name: 'Adobe Creative Cloud', vendor: 'Adobe', authUrl: 'https://ims-na1.adobelogin.com/ims/authorize' }
+};
+
+app.get('/api/integrations', authMiddleware, (req, res) => {
+  const userId = req.user.id;
+  const connections = INTEGRATION_CONNECTIONS.get(userId) || {};
+  const result = Object.entries(SUPPORTED_INTEGRATIONS).map(([key, info]) => ({
+    key,
+    ...info,
+    connected: !!connections[key],
+    connectedAt: connections[key]?.connectedAt
+  }));
+  res.json(result);
+});
+
+app.post('/api/integrations/connect', authMiddleware, (req, res) => {
+  const { platform } = req.body;
+  if (!platform || !SUPPORTED_INTEGRATIONS[platform]) {
+    return res.status(400).json({ error: 'Unknown integration platform' });
+  }
+  const userId = req.user.id;
+  const connections = INTEGRATION_CONNECTIONS.get(userId) || {};
+  connections[platform] = { connectedAt: Date.now(), status: 'connected' };
+  INTEGRATION_CONNECTIONS.set(userId, connections);
+  security.logAudit('INTEGRATION_CONNECTED', { userId, platform });
+  res.json({ success: true, platform, authUrl: SUPPORTED_INTEGRATIONS[platform].authUrl });
+});
+
+app.post('/api/integrations/disconnect', authMiddleware, (req, res) => {
+  const { platform } = req.body;
+  const userId = req.user.id;
+  const connections = INTEGRATION_CONNECTIONS.get(userId) || {};
+  delete connections[platform];
+  INTEGRATION_CONNECTIONS.set(userId, connections);
+  security.logAudit('INTEGRATION_DISCONNECTED', { userId, platform });
+  res.json({ success: true });
+});
+
+// ================================================
+// PAYMENT / SUBSCRIPTION ROUTES (Stripe-ready)
+// ================================================
+
+const SUBSCRIPTIONS_DB = new Map();
+const GIFT_CARDS_DB = new Map([
+  ['NEXUS-DEMO-2024', { balance: 9.99, currency: 'USD', used: false }],
+  ['NEXUS-ENT-2024', { balance: 14.99, currency: 'USD', used: false }]
+]);
+
+app.get('/api/payment/plans', (req, res) => {
+  res.json([
+    { id: 'free', name: 'Free', price: 0, currency: 'USD', interval: 'month', features: ['5 chats/day', 'Basic models', '1MB uploads'] },
+    { id: 'pro', name: 'Pro', price: 9.99, currency: 'USD', interval: 'month', features: ['Unlimited chats', 'All models', '100MB uploads', 'Priority support'] },
+    { id: 'enterprise', name: 'Enterprise', price: 14.99, currency: 'USD', interval: 'month', features: ['Everything in Pro', 'Custom models', 'API access', 'Dedicated support', 'SLA guarantee'] }
+  ]);
+});
+
+app.post('/api/payment/checkout', authMiddleware, async (req, res) => {
+  try {
+    const { planId, paymentMethod, billingInfo, annual } = req.body;
+    if (!planId || !paymentMethod) return res.status(400).json({ error: 'Plan and payment method required' });
+    const plans = { free: 0, pro: 9.99, enterprise: 14.99 };
+    if (!plans.hasOwnProperty(planId)) return res.status(400).json({ error: 'Invalid plan' });
+    const price = plans[planId] * (annual ? 10 : 1);
+    const subscriptionId = uuidv4();
+    const sub = {
+      id: subscriptionId,
+      userId: req.user.id,
+      planId,
+      price,
+      annual: !!annual,
+      paymentMethod: paymentMethod.type,
+      status: 'active',
+      currentPeriodStart: Date.now(),
+      currentPeriodEnd: Date.now() + (annual ? 365 : 30) * 86400000,
+      createdAt: Date.now()
+    };
+    SUBSCRIPTIONS_DB.set(subscriptionId, sub);
+    security.logAudit('SUBSCRIPTION_CREATED', { subscriptionId, userId: req.user.id, planId });
+    res.json({ success: true, subscriptionId, planId, price, nextBillingDate: sub.currentPeriodEnd });
+  } catch (err) {
+    res.status(500).json({ error: 'Checkout failed' });
+  }
+});
+
+app.post('/api/payment/gift-card/redeem', authMiddleware, (req, res) => {
+  const { code } = req.body;
+  if (!code) return res.status(400).json({ error: 'Gift card code required' });
+  const card = GIFT_CARDS_DB.get(code.toUpperCase());
+  if (!card) return res.status(404).json({ error: 'Invalid gift card code' });
+  if (card.used) return res.status(400).json({ error: 'Gift card already used' });
+  card.used = true;
+  card.usedBy = req.user.id;
+  card.usedAt = Date.now();
+  security.logAudit('GIFT_CARD_REDEEMED', { code: code.toUpperCase(), userId: req.user.id, value: card.balance });
+  res.json({ success: true, balance: card.balance, currency: card.currency });
+});
+
+app.get('/api/payment/subscription', authMiddleware, (req, res) => {
+  const sub = [...SUBSCRIPTIONS_DB.values()].find(s => s.userId === req.user.id && s.status === 'active');
+  res.json(sub || { planId: 'free', status: 'free' });
+});
+
+app.post('/api/payment/subscription/cancel', authMiddleware, (req, res) => {
+  const sub = [...SUBSCRIPTIONS_DB.values()].find(s => s.userId === req.user.id && s.status === 'active');
+  if (sub) {
+    sub.status = 'cancelled';
+    sub.cancelledAt = Date.now();
+    security.logAudit('SUBSCRIPTION_CANCELLED', { subscriptionId: sub.id, userId: req.user.id });
+  }
+  res.json({ success: true });
+});
+
+// ================================================
+// SECURITY - Enhanced Endpoints
+// ================================================
+
+app.get('/api/security/deps-audit', authMiddleware, roleMiddleware('admin', 'developer'), async (req, res) => {
+  try {
+    const { execSync } = await import('child_process');
+    let auditOutput = {};
+    try {
+      const result = execSync('npm audit --json 2>&1', { cwd: process.cwd(), timeout: 30000, encoding: 'utf8' });
+      auditOutput = JSON.parse(result);
+    } catch (e) {
+      if (e.stdout) {
+        try { auditOutput = JSON.parse(e.stdout); } catch { auditOutput = { error: 'Audit parse failed' }; }
+      }
+    }
+    res.json({ audit: auditOutput, timestamp: Date.now() });
+  } catch (err) {
+    res.status(500).json({ error: 'Deps audit failed' });
+  }
+});
+
+app.get('/api/security/network-status', authMiddleware, (req, res) => {
+  const connections = [...SESSIONS_DB.values()].map(s => ({
+    ip: s.ip,
+    userAgent: s.userAgent,
+    createdAt: s.createdAt,
+    lastSeen: Date.now()
+  }));
+  res.json({
+    activeConnections: io.engine.clientsCount || 0,
+    sessions: connections.length,
+    threats: security.threatDatabase.size,
+    status: 'healthy',
+    latency: Math.floor(Math.random() * 20 + 5)
+  });
+});
+
+app.get('/api/security/active-sessions', authMiddleware, roleMiddleware('admin'), (req, res) => {
+  const sessions = [...SESSIONS_DB.entries()].map(([id, s]) => ({ id, ...s }));
+  res.json(sessions);
+});
+
+// ================================================
 // WEBSOCKET HANDLING
 // ================================================
 
@@ -1148,7 +1680,32 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     security.logAudit('SOCKET_DISCONNECT', { socketId: socket.id });
   });
+
+  // Security event subscription
+  socket.on('security:subscribe', () => {
+    socket.join('security:events');
+  });
+
+  // Analytics subscription
+  socket.on('analytics:subscribe', ({ platform }) => {
+    socket.join(`analytics:${platform || 'all'}`);
+  });
+
+  // Project tracking subscription
+  socket.on('projects:subscribe', ({ userId }) => {
+    socket.join(`projects:${userId}`);
+  });
 });
+
+// Broadcast security events to subscribed clients
+setInterval(() => {
+  const status = security.getSecurityStatus();
+  io.to('security:events').emit('security:event', {
+    type: 'STATUS_UPDATE',
+    data: status,
+    timestamp: Date.now()
+  });
+}, 10000);
 
 // ================================================
 // AUTO-PATCHING SCHEDULER

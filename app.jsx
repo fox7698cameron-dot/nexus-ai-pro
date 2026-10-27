@@ -21,8 +21,18 @@ import {
   Bug, Wrench, Hammer, Cog, RotateCcw,
   ShieldCheck, ShieldAlert, Fingerprint, ScanFace,
   Network, Wifi, Radio, Antenna, Signal,
-  ArrowLeft, Film, ImagePlus, Clapperboard
+  ArrowLeft, Film, ImagePlus, Clapperboard,
+  CreditCard, Link, Trophy
 } from 'lucide-react';
+
+// Lazy-load new dashboard components
+import { lazy, Suspense } from 'react';
+const SecurityDashboardFull = lazy(() => import('./src/components/SecurityDashboardFull.jsx'));
+const AnalyticsDashboard = lazy(() => import('./src/components/AnalyticsDashboard.jsx'));
+const GameDevTracker = lazy(() => import('./src/components/GameDevTracker.jsx'));
+const AuthSystem = lazy(() => import('./src/components/AuthSystem.jsx'));
+const SubscriptionSystem = lazy(() => import('./src/components/SubscriptionSystem.jsx'));
+const IntegrationsPanel = lazy(() => import('./src/components/IntegrationsPanel.jsx'));
 
 // Persistence keys
 const STORAGE_KEYS = {
@@ -462,6 +472,9 @@ const TOOLS = {
   automation: { name: 'Automation', icon: Workflow, description: 'N8N-style workflows' },
   deploy: { name: 'Deploy', icon: Rocket, description: 'App deployment' },
   security: { name: 'Security', icon: Shield, description: 'Security analysis' },
+  analytics: { name: 'Analytics', icon: BarChart3, description: 'Social media & reach analytics' },
+  integrations: { name: 'Integrations', icon: Link, description: 'Platform connectors' },
+  subscription: { name: 'Subscription', icon: CreditCard, description: 'Plans & billing' },
   schedule: { name: 'Schedule', icon: Calendar, description: 'Task scheduling' }
 };
 
@@ -946,7 +959,7 @@ export default function NexusAI() {
             {Object.entries(TOOLS).map(([key, tool]) => {
               const Icon = tool.icon;
               return (
-                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security'].includes(key)) setShowToolContent(true); }}>
+                <button key={key} className={`tool-btn ${activeTool === key ? 'active' : ''}`} onClick={() => { setActiveTool(key); if (['gamedev', 'appdev', 'automation', 'security', 'analytics', 'integrations', 'subscription'].includes(key)) setShowToolContent(true); }}>
                   <Icon size={18} />
                   <span>{tool.name}</span>
                 </button>
@@ -995,112 +1008,49 @@ export default function NexusAI() {
             </div>
           )}
 
-          {/* Security Dashboard */}
+
+          {/* Full Security Dashboard */}
           {showToolContent && activeTool === 'security' && (
-            <div className="tool-content security-dashboard">
-              <div className="panel-header">
-                <ShieldCheck size={18} />
-                <h3>Security Dashboard</h3>
-              </div>
-              
-              <div className="security-grid">
-                {/* Overall Score */}
-                <div className="security-card score-card">
-                  <div className="score-circle">
-                    <div className="score-value">{securityScan.overallScore}</div>
-                    <div className="score-label">Security Score</div>
-                  </div>
-                  <div className="score-status">
-                    <div className="status-item">
-                      <ShieldCheck size={16} style={{ color: '#10b981' }} />
-                      <span>Encryption: {securityScan.encryptionStatus.toUpperCase()}</span>
-                    </div>
-                    <div className="status-item">
-                      <Lock size={16} style={{ color: '#3b82f6' }} />
-                      <span>AES-256-GCM Active</span>
-                    </div>
-                  </div>
-                </div>
+            <div style={{ padding: '8px' }}>
+              <Suspense fallback={<div style={{ padding: 24, textAlign: 'center', color: '#888' }}>Loading security dashboard…</div>}>
+                <SecurityDashboardFull darkMode={true} apiBase="/api" />
+              </Suspense>
+            </div>
+          )}
 
-                {/* Scan Button */}
-                <div className="security-card action-card">
-                  <button 
-                    className={`scan-btn ${securityScan.isScanning ? 'scanning' : ''}`}
-                    onClick={runSecurityScan}
-                    disabled={securityScan.isScanning}
-                  >
-                    {securityScan.isScanning ? (
-                      <>
-                        <Loader2 size={18} className="spin" />
-                        Scanning...
-                      </>
-                    ) : (
-                      <>
-                        <Zap size={18} />
-                        Run Full Scan
-                      </>
-                    )}
-                  </button>
-                  {securityScan.lastScanTime && (
-                    <div className="scan-time">
-                      Last scan: {new Date(securityScan.lastScanTime).toLocaleTimeString()}
-                    </div>
-                  )}
-                </div>
+          {/* Analytics Dashboard */}
+          {showToolContent && activeTool === 'analytics' && (
+            <div style={{ padding: '8px' }}>
+              <Suspense fallback={<div style={{ padding: 24, textAlign: 'center', color: '#888' }}>Loading analytics…</div>}>
+                <AnalyticsDashboard userId="current" />
+              </Suspense>
+            </div>
+          )}
 
-                {/* Vulnerabilities */}
-                <div className="security-card vulnerabilities-card">
-                  <h4><AlertTriangle size={16} /> Vulnerabilities</h4>
-                  <div className="vuln-list">
-                    {securityScan.vulnerabilities.length > 0 ? (
-                      securityScan.vulnerabilities.map(vuln => (
-                        <div key={vuln.id} className={`vuln-item severity-${vuln.severity} status-${vuln.status}`}>
-                          <div className="vuln-header">
-                            <span className={`severity-badge ${vuln.severity}`}>{vuln.severity.toUpperCase()}</span>
-                            <span className="vuln-name">{vuln.name}</span>
-                            <span className={`status-badge ${vuln.status}`}>{vuln.status.toUpperCase()}</span>
-                          </div>
-                          <div className="vuln-desc">{vuln.description}</div>
-                          {vuln.status !== 'patched' && (
-                            <button 
-                              className="patch-btn"
-                              onClick={() => patchVulnerability(vuln.id)}
-                            >
-                              <Wrench size={14} /> Patch Now
-                            </button>
-                          )}
-                        </div>
-                      ))
-                    ) : (
-                      <div className="empty-state">No vulnerabilities detected</div>
-                    )}
-                  </div>
-                </div>
+          {/* GameDev Tracker */}
+          {showToolContent && activeTool === 'gamedev' && (
+            <div style={{ padding: '8px' }}>
+              <Suspense fallback={<div style={{ padding: 24, textAlign: 'center', color: '#888' }}>Loading game dev tracker…</div>}>
+                <GameDevTracker userId="current" />
+              </Suspense>
+            </div>
+          )}
 
-                {/* Threats */}
-                <div className="security-card threats-card">
-                  <h4><Network size={16} /> Recent Threats</h4>
-                  <div className="threat-list">
-                    {securityScan.threats.length > 0 ? (
-                      securityScan.threats.map((threat, idx) => (
-                        <div key={idx} className={`threat-item status-${threat.status}`}>
-                          <div className="threat-status">
-                            {threat.status === 'blocked' && <ShieldAlert size={16} style={{ color: '#ef4444' }} />}
-                            {threat.status === 'prevented' && <ShieldCheck size={16} style={{ color: '#10b981' }} />}
-                            {threat.status === 'filtered' && <Eye size={16} style={{ color: '#f59e0b' }} />}
-                          </div>
-                          <div className="threat-info">
-                            <div className="threat-type">{threat.type}</div>
-                            <div className="threat-time">{threat.status.toUpperCase()} ΓÇó {new Date(threat.timestamp).toLocaleTimeString()}</div>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="empty-state">No threats detected</div>
-                    )}
-                  </div>
-                </div>
-              </div>
+          {/* Integrations */}
+          {showToolContent && activeTool === 'integrations' && (
+            <div style={{ padding: '8px' }}>
+              <Suspense fallback={<div style={{ padding: 24, textAlign: 'center', color: '#888' }}>Loading integrations…</div>}>
+                <IntegrationsPanel darkMode={true} />
+              </Suspense>
+            </div>
+          )}
+
+          {/* Subscription */}
+          {showToolContent && activeTool === 'subscription' && (
+            <div style={{ padding: '8px' }}>
+              <Suspense fallback={<div style={{ padding: 24, textAlign: 'center', color: '#888' }}>Loading subscription…</div>}>
+                <SubscriptionSystem userId="current" currentPlan="free" />
+              </Suspense>
             </div>
           )}
 

@@ -6,3 +6,10 @@ Caches/
 node_modules/
 dist/
 build/
+.env
+.env.local
+.env.production
+*.pem
+*.key
+*.p12
+*.pfx
